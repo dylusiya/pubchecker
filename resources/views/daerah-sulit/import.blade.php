@@ -11,8 +11,8 @@
                     <div>
                         <h4 class="card-title text-primary"><i class="mdi mdi-upload me-2"></i>Import Data Daerah Sulit</h4>
                         <p class="card-description">Gunakan halaman ini untuk mengunggah data klasifikasi kesulitan akses secara massal.</p>
-                    </div>
-                    <a href="{{ route('daerah-sulit.index') }}" class="btn btn-secondary btn-icon-text">
+                    </div>                    
+                    <a href="{{ route('daerah-sulit.index') }}" class="btn btn-outline-secondary btn-icon-text btn-sm">
                         <i class="mdi mdi-arrow-left btn-icon-prepend"></i> Kembali
                     </a>
                 </div>

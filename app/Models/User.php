@@ -190,4 +190,56 @@ class User extends Authenticatable
         }
         return $this->provinsi ?? 'Kalimantan Selatan';
     }
+
+    /**
+     * Get provinsi code untuk query MasterSLS (2 digit)
+     */
+    public function getKdProvAttribute()
+    {
+        if (!$this->kode_provinsi) {
+            return null;
+        }
+        // 6300 atau 6301 -> 63
+        return substr($this->kode_provinsi, 0, 2);
+    }
+
+    /**
+     * Get kabupaten code untuk query MasterSLS (2 digit)
+     */
+    public function getKdKabAttribute()
+    {
+        if (!$this->kode_kabupaten) {
+            return null;
+        }
+        // 6301 -> 01
+        return substr($this->kode_kabupaten, 2, 2);
+    }
+
+    /**
+     * Scope untuk mendapatkan SLS yang bisa diakses user
+     */
+    public function scopeAccessibleSls($query)
+    {
+        return $this->accessibleSlsQuery();
+    }
+
+    /**
+     * Query builder untuk SLS yang accessible
+     */
+    public function accessibleSlsQuery()
+    {
+        if ($this->isAdmin()) {
+            return \App\Models\MasterSls::query();
+        }
+        
+        $slsQuery = \App\Models\MasterSls::query();
+        
+        if ($this->kode_kabupaten) {
+            $slsQuery->where('kdkab', $this->kdkab);
+        } elseif ($this->kode_provinsi) {
+            $slsQuery->where('kdprov', $this->kdprov);
+        }
+        
+        return $slsQuery;
+    }
 }

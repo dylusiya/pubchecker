@@ -69,6 +69,9 @@ Route::middleware('auth')->group(function () {
     Route::prefix('daerah-sulit')->name('daerah-sulit.')->group(function () {
 
         Route::get('/search-sls', [DaerahSulitController::class, 'searchSls'])->name('search-sls');
+
+        Route::get('/get-kecamatan', [DaerahSulitController::class, 'getKecamatan'])->name('get-kecamatan');
+        Route::get('/get-desa', [DaerahSulitController::class, 'getDesa'])->name('get-desa');
         
         Route::get('/import', [DaerahSulitController::class, 'importForm'])->name('import.form');
         Route::post('/import', [DaerahSulitController::class, 'import'])->name('import');
@@ -128,9 +131,14 @@ Route::middleware('auth')->group(function () {
         Route::put('/update/{id}', [AdminController::class, 'update'])->name('update');
         Route::delete('/destroy/{id}', [AdminController::class, 'destroy'])->name('destroy');
         
+        Route::get('/kabupaten/{kdprov}', [AdminController::class, 'getKabupaten'])->name('kabupaten');
+        
         // Search user from SSO (if using Keycloak user search)
         Route::post('/search-user', [SsoController::class, 'searchUser'])->name('search-user');
+        
     });
+
+
 
     /*
     |--------------------------------------------------------------------------
@@ -143,6 +151,7 @@ Route::middleware('auth')->group(function () {
         Route::get('/import', [App\Http\Controllers\MasterSlsController::class, 'importForm'])->name('import');
         Route::post('/import', [App\Http\Controllers\MasterSlsController::class, 'import'])->name('import.process');
         Route::get('/export', [App\Http\Controllers\MasterSlsController::class, 'export'])->name('export');
+        Route::get('/export-excel', [App\Http\Controllers\MasterSlsController::class, 'exportExcel'])->name('export-excel');
         Route::get('/template-excel', [App\Http\Controllers\MasterSlsController::class, 'exportTemplate'])->name('template.excel');
         Route::delete('/{id}', [App\Http\Controllers\MasterSlsController::class, 'destroy'])->name('destroy');
     });

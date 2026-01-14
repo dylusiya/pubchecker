@@ -8,166 +8,216 @@
         <!-- Header Profil -->
         <div class="card card-rounded mb-4" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
             <div class="card-body py-5">
-                <div class="d-flex align-items-center">
+                <div class="d-flex align-items-center flex-wrap">
                     @if($user->foto)
                         <img src="{{ $user->foto }}" 
                              class="rounded-circle border border-white border-4" 
-                             style="width: 100px; height: 100px;"
+                             style="width: 120px; height: 120px; object-fit: cover;"
                              alt="Foto Profil">
                     @else
                         <div class="bg-white rounded-circle border border-white border-4 d-flex align-items-center justify-content-center" 
-                             style="width: 100px; height: 100px;">
-                            <i class="mdi mdi-account text-primary" style="font-size: 50px;"></i>
+                             style="width: 120px; height: 120px;">
+                            <i class="mdi mdi-account text-primary" style="font-size: 60px;"></i>
                         </div>
                     @endif
-                    <div class="ms-4 text-white">
-                        <h2 class="mb-1">{{ $user->name }}</h2>
-                        <p class="mb-1 h5">{{ $user->jabatan ?? 'Pegawai BPS' }}</p>
-                        <p class="mb-0">
-                            <i class="mdi mdi-email"></i> {{ $user->email ?? $user->username }}
-                        </p>
+                    <div class="ms-4 text-white flex-grow-1">
+                        <h2 class="mb-2">{{ $user->name }}</h2>
+                        <div class="d-flex flex-wrap gap-2 mb-2">
+                            @if($user->jabatan)
+                                <span class="badge badge-light text-primary px-3 py-2">
+                                    <i class="mdi mdi-briefcase me-1"></i>{{ $user->jabatan }}
+                                </span>
+                            @endif
+                            @if($user->golongan)
+                                <span class="badge badge-warning px-3 py-2">
+                                    <i class="mdi mdi-star me-1"></i>{{ $user->golongan }}
+                                </span>
+                            @endif
+                            @if($user->role === 'admin')
+                                <span class="badge badge-danger px-3 py-2">
+                                    <i class="mdi mdi-shield-account me-1"></i>Administrator
+                                </span>
+                            @elseif($user->role === 'approver')
+                                <span class="badge badge-success px-3 py-2">
+                                    <i class="mdi mdi-check-circle me-1"></i>Approver
+                                </span>
+                            @else
+                                <span class="badge badge-info px-3 py-2">
+                                    <i class="mdi mdi-account me-1"></i>User
+                                </span>
+                            @endif
+                        </div>
+                        <div class="d-flex flex-wrap gap-3">
+                            @if($user->email)
+                                <div>
+                                    <i class="mdi mdi-email me-1"></i>{{ $user->email }}
+                                </div>
+                            @endif
+                            @if($user->nip_baru)
+                                <div>
+                                    <i class="mdi mdi-badge-account me-1"></i>{{ $user->nip_baru }}
+                                </div>
+                            @endif
+                            @if($user->kabupaten)
+                                <div>
+                                    <i class="mdi mdi-map-marker me-1"></i>BPS {{ $user->kabupaten }}
+                                </div>
+                            @endif
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Informasi Pribadi -->
+        <!-- Informasi Detail -->
         <div class="row">
-            <div class="col-md-6 grid-margin stretch-card">
-                <div class="card card-rounded">
+            <!-- Informasi Pribadi -->
+            <div class="col-lg-6 grid-margin stretch-card">
+                <div class="card card-rounded h-100">
                     <div class="card-body">
-                        <h4 class="card-title card-title-dash">
-                            <i class="mdi mdi-account-circle text-primary"></i> Informasi Pribadi
-                        </h4>
-                        <div class="table-responsive mt-3">
-                            <table class="table table-borderless">
-                                <tbody>
-                                    <tr>
-                                        <td width="40%"><strong>Nama Lengkap</strong></td>
-                                        <td>{{ $user->name }}</td>
-                                    </tr>
-                                    <tr>
-                                        <td><strong>Nama Depan</strong></td>
-                                        <td>{{ $user->first_name ?? '-' }}</td>
-                                    </tr>
-                                    <tr>
-                                        <td><strong>Nama Belakang</strong></td>
-                                        <td>{{ $user->last_name ?? '-' }}</td>
-                                    </tr>
-                                    <tr>
-                                        <td><strong>Username SSO</strong></td>
-                                        <td>
-                                            <span class="badge badge-opacity-primary">{{ $user->username }}</span>
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <td><strong>Email</strong></td>
-                                        <td>{{ $user->email ?? '-' }}</td>
-                                    </tr>
-                                    <tr>
-                                        <td><strong>NIP Lama</strong></td>
-                                        <td>{{ $user->nip ?? '-' }}</td>
-                                    </tr>
-                                    <tr>
-                                        <td><strong>NIP Baru (18 Digit)</strong></td>
-                                        <td>{{ $user->nip_baru ?? '-' }}</td>
-                                    </tr>
-                                </tbody>
-                            </table>
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h5 class="mb-0">
+                                <i class="mdi mdi-account-circle text-primary me-2"></i>Informasi Pribadi
+                            </h5>
+                        </div>
+                        <div class="info-group">
+                            <div class="info-item">
+                                <label>Nama Lengkap</label>
+                                <p>{{ $user->name }}</p>
+                            </div>
+                            @if($user->first_name || $user->last_name)
+                            <div class="info-item">
+                                <label>Nama Depan / Belakang</label>
+                                <p>{{ $user->first_name ?? '-' }} / {{ $user->last_name ?? '-' }}</p>
+                            </div>
+                            @endif
+                            <div class="info-item">
+                                <label>Username SSO</label>
+                                <p><span class="badge badge-primary">{{ $user->username }}</span></p>
+                            </div>
+                            <div class="info-item">
+                                <label>Email</label>
+                                <p>{{ $user->email ?? '-' }}</p>
+                            </div>
+                            @if($user->nip || $user->nip_baru)
+                            <div class="info-item">
+                                <label>NIP</label>
+                                <p>
+                                    @if($user->nip_baru)
+                                        <strong>{{ $user->nip_baru }}</strong>
+                                        @if($user->nip)
+                                            <br><small class="text-muted">Lama: {{ $user->nip }}</small>
+                                        @endif
+                                    @else
+                                        {{ $user->nip }}
+                                    @endif
+                                </p>
+                            </div>
+                            @endif
                         </div>
                     </div>
                 </div>
             </div>
             
-            <div class="col-md-6 grid-margin stretch-card">
-                <div class="card card-rounded">
+            <!-- Informasi Kepegawaian -->
+            <div class="col-lg-6 grid-margin stretch-card">
+                <div class="card card-rounded h-100">
                     <div class="card-body">
-                        <h4 class="card-title card-title-dash">
-                            <i class="mdi mdi-briefcase text-primary"></i> Informasi Kepegawaian
-                        </h4>
-                        <div class="table-responsive mt-3">
-                            <table class="table table-borderless">
-                                <tbody>
-                                    <tr>
-                                        <td width="40%"><strong>Golongan</strong></td>
-                                        <td>
-                                            @if($user->golongan)
-                                                <span class="badge badge-opacity-warning">{{ $user->golongan }}</span>
-                                            @else
-                                                -
-                                            @endif
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <td><strong>Eselon</strong></td>
-                                        <td>{{ $user->eselon ?? '-' }}</td>
-                                    </tr>
-                                    <tr>
-                                        <td><strong>Jabatan</strong></td>
-                                        <td>{{ $user->jabatan ?? '-' }}</td>
-                                    </tr>
-                                    <tr>
-                                        <td><strong>Kode Organisasi</strong></td>
-                                        <td>{{ $user->kode_organisasi ?? '-' }}</td>
-                                    </tr>
-                                    <tr>
-                                        <td><strong>Role Aplikasi</strong></td>
-                                        <td>
-                                            @if($user->role === 'admin')
-                                                <span class="badge badge-opacity-danger">Administrator</span>
-                                            @else
-                                                <span class="badge badge-opacity-success">User</span>
-                                            @endif
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h5 class="mb-0">
+                                <i class="mdi mdi-briefcase text-primary me-2"></i>Informasi Kepegawaian
+                            </h5>
+                        </div>
+                        <div class="info-group">
+                            <div class="info-item">
+                                <label>Jabatan</label>
+                                <p>{{ $user->jabatan ?? '-' }}</p>
+                            </div>
+                            @if($user->golongan || $user->eselon)
+                            <div class="info-item">
+                                <label>Golongan / Eselon</label>
+                                <p>
+                                    @if($user->golongan)
+                                        <span class="badge badge-warning">{{ $user->golongan }}</span>
+                                    @else
+                                        -
+                                    @endif
+                                    @if($user->eselon)
+                                        / <span class="badge badge-info">{{ $user->eselon }}</span>
+                                    @endif
+                                </p>
+                            </div>
+                            @endif
+                            <div class="info-item">
+                                <label>Kode Organisasi</label>
+                                <p>{{ $user->kode_organisasi ?? '-' }}</p>
+                            </div>
+                            <div class="info-item">
+                                <label>Role Sistem</label>
+                                <p>
+                                    @if($user->role === 'admin')
+                                        <span class="badge badge-danger">
+                                            <i class="mdi mdi-shield-account"></i> Administrator
+                                        </span>
+                                    @elseif($user->role === 'approver')
+                                        <span class="badge badge-success">
+                                            <i class="mdi mdi-check-circle"></i> Approver
+                                        </span>
+                                    @else
+                                        <span class="badge badge-secondary">
+                                            <i class="mdi mdi-account"></i> User
+                                        </span>
+                                    @endif
+                                </p>
+                            </div>
+                            @if($user->isAdmin())
+                            <div class="info-item">
+                                <label>Hak Akses</label>
+                                <p><span class="badge badge-danger">Akses Penuh Semua Data</span></p>
+                            </div>
+                            @endif
                         </div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Informasi Unit Kerja & Lokasi -->
+        <!-- Informasi Unit Kerja -->
         <div class="row">
             <div class="col-12 grid-margin stretch-card">
                 <div class="card card-rounded">
                     <div class="card-body">
-                        <h4 class="card-title card-title-dash">
-                            <i class="mdi mdi-map-marker text-primary"></i> Informasi Unit Kerja & Lokasi
-                        </h4>
-                        <div class="row mt-3">
-                            <div class="col-md-6">
-                                <table class="table table-borderless">
-                                    <tbody>
-                                        <tr>
-                                            <td width="40%"><strong>Kode Provinsi</strong></td>
-                                            <td>{{ $user->kode_provinsi ?? '-' }}</td>
-                                        </tr>
-                                        <tr>
-                                            <td><strong>Provinsi</strong></td>
-                                            <td>{{ $user->provinsi ?? '-' }}</td>
-                                        </tr>
-                                        <tr>
-                                            <td><strong>Kode Kabupaten/Kota</strong></td>
-                                            <td>{{ $user->kode_kabupaten ?? '-' }}</td>
-                                        </tr>
-                                        <tr>
-                                            <td><strong>Kabupaten/Kota</strong></td>
-                                            <td>{{ $user->kabupaten ?? '-' }}</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
+                        <h5 class="mb-3">
+                            <i class="mdi mdi-map-marker text-primary me-2"></i>Informasi Unit Kerja & Lokasi
+                        </h5>
+                        <div class="row">
+                            <div class="col-md-3">
+                                <div class="info-item">
+                                    <label>Provinsi</label>
+                                    <p>
+                                        @if($user->kode_provinsi)
+                                            <span class="badge badge-secondary">{{ $user->kode_provinsi }}</span>
+                                        @endif
+                                        {{ $user->provinsi ?? '-' }}
+                                    </p>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="info-item">
+                                    <label>Kabupaten/Kota</label>
+                                    <p>
+                                        @if($user->kode_kabupaten)
+                                            <span class="badge badge-secondary">{{ $user->kode_kabupaten }}</span>
+                                        @endif
+                                        {{ $user->kabupaten ?? '-' }}
+                                    </p>
+                                </div>
                             </div>
                             <div class="col-md-6">
-                                <table class="table table-borderless">
-                                    <tbody>
-                                        <tr>
-                                            <td width="40%"><strong>Alamat Kantor</strong></td>
-                                            <td>{{ $user->alamat_kantor ?? '-' }}</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
+                                <div class="info-item">
+                                    <label>Alamat Kantor</label>
+                                    <p>{{ $user->alamat_kantor ?? '-' }}</p>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -175,22 +225,22 @@
             </div>
         </div>
 
-        <!-- Informasi Akses Data Mikro (untuk user biasa) -->
+        <!-- Info Akses (untuk non-admin) -->
         @if(!$user->isAdmin())
         <div class="row">
             <div class="col-12 grid-margin stretch-card">
-                <div class="card card-rounded">
+                <div class="card card-rounded bg-light border-primary">
                     <div class="card-body">
-                        <h4 class="card-title card-title-dash">
-                            <i class="mdi mdi-database text-primary"></i> Data Mikro yang Dapat Diakses
-                        </h4>
-                        <p class="card-subtitle card-subtitle-dash">
-                            Anda memiliki akses ke {{ $user->accessibleDataMikro()->count() }} data mikro
-                        </p>
-                        <div class="mt-3">
-                            <a href="{{ route('data-mikro.index') }}" class="btn btn-primary">
-                                <i class="mdi mdi-database"></i> Lihat Data Mikro
-                            </a>
+                        <div class="d-flex align-items-center">
+                            <div class="flex-shrink-0">
+                                <i class="mdi mdi-information text-primary" style="font-size: 48px;"></i>
+                            </div>
+                            <div class="ms-3">
+                                <h6 class="mb-1">Akses Data Wilayah</h6>
+                                <p class="text-muted mb-0">
+                                    Anda memiliki akses ke data SLS di wilayah <strong>{{ $user->kabupaten ?? 'semua wilayah' }}</strong>
+                                </p>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -199,4 +249,47 @@
         @endif
     </div>
 </div>
+
+<style>
+.info-group {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.info-item {
+    padding-bottom: 1rem;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.info-item:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.info-item label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #6c757d;
+    margin-bottom: 0.25rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.info-item p {
+    margin-bottom: 0;
+    font-size: 0.95rem;
+    color: #333;
+}
+
+.card-rounded {
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.card-rounded:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+</style>
 @endsection

@@ -12,17 +12,15 @@
                         <h4 class="card-title text-primary">Tambah Status Daerah Sulit</h4>
                         <p class="card-description">Input status kesulitan akses per SLS (Satuan Lingkungan Setempat)</p>
                     </div>
-                    <a href="{{ route('daerah-sulit.index') }}" class="btn btn-outline-secondary btn-icon-text">
-                        <i class="mdi mdi-arrow-left btn-icon-prepend"></i> Kembali
-                    </a>
-                </div>
-
-                @if(session('error'))
-                    <div class="alert alert-danger alert-dismissible fade show" role="alert">
-                        <i class="mdi mdi-alert-circle me-2"></i>{{ session('error') }}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    <div class="d-flex gap-2">
+                        <a href="{{ route('daerah-sulit.import') }}" class="btn btn-success btn-icon-text btn-sm">
+                            <i class="mdi mdi-upload btn-icon-prepend"></i> Import Data
+                        </a>
+                        <a href="{{ route('daerah-sulit.index') }}" class="btn btn-outline-secondary btn-icon-text btn-sm">
+                            <i class="mdi mdi-arrow-left btn-icon-prepend"></i> Kembali
+                        </a>
                     </div>
-                @endif
+                </div>
 
                 <form action="{{ route('daerah-sulit.store') }}" method="POST" enctype="multipart/form-data" class="forms-sample">
                     @csrf
@@ -109,7 +107,7 @@
                                     <label>Moda Transportasi Utama <span class="text-danger">*</span></label>
                                     <select name="metode_transportasi" class="form-select text-dark">
                                         <option value="">-- Pilih --</option>
-                                        @foreach(['Sepeda Motor', 'Mobil', 'Perahu', 'Speedboat', 'Ojek Sepeda Motor', 'Jalan Kaki'] as $metode)
+                                        @foreach(['Sepeda Motor', 'Mobil', 'Perahu', 'Speedboat', 'Jalan Kaki'] as $metode)
                                             <option value="{{ $metode }}" {{ old('metode_transportasi') == $metode ? 'selected' : '' }}>{{ $metode }}</option>
                                         @endforeach
                                     </select>

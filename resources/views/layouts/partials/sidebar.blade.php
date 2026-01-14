@@ -30,7 +30,7 @@
                     $draftCount = $draftQuery->count();
                 @endphp
                 @if($draftCount > 0)
-                    <span class="badge badge-warning ms-auto">{{ $draftCount }}</span>
+                    <span class="badge badge-warning ms-2">{{ $draftCount }}</span>
                 @endif
             </a>
         </li>
@@ -44,11 +44,18 @@
                     $pendingCount = \App\Models\StatusDaerahSulit::where('status_approval', 'pending')->count();
                 @endphp
                 @if($pendingCount > 0)
-                    <span class="badge badge-danger ms-auto">{{ $pendingCount }}</span>
+                    <span class="badge badge-danger ms-2">{{ $pendingCount }}</span>
                 @endif
             </a>
         </li>
         @endif
+
+        <li class="nav-item {{ request()->routeIs('master-sls.*') ? 'active' : '' }}">
+            <a class="nav-link" href="{{ route('master-sls.index') }}">
+                <i class="menu-icon mdi mdi-map-marker-multiple"></i>
+                <span class="menu-title">Master SLS</span>
+            </a>
+        </li>
         
         <li class="nav-item {{ request()->routeIs('daerah-sulit.history') ? 'active' : '' }}">
             <a class="nav-link" href="{{ route('daerah-sulit.history') }}">
@@ -59,12 +66,6 @@
         
         @if(auth()->user()->isAdmin())
         <li class="nav-item nav-category">Administrator</li>
-        <li class="nav-item {{ request()->routeIs('master-sls.*') ? 'active' : '' }}">
-            <a class="nav-link" href="{{ route('master-sls.index') }}">
-                <i class="menu-icon mdi mdi-map-marker-multiple"></i>
-                <span class="menu-title">Master SLS</span>
-            </a>
-        </li>
         <li class="nav-item {{ request()->routeIs('admin.*') ? 'active' : '' }}">
             <a class="nav-link" href="{{ route('admin.index') }}">
                 <i class="menu-icon mdi mdi-account-multiple"></i>

@@ -130,7 +130,7 @@
                         @if($status->file_pendukung)
                             <div class="alert alert-info mb-2">
                                 <i class="mdi mdi-file me-2"></i>File saat ini: 
-                                <a href="{{ asset('storage/' . $status->file_pendukung) }}" target="_blank" class="alert-link">
+                                <a href="{{ asset('storage/app/public/' . $status->file_pendukung) }}" target="_blank" class="alert-link">
                                     Lihat File
                                 </a>
                             </div>

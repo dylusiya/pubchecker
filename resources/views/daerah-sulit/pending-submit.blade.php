@@ -12,7 +12,7 @@
                         <h4 class="card-title text-primary">Submit Data untuk Review</h4>
                         <p class="card-description">Pilih data yang siap disubmit untuk direview admin</p>
                     </div>
-                    <a href="{{ route('daerah-sulit.index') }}" class="btn btn-outline-secondary btn-icon-text">
+                    <a href="{{ route('daerah-sulit.index') }}" class="btn btn-outline-secondary btn-icon-text btn-sm">
                         <i class="mdi mdi-arrow-left btn-icon-prepend"></i> Kembali
                     </a>
                 </div>
@@ -40,62 +40,67 @@
                 <!-- Filter -->
                 <div class="bg-light p-3 rounded mb-4 border">
                     <form method="GET" action="{{ route('daerah-sulit.pending-submit') }}" class="row g-2 align-items-end">
-                        <div class="col-md-2">
+                        <div class="col-md-1">
                             <label class="form-label small fw-bold text-dark">Tahun</label>
                             <select name="tahun" class="form-select form-select-sm text-dark">
                                 @for($y = date('Y') + 1; $y >= 2020; $y--)
-                                    <option value="{{ $y }}" {{ request('tahun', date('Y')) == $y ? 'selected' : '' }}>
-                                        {{ $y }}
-                                    </option>
+                                    <option value="{{ $y }}" {{ request('tahun', date('Y')) == $y ? 'selected' : '' }}>{{ $y }}</option>
                                 @endfor
                             </select>
                         </div>
 
-                        <div class="col-md-3">
-                            <label class="form-label small fw-bold text-dark">Kabupaten/Kota</label>
-                            <select name="kdkab" class="form-select form-select-sm text-dark">
-                                <option value="">-- Semua Kabupaten/Kota --</option>
+                        <div class="col-md-2">
+                            <label class="form-label small fw-bold text-dark">Kabupaten</label>
+                            <select name="kdkab" id="filter-kab" class="form-select form-select-sm text-dark">
+                                <option value="">-- Semua Kabupaten --</option>
                                 @php
                                     $user = auth()->user();
                                     $kabupatenList = \App\Models\MasterSls::select('kdkab', 'nmkab')
-                                        ->when(!$user->isAdmin() && $user->isKabupaten(), function($q) use ($user) {
+                                        ->when(!$user->isAdmin() && $user->kode_kabupaten, function($q) use ($user) {
                                             $q->where('kdkab', $user->kode_kabupaten);
                                         })
-                                        ->distinct()
-                                        ->orderBy('kdkab')
-                                        ->get();
+                                        ->distinct()->orderBy('kdkab')->get();
                                 @endphp
                                 @foreach($kabupatenList as $kab)
                                     <option value="{{ $kab->kdkab }}" {{ request('kdkab') == $kab->kdkab ? 'selected' : '' }}>
-                                        {{ $kab->nmkab }}
+                                        [{{ $kab->kdkab }}] {{ $kab->nmkab }}
                                     </option>
                                 @endforeach
                             </select>
                         </div>
 
                         <div class="col-md-2">
+                            <label class="form-label small fw-bold text-dark">Kecamatan</label>
+                            <select name="kdkec" id="filter-kec" class="form-select form-select-sm text-dark">
+                                <option value="">-- Semua Kecamatan --</option>
+                            </select>
+                        </div>
+
+                        <div class="col-md-2">
+                            <label class="form-label small fw-bold text-dark">Desa</label>
+                            <select name="kddesa" id="filter-desa" class="form-select form-select-sm text-dark">
+                                <option value="">-- Semua Desa --</option>
+                            </select>
+                        </div>
+
+                        <div class="col-md-1">
                             <label class="form-label small fw-bold text-dark">Status</label>
                             <select name="status_filter" class="form-select form-select-sm text-dark">
-                                <option value="">-- Semua Status --</option>
+                                <option value="">Semua</option>
                                 <option value="draft" {{ request('status_filter') == 'draft' ? 'selected' : '' }}>Draft</option>
                                 <option value="ditolak" {{ request('status_filter') == 'ditolak' ? 'selected' : '' }}>Ditolak</option>
                             </select>
                         </div>
 
-                        <div class="col-md-3">
-                            <label class="form-label small fw-bold text-dark">Pencarian</label>
+                        <div class="col-md-2">
+                            <label class="form-label small fw-bold text-dark">Cari Wilayah</label>
                             <input type="text" name="search" class="form-control form-control-sm text-dark" 
-                                placeholder="ID SLS / Nama SLS / Wilayah..." 
-                                value="{{ request('search') }}">
+                                placeholder="ID / Nama SLS..." value="{{ request('search') }}">
                         </div>
 
                         <div class="col-md-2 d-flex gap-1">
-                            <button type="submit" class="btn btn-primary btn-sm px-3">
-                                <i class="mdi mdi-magnify"></i> Filter
-                            </button>
-                            <a href="{{ route('daerah-sulit.pending-submit') }}" class="btn btn-light btn-sm border px-3">
-                                <i class="mdi mdi-refresh"></i>
-                            </a>
+                            <button type="submit" class="btn btn-primary btn-sm px-3"><i class="mdi mdi-magnify"></i> Filter</button>
+                            <a href="{{ route('daerah-sulit.pending-submit') }}" class="btn btn-light btn-sm border px-3"><i class="mdi mdi-refresh"></i></a>
                         </div>
                     </form>
                 </div>
@@ -105,6 +110,8 @@
                     <form method="GET" action="{{ route('daerah-sulit.pending-submit') }}" class="d-flex align-items-center gap-2">
                         <input type="hidden" name="tahun" value="{{ request('tahun', date('Y')) }}">
                         <input type="hidden" name="kdkab" value="{{ request('kdkab') }}">
+                        <input type="hidden" name="kdkec" value="{{ request('kdkec') }}">
+                        <input type="hidden" name="kddesa" value="{{ request('kddesa') }}">
                         <input type="hidden" name="status_filter" value="{{ request('status_filter') }}">
                         <input type="hidden" name="search" value="{{ request('search') }}">
                         <input type="hidden" name="sort" value="{{ request('sort', 'idsls') }}">
@@ -320,12 +327,12 @@
                         <i class="mdi mdi-send-circle-outline text-primary" style="font-size: 64px;"></i>
                     </div>
                     <p class="text-center mb-3">
-                        Anda akan submit <strong id="submitCount">0</strong> data untuk direview oleh admin.
+                        Anda akan submit <strong id="submitCount">0</strong> data untuk direview oleh approveradmin.
                     </p>
                     <div class="alert alert-info">
                         <small>
                             <i class="mdi mdi-information me-1"></i>
-                            <strong>Catatan:</strong> Setelah disubmit, data tidak dapat diedit hingga mendapat keputusan dari admin.
+                            <strong>Catatan:</strong> Setelah disubmit, data tidak dapat diedit hingga mendapat keputusan dari approver/admin.
                         </small>
                     </div>
                 </div>
@@ -418,6 +425,49 @@
 @push('scripts')
 <script>
 $(document).ready(function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const initialKec = urlParams.get('kdkec');
+    const initialDesa = urlParams.get('kddesa');
+
+    function loadKecamatan(kdkab, selectedKec = null) {
+        if (!kdkab) return;
+        $.get("{{ route('daerah-sulit.get-kecamatan') }}", { kdkab: kdkab }, function(data) {
+            $('#filter-kec').empty().append('<option value="">-- Semua Kecamatan --</option>');
+            $.each(data, function(key, val) {
+                let selected = (selectedKec == val.kdkec) ? 'selected' : '';
+                $('#filter-kec').append(`<option value="${val.kdkec}" ${selected}>[${val.kdkec}] ${val.nmkec}</option>`);
+            });
+            if (selectedKec) loadDesa(kdkab, selectedKec, initialDesa);
+        });
+    }
+
+    function loadDesa(kdkab, kdkec, selectedDesa = null) {
+        if (!kdkab || !kdkec) return;
+        $.get("{{ route('daerah-sulit.get-desa') }}", { kdkab: kdkab, kdkec: kdkec }, function(data) {
+            $('#filter-desa').empty().append('<option value="">-- Semua Desa --</option>');
+            $.each(data, function(key, val) {
+                let selected = (selectedDesa == val.kddesa) ? 'selected' : '';
+                $('#filter-desa').append(`<option value="${val.kddesa}" ${selected}>[${val.kddesa}] ${val.nmdesa}</option>`);
+            });
+        });
+    }
+
+    $('#filter-kab').on('change', function() {
+        let kdkab = $(this).val();
+        $('#filter-kec').empty().append('<option value="">-- Semua Kecamatan --</option>');
+        $('#filter-desa').empty().append('<option value="">-- Semua Desa --</option>');
+        loadKecamatan(kdkab);
+    });
+
+    $('#filter-kec').on('change', function() {
+        loadDesa($('#filter-kab').val(), $(this).val());
+    });
+
+    if ($('#filter-kab').val()) {
+        loadKecamatan($('#filter-kab').val(), initialKec);
+    }
+
+    
     // Check all
     $('#checkAll').on('change', function() {
         $('.checkbox-item').prop('checked', $(this).prop('checked'));

@@ -12,13 +12,8 @@ class MasterSlsController extends Controller
     public function __construct()
     {
         $this->middleware('auth');
-        // Only admin can access
-        $this->middleware(function ($request, $next) {
-            if (!auth()->user()->isAdmin()) {
-                abort(403, 'Akses ditolak. Hanya admin yang dapat mengelola Master SLS.');
-            }
-            return $next($request);
-        });
+        // Semua user bisa akses, tapi admin bisa full CRUD
+        // Non-admin hanya bisa view sesuai wilayahnya
     }
 
     /**
@@ -26,43 +21,91 @@ class MasterSlsController extends Controller
      */
     public function index(Request $request)
     {
-        $search = $request->get('search');
+        $user = auth()->user();
         $kdkab = $request->get('kdkab');
-
+        $kdkec = $request->get('kdkec');
+        $kddesa = $request->get('kddesa');
+        $search = $request->get('search');
+        $sort = $request->get('sort', 'idsls');
+        $order = $request->get('order', 'asc');
+        $perPage = $request->get('per_page', 50);
+        
+        // Base query
         $query = MasterSls::query();
+        
+        // Access control & Filter Wilayah
+        if (!$user->isAdmin()) {
+            if ($user->kode_kabupaten) {
+                // Akses kabupaten spesifik
+                $query->where('kdkab', $user->kdkab); // gunakan accessor
+                
+            } elseif ($user->kode_provinsi) {
+                // Akses semua kabupaten di provinsi
+                $query->where('kdprov', $user->kdprov);
+                };
+            
+        }
 
+        if ($kdkec) {
+            $query->where('kdkec', $kdkec);
+        }
+
+        if ($kddesa) {
+            $query->where('kddesa', $kddesa);
+        }
+
+        // Search
         if ($search) {
             $query->where(function($q) use ($search) {
                 $q->where('idsls', 'like', "%{$search}%")
-                  ->orWhere('nmsls', 'like', "%{$search}%")
-                  ->orWhere('nama_ketua', 'like', "%{$search}%");
+                ->orWhere('nmsls', 'like', "%{$search}%")
+                ->orWhere('nmkab', 'like', "%{$search}%")
+                ->orWhere('nmkec', 'like', "%{$search}%")
+                ->orWhere('nmdesa', 'like', "%{$search}%")
+                ->orWhere('nama_ketua', 'like', "%{$search}%");
             });
         }
-
-        if ($kdkab) {
-            $query->where('kdkab', $kdkab);
+        
+        // Sorting
+        $query->orderBy($sort, $order);
+        
+        // Pagination
+        if ($perPage == 'all') {
+            $data = $query->get();
+            $data = new \Illuminate\Pagination\LengthAwarePaginator(
+                $data,
+                $data->count(),
+                $data->count(),
+                1,
+                ['path' => $request->url(), 'query' => $request->query()]
+            );
+        } else {
+            $data = $query->paginate($perPage)->appends($request->query());
         }
-
-        $data = $query->orderBy('kdkab')
-                     ->orderBy('kdkec')
-                     ->orderBy('kddesa')
-                     ->orderBy('kdsls')
-                     ->paginate(50);
-
-        // Get kabupaten list for filter
+        
+        // Kabupaten list
         $kabupatenList = MasterSls::select('kdkab', 'nmkab')
-                                  ->distinct()
-                                  ->orderBy('nmkab')
-                                  ->get();
-
+            ->when(!$user->isAdmin() && $user->kode_kabupaten, function($q) use ($user) {
+                $q->where('kdkab', $user->kode_kabupaten);
+            })
+            ->distinct()
+            ->orderBy('kdkab')
+            ->get();
+        
+        // Stats
+        $statsQuery = MasterSls::query();
+        if (!$user->isAdmin() && $user->kode_kabupaten) {
+            $statsQuery->where('kdkab', $user->kode_kabupaten);
+        }
+        
         $stats = [
-            'total' => MasterSls::count(),
-            'active' => MasterSls::where('is_active', true)->count(),
-            'sls' => MasterSls::where('jenis', 'SLS')->count(),
-            'non_sls' => MasterSls::where('jenis', 'Non SLS')->count(),
+            'total' => (clone $statsQuery)->count(),
+            'active' => (clone $statsQuery)->where('is_active', true)->count(),
+            'sls' => (clone $statsQuery)->where('jenis', 'SLS')->count(),
+            'non_sls' => (clone $statsQuery)->where('jenis', '!=', 'SLS')->count(),
         ];
-
-        return view('master-sls.index', compact('data', 'kabupatenList', 'stats', 'search', 'kdkab'));
+        
+        return view('master-sls.index', compact('data', 'kdkab', 'kdkec', 'kddesa', 'search', 'kabupatenList', 'stats', 'sort', 'order', 'perPage'));
     }
 
     /**
@@ -70,6 +113,11 @@ class MasterSlsController extends Controller
      */
     public function importForm()
     {
+        // Only admin can import
+        if (!auth()->user()->isAdmin()) {
+            abort(403, 'Hanya admin yang dapat mengimport Master SLS');
+        }
+
         return view('master-sls.import');
     }
 
@@ -78,6 +126,11 @@ class MasterSlsController extends Controller
      */
     public function import(Request $request)
     {
+        // Only admin can import
+        if (!auth()->user()->isAdmin()) {
+            abort(403, 'Hanya admin yang dapat mengimport Master SLS');
+        }
+
         $request->validate([
             'file' => 'required|file|mimes:csv,txt,xlsx,xls|max:10240',
         ], [
@@ -131,9 +184,6 @@ class MasterSlsController extends Controller
             
             while (($row = fgetcsv($handle, 1000, ',')) !== false) {
                 try {
-                    // Expected columns: idsls, nmsls, nama_ketua, jenis, kdprov, nmprov, kdkab, nmkab, 
-                    //                   kdkec, nmkec, kddesa, nmdesa, kdsls, latitude, longitude
-                    
                     if (count($row) < 13) {
                         $failed++;
                         continue;
@@ -249,11 +299,20 @@ class MasterSlsController extends Controller
      */
     public function export()
     {
-        $data = MasterSls::orderBy('kdkab')
-                        ->orderBy('kdkec')
-                        ->orderBy('kddesa')
-                        ->orderBy('kdsls')
-                        ->get();
+        $user = auth()->user();
+        
+        $query = MasterSls::query();
+        
+        // Filter by user's kabupaten
+        if (!$user->isAdmin() && $user->kode_kabupaten) {
+            $query->where('kdkab', $user->kode_kabupaten);
+        }
+        
+        $data = $query->orderBy('kdkab')
+                     ->orderBy('kdkec')
+                     ->orderBy('kddesa')
+                     ->orderBy('kdsls')
+                     ->get();
 
         $filename = 'master_sls_' . date('Y-m-d_His') . '.csv';
         
@@ -265,13 +324,13 @@ class MasterSlsController extends Controller
         $callback = function() use ($data) {
             $file = fopen('php://output', 'w');
             
-            // Header - URUTAN BARU
+            // Header
             fputcsv($file, [
                 'idsls', 'nmsls', 'nama_ketua', 'jenis', 'kdprov', 'nmprov', 'kdkab', 'nmkab',
                 'kdkec', 'nmkec', 'kddesa', 'nmdesa', 'kdsls', 'latitude', 'longitude'
             ]);
 
-            // Data - URUTAN BARU
+            // Data
             foreach ($data as $row) {
                 fputcsv($file, [
                     $row->idsls,
@@ -299,16 +358,139 @@ class MasterSlsController extends Controller
     }
 
     /**
-     * Download template Excel
+     * Export Master SLS to Excel
      */
-    public function exportTemplate()
+    public function exportExcel()
     {
+        $user = auth()->user();
+        
+        $query = MasterSls::query();
+        
+        // Filter by user's kabupaten
+        if (!$user->isAdmin() && $user->kode_kabupaten) {
+            $query->where('kdkab', $user->kode_kabupaten);
+        }
+        
+        $data = $query->orderBy('kdkab')
+                    ->orderBy('kdkec')
+                    ->orderBy('kddesa')
+                    ->orderBy('kdsls')
+                    ->get();
+
         try {
             $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
             $sheet = $spreadsheet->getActiveSheet();
             $sheet->setTitle('Master SLS');
 
-            // Header - URUTAN BARU
+            // Header
+            $headers = [
+                'ID SLS', 'Nama SLS', 'Nama Ketua', 'Jenis', 
+                'Kode Provinsi', 'Provinsi', 'Kode Kabupaten', 'Kabupaten',
+                'Kode Kecamatan', 'Kecamatan', 'Kode Desa', 'Desa',
+                'Kode SLS', 'Latitude', 'Longitude', 'Status'
+            ];
+
+            $sheet->fromArray($headers, null, 'A1');
+
+            // Style header
+            $headerStyle = [
+                'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+                'fill' => [
+                    'fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
+                    'startColor' => ['rgb' => '4B49AC']
+                ],
+                'borders' => [
+                    'allBorders' => [
+                        'borderStyle' => \PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN,
+                    ]
+                ],
+                'alignment' => [
+                    'horizontal' => \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER,
+                    'vertical' => \PhpOffice\PhpSpreadsheet\Style\Alignment::VERTICAL_CENTER,
+                ]
+            ];
+            $sheet->getStyle('A1:P1')->applyFromArray($headerStyle);
+
+            // Data rows
+            $row = 2;
+            foreach ($data as $sls) {
+                $sheet->fromArray([
+                    $sls->idsls,
+                    $sls->nmsls,
+                    $sls->nama_ketua,
+                    $sls->jenis_display,
+                    $sls->kdprov,
+                    $sls->nmprov,
+                    $sls->kdkab,
+                    $sls->nmkab,
+                    $sls->kdkec,
+                    $sls->nmkec,
+                    $sls->kddesa,
+                    $sls->nmdesa,
+                    $sls->kdsls,
+                    $sls->latitude,
+                    $sls->longitude,
+                    $sls->is_active ? 'Aktif' : 'Tidak Aktif',
+                ], null, 'A' . $row);
+                
+                $row++;
+            }
+
+            // Auto size columns
+            foreach (range('A', 'P') as $col) {
+                $sheet->getColumnDimension($col)->setAutoSize(true);
+            }
+
+            // Set column A (ID SLS) as text to preserve leading zeros
+            $sheet->getStyle('A2:A' . ($row - 1))->getNumberFormat()
+                ->setFormatCode(\PhpOffice\PhpSpreadsheet\Style\NumberFormat::FORMAT_TEXT);
+
+            // Add borders to all data
+            $sheet->getStyle('A1:P' . ($row - 1))->applyFromArray([
+                'borders' => [
+                    'allBorders' => [
+                        'borderStyle' => \PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN,
+                        'color' => ['rgb' => 'CCCCCC']
+                    ]
+                ]
+            ]);
+
+            // Generate filename
+            $kabupaten = $user->isAdmin() ? 'Semua' : ($user->kabupaten ?? 'Data');
+            $filename = 'master_sls_' . str_replace(' ', '_', $kabupaten) . '_' . date('Ymd_His') . '.xlsx';
+
+            // Output
+            $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+            
+            header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+            header('Content-Disposition: attachment;filename="' . $filename . '"');
+            header('Cache-Control: max-age=0');
+
+            $writer->save('php://output');
+            exit;
+
+        } catch (\Exception $e) {
+            Log::error('Error exporting Master SLS to Excel: ' . $e->getMessage());
+            return back()->with('error', 'Gagal export data ke Excel: ' . $e->getMessage());
+        }
+    }
+    
+    /**
+     * Download template Excel
+     */
+    public function exportTemplate()
+    {
+        // Only admin can download template
+        if (!auth()->user()->isAdmin()) {
+            abort(403, 'Hanya admin yang dapat mendownload template');
+        }
+
+        try {
+            $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+            $sheet = $spreadsheet->getActiveSheet();
+            $sheet->setTitle('Master SLS');
+
+            // Header
             $headers = [
                 'idsls', 'nmsls', 'nama_ketua', 'jenis', 'kdprov', 'nmprov', 'kdkab', 'nmkab',
                 'kdkec', 'nmkec', 'kddesa', 'nmdesa', 'kdsls', 'latitude', 'longitude'
@@ -377,43 +559,11 @@ class MasterSlsController extends Controller
                 ['   - NONSLS_PERAIRAN'],
                 ['   - NONSLS_PERTANIAN'],
                 [''],
-                ['5. kdprov (2 digit) - wajib'],
-                ['   Contoh: 63'],
-                [''],
-                ['6. nmprov (nama provinsi) - wajib'],
-                ['   Contoh: KALIMANTAN SELATAN'],
-                [''],
-                ['7. kdkab (2 digit) - wajib'],
-                ['   Contoh: 01 untuk Tanah Laut'],
-                [''],
-                ['8. nmkab (nama kabupaten) - wajib'],
-                ['   Contoh: TANAH LAUT'],
-                [''],
-                ['9. kdkec (3 digit) - wajib'],
-                ['   Contoh: 010 untuk Panyipatan'],
-                [''],
-                ['10. nmkec (nama kecamatan) - wajib'],
-                ['   Contoh: PANYIPATAN'],
-                [''],
-                ['11. kddesa (3 digit) - wajib'],
-                ['   Contoh: 001 untuk Batakan'],
-                [''],
-                ['12. nmdesa (nama desa) - wajib'],
-                ['   Contoh: BATAKAN'],
-                [''],
-                ['13. kdsls (4 digit) - wajib'],
-                ['   Contoh: 0001, 0002, 9999 (untuk Non SLS)'],
-                [''],
-                ['14. latitude (koordinat GPS) - opsional'],
-                ['15. longitude (koordinat GPS) - opsional'],
+                ['5-15. Kode wilayah & koordinat'],
                 [''],
                 ['CATATAN PENTING:'],
                 ['- idsls = kdprov + kdkab + kdkec + kddesa + kdsls'],
-                ['- kdprov: 2 digit (63)'],
-                ['- kdkab: 2 digit (01, 02, dst)'],
-                ['- kdkec: 3 digit (010, 020, dst)'],
-                ['- kddesa: 3 digit (001, 002, dst)'],
-                ['- kdsls: 4 digit (0001-9999)'],
+                ['- Semua kode harus sesuai format yang ditentukan'],
             ];
 
             $instructionSheet->fromArray($instructions, null, 'A1');
@@ -443,6 +593,12 @@ class MasterSlsController extends Controller
      */
     public function destroy($id)
     {
+        // Only admin can delete
+        if (!auth()->user()->isAdmin()) {
+            abort(403, 'Hanya admin yang dapat menghapus Master SLS');
+        }
+
+        DB::beginTransaction();
         try {
             $sls = MasterSls::findOrFail($id);
 
@@ -455,6 +611,8 @@ class MasterSlsController extends Controller
 
             $sls->delete();
 
+            DB::commit();
+
             Log::info('Master SLS deleted', [
                 'user' => auth()->user()->username,
                 'idsls' => $sls->idsls,
@@ -463,6 +621,7 @@ class MasterSlsController extends Controller
             return back()->with('success', 'Data SLS berhasil dihapus');
 
         } catch (\Exception $e) {
+            DB::rollBack();
             Log::error('Error deleting Master SLS: ' . $e->getMessage());
             return back()->with('error', 'Gagal menghapus data');
         }

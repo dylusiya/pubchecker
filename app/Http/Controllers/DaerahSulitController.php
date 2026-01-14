@@ -30,42 +30,69 @@ class DaerahSulitController extends Controller
     {
         $tahunAktif = $request->get('tahun', date('Y'));
         $kdkab = $request->get('kdkab');
+        $kdkec = $request->get('kdkec');
+        $kddesa = $request->get('kddesa');
         $approval = $request->get('approval', 'disetujui');
         $search = $request->get('search');
         $sort = $request->get('sort', 'idsls');
         $order = $request->get('order', 'asc');
         $perPage = $request->get('per_page', 20);
         
+        $user = auth()->user();
+        
+        // Get latest status IDs first
+        $latestIds = StatusDaerahSulit::selectRaw('MAX(id) as latest_id')
+            ->where('tahun_anggaran', $tahunAktif)
+            ->whereNull('deleted_at')
+            ->groupBy('master_sls_id')
+            ->pluck('latest_id');
+        
         // Build query
         $query = StatusDaerahSulit::with(['masterSls'])
-            ->where('tahun_anggaran', $tahunAktif);
+            ->whereIn('status_daerah_sulit.id', $latestIds);
         
-        // Filter by kabupaten
+        // Filter by kabupaten/kecamatan/desa
         if ($kdkab) {
-            $query->whereHas('masterSls', function($q) use ($kdkab) {
+            $query->whereHas('masterSls', function($q) use ($kdkab, $kdkec, $kddesa) {
                 $q->where('kdkab', $kdkab);
+                if ($kdkec) {
+                    $q->where('kdkec', $kdkec);
+                }
+                if ($kddesa) {
+                    $q->where('kddesa', $kddesa);
+                }
             });
         }
         
-        // Filter by status approval
+        //Filter by status approval
         if ($approval) {
-            $query->where('status_approval', $approval);
+            $query->where('status_daerah_sulit.status_approval', $approval);
         }
         
         // Search
         if ($search) {
             $query->whereHas('masterSls', function($q) use ($search) {
                 $q->where('idsls', 'like', "%{$search}%")
-                ->orWhere('nmsls', 'like', "%{$search}%");
+                ->orWhere('nmsls', 'like', "%{$search}%")
+                ->orWhere('nmkab', 'like', "%{$search}%")
+                ->orWhere('nmkec', 'like', "%{$search}%")
+                ->orWhere('nmdesa', 'like', "%{$search}%");
             });
         }
         
         // Access control
-        $user = auth()->user();
-        if (!$user->isAdmin() && $user->isKabupaten()) {
-            $query->whereHas('masterSls', function($q) use ($user) {
-                $q->where('kdkab', $user->kode_kabupaten);
-            });
+        if (!$user->isAdmin()) {
+            if ($user->kode_kabupaten) {
+                // Akses kabupaten spesifik
+                $query->whereHas('masterSls', function($q) use ($user) {
+                    $q->where('kdkab', $user->kdkab); // gunakan accessor
+                });
+            } elseif ($user->kode_provinsi) {
+                // Akses semua kabupaten di provinsi
+                $query->whereHas('masterSls', function($q) use ($user) {
+                    $q->where('kdprov', $user->kdprov);
+                });
+            }
         }
         
         // Sorting
@@ -74,7 +101,7 @@ class DaerahSulitController extends Controller
                 ->select('status_daerah_sulit.*')
                 ->orderBy("master_sls.{$sort}", $order);
         } else {
-            $query->orderBy($sort, $order);
+            $query->orderBy("status_daerah_sulit.{$sort}", $order);
         }
         
         // Pagination
@@ -98,18 +125,31 @@ class DaerahSulitController extends Controller
                                     ->get();
         
         // Calculate stats
-        $statsQueryBase = StatusDaerahSulit::where('tahun_anggaran', $tahunAktif)
-                                   ->where('status_approval', 'disetujui');
-
-        if (!$user->isAdmin() && $user->isKabupaten()) {
-            $statsQueryBase->whereHas('masterSls', function($q) use ($user) {
-                $q->where('kdkab', $user->kode_kabupaten);
-            });
+        if (!$user->isAdmin()) {
+            if ($user->kode_kabupaten) {
+                $latestIds = StatusDaerahSulit::whereIn('id', $latestIds)
+                    ->whereHas('masterSls', function($q) use ($user) {
+                        $q->where('kdkab', $user->kdkab);
+                    })
+                    ->pluck('id');
+            } elseif ($user->kode_provinsi) {
+                $latestIds = StatusDaerahSulit::whereIn('id', $latestIds)
+                    ->whereHas('masterSls', function($q) use ($user) {
+                        $q->where('kdprov', $user->kdprov);
+                    })
+                    ->pluck('id');
+            }
         }
 
         $stats = [
-            'sulit' => (clone $statsQueryBase)->where('is_daerah_sulit', true)->count(),
-            'total_biaya' => (clone $statsQueryBase)->where('is_daerah_sulit', true)->sum('perkiraan_biaya'),
+            'sulit' => StatusDaerahSulit::whereIn('id', $latestIds)
+                        ->where('status_approval', 'disetujui')
+                        ->where('is_daerah_sulit', true)
+                        ->count(),
+            'total_biaya' => StatusDaerahSulit::whereIn('id', $latestIds)
+                        ->where('status_approval', 'disetujui')
+                        ->where('is_daerah_sulit', true)
+                        ->sum('perkiraan_biaya'),
         ];
         
         $tahun = $tahunAktif;
@@ -118,7 +158,9 @@ class DaerahSulitController extends Controller
             'data', 
             'tahunAktif',
             'tahun',
-            'kdkab', 
+            'kdkab',
+            'kdkec',
+            'kddesa',
             'approval',
             'search',
             'sort',
@@ -137,14 +179,8 @@ class DaerahSulitController extends Controller
         $tahun = $request->get('tahun', date('Y'));
         $user = auth()->user();
 
-        // Get SLS yang belum ada statusnya untuk tahun ini
         $slsList = $user->accessibleSls()
-            ->whereNotIn('id', function($query) use ($tahun) {
-                $query->select('master_sls_id')
-                    ->from('status_daerah_sulit')
-                    ->where('tahun_anggaran', $tahun)
-                    ->whereNull('deleted_at');
-            })
+            ->where('is_active', true)
             ->orderBy('kdkab')
             ->orderBy('kdkec')
             ->orderBy('kddesa')
@@ -193,16 +229,6 @@ class DaerahSulitController extends Controller
         ];
 
         $request->validate($rules, $messages);
-
-        // Check duplicate
-        $exists = StatusDaerahSulit::where('master_sls_id', $request->master_sls_id)
-            ->where('tahun_anggaran', $request->tahun_anggaran)
-            ->whereNull('deleted_at')
-            ->exists();
-
-        if ($exists) {
-            return back()->with('error', 'Status untuk SLS ini di tahun ' . $request->tahun_anggaran . ' sudah ada')->withInput();
-        }
 
         DB::beginTransaction();
         try {
@@ -269,16 +295,9 @@ class DaerahSulitController extends Controller
             return response()->json([]);
         }
         
-        // ✅ Tambahkan ini
         $user = auth()->user();
         
-        $query = $user->accessibleSls()
-            ->whereNotIn('id', function($q) use ($tahun) {
-                $q->select('master_sls_id')
-                ->from('status_daerah_sulit')
-                ->where('tahun_anggaran', $tahun)
-                ->whereNull('deleted_at');
-            });
+        $query = $user->accessibleSls()->where('is_active', true);
         
         if ($search) {
             $query->where(function($q) use ($search) {
@@ -860,6 +879,8 @@ class DaerahSulitController extends Controller
         $user = auth()->user();
         $tahun = $request->get('tahun', date('Y'));
         $kdkab = $request->get('kdkab'); 
+        $kdkec = $request->get('kdkec');
+        $kddesa = $request->get('kddesa');
         $search = $request->get('search');
         $perPage = $request->get('per_page', 20);
         $statusFilter = $request->get('status_filter');
@@ -875,17 +896,30 @@ class DaerahSulitController extends Controller
             $query->where('status_approval', $statusFilter);
         }
         
+        // Filter by kabupaten/kecamatan/desa
         if ($kdkab) {
-            $query->whereHas('masterSls', function($q) use ($kdkab) {
+            $query->whereHas('masterSls', function($q) use ($kdkab, $kdkec, $kddesa) {
                 $q->where('kdkab', $kdkab);
+                if ($kdkec) {
+                    $q->where('kdkec', $kdkec);
+                }
+                if ($kddesa) {
+                    $q->where('kddesa', $kddesa);
+                }
             });
         }
         
         // Filter by user's kabupaten if not admin
-        if (!$user->isAdmin() && $user->isKabupaten()) {
-            $query->whereHas('masterSls', function($q) use ($user) {
-                $q->where('kdkab', $user->kode_kabupaten);
-            });
+        if (!$user->isAdmin()) {
+            if ($user->kode_kabupaten) {
+                $query->whereHas('masterSls', function($q) use ($user) {
+                    $q->where('kdkab', $user->kdkab);
+                });
+            } elseif ($user->kode_provinsi) {
+                $query->whereHas('masterSls', function($q) use ($user) {
+                    $q->where('kdprov', $user->kdprov);
+                });
+            }
         }
         
         // Search
@@ -932,10 +966,16 @@ class DaerahSulitController extends Controller
             });
         }
         
-        if (!$user->isAdmin() && $user->isKabupaten()) {
-            $statsQuery->whereHas('masterSls', function($q) use ($user) {
-                $q->where('kdkab', $user->kode_kabupaten);
-            });
+        if (!$user->isAdmin()) {
+            if ($user->kode_kabupaten) {
+                $statsQuery->whereHas('masterSls', function($q) use ($user) {
+                    $q->where('kdkab', $user->kdkab);
+                });
+            } elseif ($user->kode_provinsi) {
+                $statsQuery->whereHas('masterSls', function($q) use ($user) {
+                    $q->where('kdprov', $user->kdprov);
+                });
+            }
         }
         
         $stats = [
@@ -945,7 +985,10 @@ class DaerahSulitController extends Controller
         
         return view('daerah-sulit.pending-submit', compact(
             'data', 
-            'tahun', 
+            'tahun',
+            'kdkab',
+            'kdkec',
+            'kddesa',
             'search', 
             'stats', 
             'perPage',
@@ -975,8 +1018,10 @@ class DaerahSulitController extends Controller
                 
                 if ($status && $status->canDelete()) {
                     // Check access
-                    if (!$user->isAdmin() && $user->isKabupaten()) {
-                        if ($status->masterSls->kdkab !== $user->kode_kabupaten) {
+                    if (!$user->isAdmin()) {
+                        if ($user->kode_kabupaten && $status->masterSls->kdkab !== $user->kdkab) {
+                            continue;
+                        } elseif ($user->kode_provinsi && $status->masterSls->kdprov !== $user->kdprov) {
                             continue;
                         }
                     }
@@ -1035,9 +1080,11 @@ class DaerahSulitController extends Controller
                 
                 if ($status && $status->canSubmit()) {
                     // Check access
-                    if (!$user->isAdmin() && $user->isKabupaten()) {
-                        if ($status->masterSls->kdkab !== $user->kode_kabupaten) {
-                            continue; // Skip jika bukan wilayah user
+                    if (!$user->isAdmin()) {
+                        if ($user->kode_kabupaten && $status->masterSls->kdkab !== $user->kdkab) {
+                            continue;
+                        } elseif ($user->kode_provinsi && $status->masterSls->kdprov !== $user->kdprov) {
+                            continue;
                         }
                     }
                     
@@ -1091,6 +1138,8 @@ class DaerahSulitController extends Controller
         
         $tahun = $request->get('tahun', date('Y'));
         $kdkab = $request->get('kdkab');
+        $kdkec = $request->get('kdkec');
+        $kddesa = $request->get('kddesa');
         $search = $request->get('search');
         $perPage = $request->get('per_page', 20);
         $sort = $request->get('sort', 'idsls');
@@ -1100,16 +1149,26 @@ class DaerahSulitController extends Controller
             ->where('status_approval', 'pending')
             ->where('tahun_anggaran', $tahun);
         
+        // Filter by kabupaten/kecamatan/desa
         if ($kdkab) {
-            $query->whereHas('masterSls', function($q) use ($kdkab) {
+            $query->whereHas('masterSls', function($q) use ($kdkab, $kdkec, $kddesa) {
                 $q->where('kdkab', $kdkab);
+                if ($kdkec) {
+                    $q->where('kdkec', $kdkec);
+                }
+                if ($kddesa) {
+                    $q->where('kddesa', $kddesa);
+                }
             });
         }
         
         if ($search) {
             $query->whereHas('masterSls', function($q) use ($search) {
                 $q->where('idsls', 'like', "%{$search}%")
-                ->orWhere('nmsls', 'like', "%{$search}%");
+                ->orWhere('nmsls', 'like', "%{$search}%")
+                ->orWhere('nmkab', 'like', "%{$search}%")
+                ->orWhere('nmkec', 'like', "%{$search}%")
+                ->orWhere('nmdesa', 'like', "%{$search}%");
             });
         }
         
@@ -1155,7 +1214,9 @@ class DaerahSulitController extends Controller
         return view('daerah-sulit.pending-approval', compact(
             'data', 
             'tahun', 
-            'kdkab', 
+            'kdkab',
+            'kdkec',
+            'kddesa',
             'search', 
             'kabupatenList', 
             'stats', 
@@ -1310,10 +1371,16 @@ class DaerahSulitController extends Controller
             ->where('tahun_anggaran', $tahun);
 
         // Filter by user's kabupaten if not admin
-        if (!$user->isAdmin() && $user->isKabupaten()) {
-            $query->whereHas('masterSls', function($q) use ($user) {
-                $q->where('kdkab', $user->kode_kabupaten);
-            });
+        if (!$user->isAdmin()) {
+            if ($user->kode_kabupaten) {
+                $query->whereHas('masterSls', function($q) use ($user) {
+                    $q->where('kdkab', $user->kdkab);
+                });
+            } elseif ($user->kode_provinsi) {
+                $query->whereHas('masterSls', function($q) use ($user) {
+                    $q->where('kdprov', $user->kdprov);
+                });
+            }
         }
 
         $histories = $query->latest('created_at')->paginate(50);
@@ -1351,6 +1418,29 @@ class DaerahSulitController extends Controller
         }
     }
 
+    // Dipanggil via AJAX dari browser, WAJIB public dan BUTUH route
+    public function getKecamatan(Request $request)
+    {
+        $kecamatan = MasterSls::where('kdkab', $request->kdkab)
+            ->select('kdkec', 'nmkec')
+            ->distinct()
+            ->orderBy('kdkec')
+            ->get();
+        return response()->json($kecamatan);
+    }
+
+    // Dipanggil via AJAX dari browser, WAJIB public dan BUTUH route
+    public function getDesa(Request $request)
+    {
+        $desa = MasterSls::where('kdkab', $request->kdkab)
+            ->where('kdkec', $request->kdkec)
+            ->select('kddesa', 'nmdesa')
+            ->distinct()
+            ->orderBy('kddesa')
+            ->get();
+        return response()->json($desa);
+    }
+
     /**
      * Upload file
      */
@@ -1373,11 +1463,15 @@ class DaerahSulitController extends Controller
         $query = MasterSls::select('kdkab', 'nmkab')
             ->distinct();
 
-        if (!$user->isAdmin() && $user->isKabupaten()) {
-            $query->where('kdkab', $user->kode_kabupaten);
+        if (!$user->isAdmin()) {
+            if ($user->kode_kabupaten) {
+                $query->where('kdkab', $user->kdkab);
+            } elseif ($user->kode_provinsi) {
+                $query->where('kdprov', $user->kdprov);
+            }
         }
 
-        return $query->orderBy('nmkab')->get();
+        return $query->orderBy('kdkab')->get();
     }
 
     /**
@@ -1402,8 +1496,16 @@ class DaerahSulitController extends Controller
             return;
         }
 
-        if ($user->isKabupaten() && $status->masterSls->kdkab !== $user->kode_kabupaten) {
-            abort(403, 'Anda tidak memiliki akses ke data ini');
+        // Check kabupaten access
+        if ($user->kode_kabupaten) {
+            if ($status->masterSls->kdkab !== $user->kdkab) {
+                abort(403, 'Anda tidak memiliki akses ke data kabupaten ini');
+            }
+        } elseif ($user->kode_provinsi) {
+            // Check provinsi access
+            if ($status->masterSls->kdprov !== $user->kdprov) {
+                abort(403, 'Anda tidak memiliki akses ke data provinsi ini');
+            }
         }
     }
 }

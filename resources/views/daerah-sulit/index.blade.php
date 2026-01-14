@@ -46,7 +46,7 @@
 
                 <div class="bg-light p-3 rounded mb-4 border">
                     <form method="GET" action="{{ route('daerah-sulit.index') }}" class="row g-2 align-items-end">
-                        <div class="col-md-2">
+                        <div class="col-md-1">
                             <label class="form-label small fw-bold">Tahun</label>
                             <select name="tahun" class="form-select form-select-sm text-dark">
                                 @for($y = date('Y') + 1; $y >= 2020; $y--)
@@ -54,29 +54,49 @@
                                 @endfor
                             </select>
                         </div>
-                        <div class="col-md-3">
+                        
+                        <div class="col-md-2">
                             <label class="form-label small fw-bold">Kabupaten</label>
-                            <select name="kdkab" class="form-select form-select-sm text-dark">
+                            <select name="kdkab" id="filter-kab" class="form-select form-select-sm text-dark">
                                 <option value="">-- Semua Kabupaten --</option>
                                 @foreach($kabupatenList as $kab)
-                                    <option value="{{ $kab->kdkab }}" {{ $kdkab == $kab->kdkab ? 'selected' : '' }}>{{ $kab->nmkab }}</option>
+                                    <option value="{{ $kab->kdkab }}" {{ $kdkab == $kab->kdkab ? 'selected' : '' }}>
+                                        [{{ $kab->kdkab }}] {{ $kab->nmkab }}
+                                    </option>
                                 @endforeach
                             </select>
                         </div>
+
                         <div class="col-md-2">
-                            <label class="form-label small fw-bold">Status Approval</label>
-                            <select name="approval" class="form-select form-select-sm text-dark">
-                                <option value="">-- Semua --</option>
-                                <option value="draft" {{ request('approval', 'disetujui') == 'draft' ? 'selected' : '' }}>Draft</option>
-                                <option value="pending" {{ request('approval', 'disetujui') == 'pending' ? 'selected' : '' }}>Pending</option>
-                                <option value="disetujui" {{ request('approval', 'disetujui') == 'disetujui' ? 'selected' : '' }}>Disetujui</option>
-                                <option value="ditolak" {{ request('approval', 'disetujui') == 'ditolak' ? 'selected' : '' }}>Ditolak</option>
+                            <label class="form-label small fw-bold">Kecamatan</label>
+                            <select name="kdkec" id="filter-kec" class="form-select form-select-sm text-dark">
+                                <option value="">-- Semua Kecamatan --</option>
                             </select>
                         </div>
-                        <div class="col-md-3">
-                            <label class="form-label small fw-bold">Cari Wilayah</label>
-                            <input type="text" name="search" class="form-control form-control-sm" placeholder="Nama SLS / ID SLS..." value="{{ $search }}">
+
+                        <div class="col-md-2">
+                            <label class="form-label small fw-bold">Desa</label>
+                            <select name="kddesa" id="filter-desa" class="form-select form-select-sm text-dark">
+                                <option value="">-- Semua Desa --</option>
+                            </select>
                         </div>
+
+                        <div class="col-md-1">
+                            <label class="form-label small fw-bold">Status</label>
+                            <select name="approval" class="form-select form-select-sm text-dark">
+                                <option value="">Semua</option>
+                                <option value="draft" {{ request('approval') == 'draft' ? 'selected' : '' }}>Draft</option>
+                                <option value="pending" {{ request('approval') == 'pending' ? 'selected' : '' }}>Pending</option>
+                                <option value="disetujui" {{ request('approval', 'disetujui') == 'disetujui' ? 'selected' : '' }}>Disetujui</option>
+                                <option value="ditolak" {{ request('approval') == 'ditolak' ? 'selected' : '' }}>Ditolak</option>
+                            </select>
+                        </div>
+
+                        <div class="col-md-2">
+                            <label class="form-label small fw-bold">Cari Wilayah</label>
+                            <input type="text" name="search" class="form-control form-control-sm" placeholder="Nama Wilayah" value="{{ $search }}">
+                        </div>
+
                         <div class="col-md-2 d-flex gap-1">
                             <button type="submit" class="btn btn-primary btn-sm px-3"><i class="mdi mdi-magnify"></i> Filter</button>
                             <a href="{{ route('daerah-sulit.index') }}" class="btn btn-light btn-sm border px-3">Reset</a>
@@ -89,6 +109,8 @@
                     <form method="GET" action="{{ route('daerah-sulit.index') }}" class="d-flex align-items-center gap-2">
                         <input type="hidden" name="tahun" value="{{ $tahunAktif }}">
                         <input type="hidden" name="kdkab" value="{{ $kdkab }}">
+                        <input type="hidden" name="kdkec" value="{{ request('kdkec') }}">
+                        <input type="hidden" name="kddesa" value="{{ request('kddesa') }}">
                         <input type="hidden" name="approval" value="{{ request('approval', 'disetujui') }}">
                         <input type="hidden" name="search" value="{{ $search }}">
                         <input type="hidden" name="sort" value="{{ request('sort') }}">
@@ -166,6 +188,14 @@
                                     </a>
                                 </th>
                                 <th class="py-3">
+                                    <a href="{{ route('daerah-sulit.index', array_merge(request()->all(), ['sort' => 'keterangan', 'order' => request('sort') == 'keterangan' && request('order') == 'asc' ? 'desc' : 'asc'])) }}" class="text-decoration-none text-dark">
+                                        keterangan
+                                        @if(request('sort') == 'keterangan')
+                                            <i class="mdi mdi-chevron-{{ request('order') == 'asc' ? 'up' : 'down' }}"></i>
+                                        @endif
+                                    </a>
+                                </th>
+                                <th class="py-3">
                                     <a href="{{ route('daerah-sulit.index', array_merge(request()->all(), ['sort' => 'status_approval', 'order' => request('sort') == 'status_approval' && request('order') == 'asc' ? 'desc' : 'asc'])) }}" class="text-decoration-none text-dark">
                                         Status Approval
                                         @if(request('sort') == 'status_approval')
@@ -185,7 +215,8 @@
                                 </td>
                                 <td class="py-3">
                                     <div class="small fw-bold">{{ $item->masterSls->nmkab }}</div>
-                                    <div class="small text-muted">{{ $item->masterSls->nmkec }} - {{ $item->masterSls->nmdesa }}</div>
+                                    <div class="small text-muted">Kec. {{ $item->masterSls->nmkec }}</div>
+                                    <div class="small text-muted">Desa {{ $item->masterSls->nmdesa }}</div>
                                 </td>
                                 <td class="py-3 text-center">
                                     @if($item->is_daerah_sulit)
@@ -201,6 +232,9 @@
                                     @else
                                         <span class="text-muted small">N/A</span>
                                     @endif
+                                </td>
+                                <td class="py-3">
+                                    <div class="small">{{ Str::limit($item->keterangan, 40) ?? '-' }}</div>
                                 </td>
                                 <td class="py-3">
                                     @php
@@ -240,7 +274,7 @@
                             </tr>
                             @empty
                             <tr>
-                                <td colspan="6" class="py-5 text-center">
+                                <td colspan="7" class="py-5 text-center">
                                     <div class="d-flex flex-column align-items-center">
                                         <i class="mdi mdi-database-off text-light mb-3" style="font-size: 60px;"></i>
                                         <h5 class="text-muted fw-normal">Data Tahun {{ $tahunAktif }} Tidak Ditemukan</h5>
@@ -268,12 +302,116 @@
     </div>
 </div>
 
+@push('styles')
 <style>
+    /* Table styling - sama dengan pending-submit/approval */
+    .table td { 
+        vertical-align: middle !important; 
+        font-size: 0.875rem !important;
+    }
     
-    .table td { vertical-align: middle !important; }
-    .badge { font-weight: 600; font-size: 10px; }
-    .btn-xs { padding: 0.25rem 0.5rem; font-size: 0.75rem; }
-    .statistics-details { border-bottom: 1px solid #eee; padding-bottom: 20px; }
+    .table th {
+        font-size: 0.875rem !important;
+        font-weight: 600 !important;
+    }
+    
+    /* Badge styling */
+    .badge { 
+        font-weight: 600; 
+        font-size: 0.75rem;
+        padding: 0.35em 0.65em;
+    }
+    
+    /* Button styling */
+    .btn-xs { 
+        padding: 0.25rem 0.5rem; 
+        font-size: 0.75rem; 
+    }
+    
+    /* Stats border */
+    .statistics-details { 
+        border-bottom: 1px solid #eee; 
+        padding-bottom: 20px; 
+    }
+    
+    /* Form controls */
+    .form-select, 
+    .form-control,
+    select.form-select,
+    select.form-control {
+        color: #495057 !important;
+        font-size: 0.875rem !important;
+    }
+    
+    .form-select option,
+    .form-control option {
+        color: #495057 !important;
+    }
+    
+    /* Form label */
+    .form-label.small {
+        font-size: 0.875rem;
+    }
 </style>
+@endpush
 
+@push('scripts')
+<script>
+$(document).ready(function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const initialKec = urlParams.get('kdkec');
+    const initialDesa = urlParams.get('kddesa');
+
+    function loadKecamatan(kdkab, selectedKec = null) {
+        if (!kdkab) return;
+        
+        $.get("{{ route('daerah-sulit.get-kecamatan') }}", { kdkab: kdkab }, function(data) {
+            $('#filter-kec').empty().append('<option value="">-- Semua Kecamatan --</option>');
+            $.each(data, function(key, val) {
+                let selected = (selectedKec == val.kdkec) ? 'selected' : '';
+                $('#filter-kec').append(`<option value="${val.kdkec}" ${selected}>[${val.kdkec}] ${val.nmkec}</option>`);
+            });
+            
+            if (selectedKec) {
+                loadDesa(kdkab, selectedKec, initialDesa);
+            }
+        });
+    }
+
+    function loadDesa(kdkab, kdkec, selectedDesa = null) {
+        if (!kdkab || !kdkec) return;
+
+        $.get("{{ route('daerah-sulit.get-desa') }}", { kdkab: kdkab, kdkec: kdkec }, function(data) {
+            $('#filter-desa').empty().append('<option value="">-- Semua Desa --</option>');
+            $.each(data, function(key, val) {
+                let selected = (selectedDesa == val.kddesa) ? 'selected' : '';
+                $('#filter-desa').append(`<option value="${val.kddesa}" ${selected}>[${val.kddesa}] ${val.nmdesa}</option>`);
+            });
+        });
+    }
+
+    // Event saat Kabupaten diganti
+    $('#filter-kab').on('change', function() {
+        let kdkab = $(this).val();
+        $('#filter-kec').empty().append('<option value="">-- Semua Kecamatan --</option>');
+        $('#filter-desa').empty().append('<option value="">-- Semua Desa --</option>');
+        loadKecamatan(kdkab);
+    });
+
+    // Event saat Kecamatan diganti
+    $('#filter-kec').on('change', function() {
+        let kdkab = $('#filter-kab').val();
+        let kdkec = $(this).val();
+        $('#filter-desa').empty().append('<option value="">-- Semua Desa --</option>');
+        loadDesa(kdkab, kdkec);
+    });
+
+    // Inisialisasi awal jika sudah ada filter terpilih (saat reload)
+    let currentKab = $('#filter-kab').val();
+    if (currentKab) {
+        loadKecamatan(currentKab, initialKec);
+    }
+});
+</script>
+@endpush
 @endsection

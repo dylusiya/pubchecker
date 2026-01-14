@@ -75,6 +75,8 @@
                     </div>
                 </div>
 
+                
+
                 @if($status->is_daerah_sulit)
                 <!-- Detail Kesulitan -->
                 <div class="card mb-4 border-danger">
@@ -126,7 +128,7 @@
                                 <h6 class="mb-0"><i class="mdi mdi-file text-primary me-2"></i>File Pendukung</h6>
                             </div>
                             <div class="card-body">
-                                <a href="{{ asset('storage/' . $status->file_pendukung) }}" target="_blank" class="btn btn-outline-primary btn-icon-text">
+                                <a href="{{ asset('storage/app/public/' . $status->file_pendukung) }}" target="_blank" class="btn btn-outline-primary btn-icon-text">
                                     <i class="mdi mdi-download btn-icon-prepend"></i> Unduh File
                                 </a>
                             </div>
@@ -185,6 +187,165 @@
                         </button>
                     @endif
                 </div>
+
+                <!-- Riwayat Status SLS Ini -->
+                @php
+                    $riwayatSls = \App\Models\StatusDaerahSulit::where('master_sls_id', $status->master_sls_id)
+                        ->whereNull('deleted_at')
+                        ->with(['creator', 'approver'])
+                        ->orderBy('tahun_anggaran', 'desc')
+                        ->orderBy('created_at', 'desc')
+                        ->get();
+                @endphp
+
+                @if($riwayatSls->count() > 1)
+                <div class="card mt-3">
+                    <div class="card-header bg-gradient-primary text-white d-flex justify-content-between align-items-center">
+                        <h6 class="mb-0">
+                            <i class="mdi mdi-timeline-text me-2"></i>
+                            Riwayat Status SLS {{ $status->masterSls->idsls }}
+                        </h6>
+                        <span class="badge badge-light text-primary">{{ $riwayatSls->count() }} record | {{ $riwayatSls->unique('tahun_anggaran')->count() }} tahun</span>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="timeline">
+                            @foreach($riwayatSls as $index => $item)
+                            <div class="timeline-item {{ $item->id == $status->id ? 'active-record' : '' }}">
+                                <div class="timeline-badge {{ $item->is_daerah_sulit ? 'bg-danger' : 'bg-success' }}">
+                                    <i class="mdi mdi-{{ $item->is_daerah_sulit ? 'alert' : 'check' }}"></i>
+                                </div>
+                                <div class="timeline-panel">
+                                    <div class="timeline-heading">
+                                        <div class="d-flex justify-content-between align-items-start mb-2">
+                                            <div>
+                                                <h6 class="mb-1">
+                                                    @if($item->is_daerah_sulit)
+                                                        <span class="badge badge-danger me-2">DAERAH SULIT</span>
+                                                    @else
+                                                        <span class="badge badge-success me-2">TIDAK SULIT</span>
+                                                    @endif
+                                                    <span class="badge badge-primary">{{ $item->tahun_anggaran }}</span>
+                                                    @if($item->id == $status->id)
+                                                        <span class="badge badge-warning ms-1">
+                                                            <i class="mdi mdi-eye-check"></i> Sedang Dilihat
+                                                        </span>
+                                                    @endif
+                                                </h6>
+                                                <small class="text-muted">
+                                                    <i class="mdi mdi-calendar"></i> {{ $item->created_at->format('d F Y, H:i') }} WIB
+                                                    <span class="mx-2">•</span>
+                                                    <i class="mdi mdi-account"></i> {{ $item->creator->name ?? '-' }}
+                                                </small>
+                                            </div>
+                                            <div class="text-end">
+                                                @php
+                                                    $approvalClasses = [
+                                                        'draft' => 'badge-secondary',
+                                                        'pending' => 'badge-warning',
+                                                        'disetujui' => 'badge-success',
+                                                        'ditolak' => 'badge-danger',
+                                                    ];
+                                                    $approvalIcons = [
+                                                        'draft' => 'mdi-file-document',
+                                                        'pending' => 'mdi-clock-outline',
+                                                        'disetujui' => 'mdi-check-circle',
+                                                        'ditolak' => 'mdi-close-circle',
+                                                    ];
+                                                @endphp
+                                                <span class="badge {{ $approvalClasses[$item->status_approval] ?? 'badge-secondary' }}">
+                                                    <i class="mdi {{ $approvalIcons[$item->status_approval] ?? 'mdi-help' }}"></i>
+                                                    {{ strtoupper($item->status_approval) }}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="timeline-body">
+                                        <div class="row g-3">
+                                            <!-- Kegiatan -->
+                                            <div class="col-md-12">
+                                                <div class="info-box">
+                                                    <strong><i class="mdi mdi-briefcase text-primary"></i> Kegiatan:</strong>
+                                                    <p class="mb-0 ms-3">{{ $item->kegiatan }}</p>
+                                                </div>
+                                            </div>
+
+                                            @if($item->is_daerah_sulit)
+                                            <!-- Detail Kesulitan -->
+                                            <div class="col-md-4">
+                                                <div class="info-box">
+                                                    <strong><i class="mdi mdi-cash text-success"></i> Perkiraan Biaya:</strong>
+                                                    <p class="mb-0 ms-3 text-danger fw-bold">
+                                                        Rp {{ number_format($item->perkiraan_biaya, 0, ',', '.') }}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-4">
+                                                <div class="info-box">
+                                                    <strong><i class="mdi mdi-truck-fast text-warning"></i> Transportasi:</strong>
+                                                    <p class="mb-0 ms-3">{{ $item->metode_transportasi ?? '-' }}</p>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-4">
+                                                <div class="info-box">
+                                                    <strong><i class="mdi mdi-clock text-info"></i> Waktu Tempuh:</strong>
+                                                    <p class="mb-0 ms-3">{{ $item->waktu_tempuh_menit ?? 0 }} menit</p>
+                                                </div>
+                                            </div>
+                                            @endif
+
+                                            <!-- Keterangan -->
+                                            <div class="col-md-12">
+                                                <div class="info-box">
+                                                    <strong><i class="mdi mdi-text text-primary"></i> Keterangan:</strong>
+                                                    <p class="mb-0 ms-3 text-justify">{{ $item->keterangan ?? '-' }}</p>
+                                                </div>
+                                            </div>
+
+                                            @if($item->status_approval == 'disetujui' && $item->approver)
+                                            <!-- Info Approval -->
+                                            <div class="col-md-12">
+                                                <div class="alert alert-success mb-0 py-2">
+                                                    <small>
+                                                        <i class="mdi mdi-check-circle me-1"></i>
+                                                        <strong>Disetujui oleh {{ $item->approver->name }}</strong>
+                                                        pada {{ $item->approved_at->format('d/m/Y H:i') }}
+                                                        @if($item->catatan_approval)
+                                                            <br>
+                                                            <span class="ms-3">Catatan: {{ $item->catatan_approval }}</span>
+                                                        @endif
+                                                    </small>
+                                                </div>
+                                            </div>
+                                            @elseif($item->status_approval == 'ditolak' && $item->catatan_approval)
+                                            <!-- Info Penolakan -->
+                                            <div class="col-md-12">
+                                                <div class="alert alert-danger mb-0 py-2">
+                                                    <small>
+                                                        <i class="mdi mdi-close-circle me-1"></i>
+                                                        <strong>Ditolak:</strong> {{ $item->catatan_approval }}
+                                                    </small>
+                                                </div>
+                                            </div>
+                                            @endif
+                                        </div>
+
+                                        <!-- Action Button -->
+                                        @if($item->id != $status->id)
+                                        <div class="mt-3">
+                                            <a href="{{ route('daerah-sulit.show', $item->id) }}" 
+                                            class="btn btn-sm btn-outline-primary">
+                                                <i class="mdi mdi-eye"></i> Lihat Detail Record Ini
+                                            </a>
+                                        </div>
+                                        @endif
+                                    </div>
+                                </div>
+                            </div>
+                            @endforeach
+                        </div>                        
+                    </div>
+                </div>
+                @endif
 
                 <!-- History (Compact) -->
                 @if($status->histories && $status->histories->count() > 0)
@@ -374,3 +535,104 @@
     </div>
 </div>
 @endsection
+
+@push('styles')
+<style>
+/* Timeline Styles */
+.timeline {
+    position: relative;
+    padding: 20px 0;
+    list-style: none;
+}
+
+.timeline-item {
+    position: relative;
+    padding-left: 60px;
+    margin-bottom: 30px;
+}
+
+.timeline-item:last-child {
+    margin-bottom: 0;
+}
+
+.timeline-item::before {
+    content: '';
+    position: absolute;
+    left: 18px;
+    top: 40px;
+    bottom: -30px;
+    width: 2px;
+    background: #e0e0e0;
+}
+
+.timeline-item:last-child::before {
+    display: none;
+}
+
+.timeline-badge {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 18px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    z-index: 1;
+}
+
+.timeline-panel {
+    background: white;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    transition: all 0.3s ease;
+}
+
+.timeline-panel:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    transform: translateY(-2px);
+}
+
+.active-record .timeline-panel {
+    border: 2px solid #4B49AC;
+    background: #f8f9ff;
+}
+
+.active-record .timeline-badge {
+    box-shadow: 0 0 0 4px rgba(75, 73, 172, 0.2);
+}
+
+.info-box {
+    margin-bottom: 15px;
+}
+
+.info-box:last-child {
+    margin-bottom: 0;
+}
+
+.info-box strong {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 0.9rem;
+}
+
+.info-box p {
+    font-size: 0.95rem;
+    line-height: 1.6;
+}
+
+.bg-gradient-primary {
+    background: linear-gradient(135deg, #4B49AC 0%, #7978E9 100%);
+}
+
+.text-justify {
+    text-align: justify;
+}
+</style>
+@endpush

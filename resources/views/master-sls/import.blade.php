@@ -12,8 +12,8 @@
                         <h4 class="card-title">Import Master SLS</h4>
                         <p class="card-description">Upload file CSV atau Excel untuk import data Master SLS</p>
                     </div>
-                    <a href="{{ route('master-sls.index') }}" class="btn btn-secondary">
-                        <i class="mdi mdi-arrow-left"></i> Kembali
+                    <a href="{{ route('master-sls.index') }}" class="btn btn-outline-secondary btn-icon-text btn-sm">
+                        <i class="mdi mdi-arrow-left btn-icon-prepend"></i> Kembali
                     </a>
                 </div>
 
