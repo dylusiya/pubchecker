@@ -26,22 +26,48 @@ class SsoController extends Controller
         $this->redirectUri = config('services.sso.redirect_uri');
     }
 
+    /**
+     * Homepage - redirect berdasarkan status login
+     */
     public function index()
     {
         if (Auth::check()) {
-            return redirect('/dashboard');
+            return redirect()->route('dashboard');
         }
-        return view('welcome');
+        return redirect()->route('login');
+    }
+
+    /**
+     * Halaman Login
+     */
+    public function login()
+    {
+        // Jika sudah login, redirect ke dashboard
+        if (Auth::check()) {
+            return redirect()->route('dashboard');
+        }
+
+        // Tampilkan halaman login
+        return view('auth.login');
     }
 
     /**
      * Redirect ke SSO BPS
-     * URL: https://kalsel.web.bps.go.id/sso_new/?app=daerahsulit
+     * URL: https://kalsel.web.bps.go.id/sso_new/?app=skm
      */
     public function redirect()
     {
-        // Redirect ke sso_new dengan parameter app=daerahsulit
-        return redirect('https://kalsel.web.bps.go.id/sso_new/?app=daerahsulit');
+        // Jika sudah login, redirect ke dashboard
+        if (Auth::check()) {
+            return redirect()->route('dashboard');
+        }
+
+        // Redirect ke sso_new dengan parameter app=skm
+        $ssoUrl = 'https://kalsel.web.bps.go.id/sso_new/?app=skm';
+        
+        Log::info('Redirecting to SSO', ['url' => $ssoUrl]);
+        
+        return redirect($ssoUrl);
     }
 
     /**
@@ -54,11 +80,17 @@ class SsoController extends Controller
             // Log SEMUA data yang diterima dari sso_new
             Log::info('=== SSO CALLBACK RECEIVED ===');
             Log::info('All Request Data:', $request->all());
+            Log::info('Request Method:', ['method' => $request->method()]);
+            Log::info('Request Headers:', $request->headers->all());
             
             // Validasi parameter yang dikirim dari sso_new
             if (!$request->has('username') || !$request->has('token')) {
-                Log::error('Missing required parameters');
-                return redirect('/')->with('error', 'Parameter tidak lengkap');
+                Log::error('Missing required parameters', [
+                    'has_username' => $request->has('username'),
+                    'has_token' => $request->has('token'),
+                    'all_params' => array_keys($request->all())
+                ]);
+                return redirect()->route('login')->with('error', 'Parameter tidak lengkap dari SSO');
             }
     
             $username = $request->username;
@@ -66,20 +98,27 @@ class SsoController extends Controller
             
             Log::info('Processing SSO login', [
                 'username' => $username,
-                'token' => substr($token, 0, 20) . '...'
+                'token_length' => strlen($token),
+                'token_preview' => substr($token, 0, 20) . '...'
             ]);
     
             // Verifikasi token ke Keycloak untuk keamanan
             $userInfoUrl = $this->baseUrl . '/realms/' . $this->realm . '/protocol/openid-connect/userinfo';
             
-            $userResponse = Http::withToken($token)->get($userInfoUrl);
+            Log::info('Verifying token to Keycloak', ['url' => $userInfoUrl]);
+            
+            $userResponse = Http::withToken($token)
+                ->timeout(10)
+                ->get($userInfoUrl);
     
             if (!$userResponse->successful()) {
                 Log::error('Token verification failed', [
                     'status' => $userResponse->status(),
-                    'body' => $userResponse->body()
+                    'body' => $userResponse->body(),
+                    'headers' => $userResponse->headers()
                 ]);
-                return redirect('/')->with('error', 'Token tidak valid atau sudah expired');
+                return redirect()->route('login')
+                    ->with('error', 'Token tidak valid atau sudah expired. Silakan login ulang.');
             }
     
             $userData = $userResponse->json();
@@ -93,21 +132,36 @@ class SsoController extends Controller
     
             if ($user) {
                 Auth::login($user);
-                Log::info('User logged in successfully: ' . $user->id);
+                $request->session()->regenerate();
                 
-                return redirect('/dashboard')->with('success', 'Login berhasil!');
+                Log::info('User logged in successfully', [
+                    'user_id' => $user->id,
+                    'username' => $user->username,
+                    'name' => $user->name
+                ]);
+                
+                return redirect()->route('dashboard')->with('success', 'Login berhasil! Selamat datang ' . $user->name);
             }
     
             Log::error('Failed to create/update user');
-            return redirect('/')->with('error', 'Gagal membuat user');
+            return redirect()->route('login')->with('error', 'Gagal membuat/update user. Silakan hubungi administrator.');
     
         } catch (\Exception $e) {
-            Log::error('SSO Callback Error: ' . $e->getMessage());
-            Log::error('Stack trace: ' . $e->getTraceAsString());
-            return redirect('/')->with('error', 'Terjadi kesalahan saat proses login. Silakan coba lagi.');
+            Log::error('SSO Callback Error', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return redirect()->route('login')
+                ->with('error', 'Terjadi kesalahan saat proses login SSO: ' . $e->getMessage());
         }
     }
 
+    /**
+     * Temukan atau buat user baru
+     */
     protected function findOrCreateUser($userData, $request)
     {
         try {
@@ -115,15 +169,17 @@ class SsoController extends Controller
             $email = $userData['email'] ?? $request->email ?? null;
 
             if (!$username) {
-                Log::error('Username not found');
+                Log::error('Username not found in user data');
                 return null;
             }
+
+            Log::info('Finding or creating user', ['username' => $username]);
 
             $user = User::where('username', $username)->first();
 
             // Siapkan data untuk disimpan - ambil SEMUA data dari Keycloak
             $userDataToSave = [
-                'name' => $userData['name'] ?? $request->nama ?? 'User',
+                'name' => $userData['name'] ?? $request->nama ?? $username,
                 'first_name' => $userData['first-name'] ?? null,
                 'last_name' => $userData['last-name'] ?? null,
                 'email' => $email,
@@ -144,23 +200,43 @@ class SsoController extends Controller
                 $kodeOrg = $userData['organisasi'];
                 $userDataToSave['kode_organisasi'] = $kodeOrg;
                 
-                // Extract kode provinsi (4 digit pertama)
-                $userDataToSave['kode_provinsi'] = substr($kodeOrg, 0, 4);
+                // Extract kode provinsi (2 digit pertama + "00")
+                // Contoh: 6301 → 6300, 6371 → 6300
+                $userDataToSave['kode_provinsi'] = substr($kodeOrg, 0, 2) . '00';
                 
-                // Extract kode kabupaten - hanya jika bukan provinsi
-                $kodeKab = substr($kodeOrg, 0, 4);
-                if (substr($kodeKab, 2, 2) != '00') {
-                    $userDataToSave['kode_kabupaten'] = $kodeKab;
+                // Extract kode kabupaten dari kode organisasi
+                // Format: 6301 (63 = provinsi, 01 = kabupaten)
+                // Jika 2 digit terakhir = 00, berarti provinsi (tidak ada kabupaten)
+                $lastTwoDigits = substr($kodeOrg, 2, 2);
+                
+                if ($lastTwoDigits != '00') {
+                    // Ada kabupaten: simpan 4 digit penuh
+                    $userDataToSave['kode_kabupaten'] = substr($kodeOrg, 0, 4);
+                } else {
+                    // 👇 TAMBAHAN: Provinsi saja: PAKSA set kode_kabupaten = null
+                    // Ini penting untuk reset jika user sebelumnya kabupaten
+                    $userDataToSave['kode_kabupaten'] = null;
                 }
+            } else {
+                // 👇 TAMBAHAN: Jika tidak ada organisasi sama sekali, reset semua
+                $userDataToSave['kode_organisasi'] = null;
+                $userDataToSave['kode_provinsi'] = null;
+                $userDataToSave['kode_kabupaten'] = null;
             }
 
             // Nama Provinsi dan Kabupaten
             if (isset($userData['provinsi'])) {
                 $userDataToSave['provinsi'] = $userData['provinsi'];
+            } else {
+                // 👇 TAMBAHAN: Reset provinsi jika tidak ada
+                $userDataToSave['provinsi'] = null;
             }
 
             if (isset($userData['kabupaten'])) {
                 $userDataToSave['kabupaten'] = $userData['kabupaten'];
+            } else {
+                // 👇 TAMBAHAN: Reset kabupaten jika tidak ada
+                $userDataToSave['kabupaten'] = null;
             }
 
             // Golongan
@@ -195,41 +271,41 @@ class SsoController extends Controller
                 // Buat user baru
                 $userDataToSave['password'] = bcrypt(bin2hex(random_bytes(16)));
                 $user = User::create($userDataToSave);
-                Log::info('New user created', ['id' => $user->id, 'username' => $username]);
+                Log::info('New user created', [
+                    'id' => $user->id,
+                    'username' => $username,
+                    'name' => $user->name,
+                    'kode_organisasi' => $user->kode_organisasi,
+                    'kode_provinsi' => $user->kode_provinsi,
+                    'kode_kabupaten' => $user->kode_kabupaten
+                ]);
             } else {
-                // Update user yang sudah ada
+                // 👇 PENTING: Update user yang sudah ada
+                // Gunakan update() untuk REPLACE semua field (termasuk set null)
                 $user->update($userDataToSave);
-                Log::info('User updated', ['id' => $user->id, 'username' => $username]);
+                
+                Log::info('User updated', [
+                    'id' => $user->id,
+                    'username' => $username,
+                    'name' => $user->name,
+                    'kode_organisasi_old' => $user->getOriginal('kode_organisasi'),
+                    'kode_organisasi_new' => $user->kode_organisasi,
+                    'kode_kabupaten_old' => $user->getOriginal('kode_kabupaten'),
+                    'kode_kabupaten_new' => $user->kode_kabupaten
+                ]);
             }
 
             return $user;
 
         } catch (\Exception $e) {
-            Log::error('Error creating/updating user: ' . $e->getMessage());
-            Log::error('Exception details:', [
+            Log::error('Error creating/updating user', [
+                'message' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
-                'message' => $e->getMessage()
+                'trace' => $e->getTraceAsString()
             ]);
-            Log::error('Stack trace: ' . $e->getTraceAsString());
             return null;
         }
-    }
-
-    public function login()
-    {
-        // Jika sudah login, redirect ke dashboard
-        if (Auth::check()) {
-            return redirect()->route('dashboard');
-        }
-
-        // Jika environment local atau localhost, tampilkan welcome page
-        if (config('app.env') === 'local' || request()->getHost() === 'localhost') {
-            return view('welcome');
-        }
-
-        // Production: Redirect ke sso_new dengan parameter app=daerahsulit
-        return redirect('https://kalsel.web.bps.go.id/sso_new/?app=daerahsulit');
     }
 
     /**
@@ -246,56 +322,91 @@ class SsoController extends Controller
         ]);
 
         try {
+            Log::info('Local login attempt', ['username' => $request->username]);
+
             // Cari user berdasarkan username
             $user = User::where('username', $request->username)->first();
 
             // Cek apakah user ada
             if (!$user) {
                 Log::warning('Login local failed: User not found', ['username' => $request->username]);
-                return back()->with('error', 'Username atau password salah')->withInput($request->only('username'));
+                return back()
+                    ->with('error', 'Username atau password salah')
+                    ->withInput($request->only('username'));
             }
+
             // Cek password
             if (!Hash::check($request->password, $user->password)) {
-                Log::warning('Login local failed: Wrong password', ['username' => $request->username]);
-                return back()->with('error', 'Username atau password salah')->withInput($request->only('username'));
+                Log::warning('Login local failed: Wrong password', [
+                    'username' => $request->username,
+                    'user_id' => $user->id
+                ]);
+                return back()
+                    ->with('error', 'Username atau password salah')
+                    ->withInput($request->only('username'));
             }
 
             // Login berhasil
             Auth::login($user);
             $request->session()->regenerate();
 
-            Log::info('User logged in via local login', ['user_id' => $user->id, 'username' => $user->username]);
+            Log::info('User logged in via local login', [
+                'user_id' => $user->id,
+                'username' => $user->username,
+                'name' => $user->name
+            ]);
 
-            return redirect()->intended('/dashboard')->with('success', 'Login berhasil!');
+            return redirect()->intended(route('dashboard'))
+                ->with('success', 'Login berhasil! Selamat datang ' . $user->name);
 
         } catch (\Exception $e) {
-            Log::error('Local login error: ' . $e->getMessage());
-            return back()->with('error', 'Terjadi kesalahan saat login');
+            Log::error('Local login error', [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return back()->with('error', 'Terjadi kesalahan saat login. Silakan coba lagi.');
         }
     }
 
+    /**
+     * Logout
+     */
     public function logout(Request $request)
-{
-    // Safety check
-    if (!Auth::check()) {
-        return redirect('/')->with('error', 'Anda sudah logout');
-    }
-    
-    $username = Auth::user()->username ?? null;
+    {
+        // Safety check
+        if (!Auth::check()) {
+            Log::warning('Logout attempt but user not logged in');
+            return redirect()->route('login')->with('info', 'Anda sudah logout');
+        }
+        
+        $username = Auth::user()->username ?? null;
+        $name = Auth::user()->name ?? null;
+        
+        Log::info('User logging out', [
+            'username' => $username,
+            'name' => $name
+        ]);
         
         Auth::logout();
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 
-        Log::info('User logged out', ['username' => $username]);
+        Log::info('User logged out successfully', ['username' => $username]);
 
+        // Cek environment
+        $isLocal = config('app.env') === 'local' || 
+                   request()->getHost() === 'localhost' || 
+                   request()->getHost() === '127.0.0.1';
         
-        if (config('app.env') === 'local' || request()->getHost() === 'localhost') {
-            return redirect('/')->with('success', 'Anda telah logout');
+        if ($isLocal) {
+            return redirect()->route('login')->with('success', 'Anda telah logout');
         }
 
-        return redirect('https://kalsel.web.bps.go.id/sso_new/?app=daerahsulit&logout=1');
+        // Production: Redirect ke SSO logout
+        $ssoLogoutUrl = 'https://kalsel.web.bps.go.id/sso_new/?app=skm&logout=1';
+        
+        Log::info('Redirecting to SSO logout', ['url' => $ssoLogoutUrl]);
+        
+        return redirect($ssoLogoutUrl);
     }
-
-    
 }

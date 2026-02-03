@@ -1,4 +1,4 @@
-@extends('layouts.admin')
+@extends('layouts.app')
 
 @section('title', 'Profil Saya')
 
@@ -224,29 +224,6 @@
                 </div>
             </div>
         </div>
-
-        <!-- Info Akses (untuk non-admin) -->
-        @if(!$user->isAdmin())
-        <div class="row">
-            <div class="col-12 grid-margin stretch-card">
-                <div class="card card-rounded bg-light border-primary">
-                    <div class="card-body">
-                        <div class="d-flex align-items-center">
-                            <div class="flex-shrink-0">
-                                <i class="mdi mdi-information text-primary" style="font-size: 48px;"></i>
-                            </div>
-                            <div class="ms-3">
-                                <h6 class="mb-1">Akses Data Wilayah</h6>
-                                <p class="text-muted mb-0">
-                                    Anda memiliki akses ke data SLS di wilayah <strong>{{ $user->kabupaten ?? 'semua wilayah' }}</strong>
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        @endif
     </div>
 </div>
 

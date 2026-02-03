@@ -3,7 +3,8 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <title>@yield('title', 'Daerah Sulit') - BPS Kalsel</title>
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>@yield('title', 'Survey Kepuasan') - BPS Kalsel</title>
     
     <!-- plugins:css -->
     <link rel="stylesheet" href="{{ asset('assets/vendors/feather/feather.css') }}">
@@ -30,7 +31,6 @@
     <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('assets/images/favicon-32x32.png') }}">
     <link rel="icon" type="image/png" sizes="16x16" href="{{ asset('assets/images/favicon-16x16.png') }}">
     
-    
     @stack('styles')
 </head>
 <body class="with-welcome-text">
@@ -48,14 +48,28 @@
                     <!-- Alerts -->
                     @if(session('success'))
                         <div class="alert alert-success alert-dismissible fade show" role="alert">
-                            <strong>Berhasil! </strong> {{ session('success') }}
+                            <strong><i class="mdi mdi-check-circle"></i> Berhasil!</strong> {{ session('success') }}
                             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                         </div>
                     @endif
 
                     @if(session('error'))
                         <div class="alert alert-danger alert-dismissible fade show" role="alert">
-                            <strong>Error! </strong> {{ session('error') }}
+                            <strong><i class="mdi mdi-alert-circle"></i> Error!</strong> {{ session('error') }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                    @endif
+
+                    @if(session('info'))
+                        <div class="alert alert-info alert-dismissible fade show" role="alert">
+                            <strong><i class="mdi mdi-information"></i> Info!</strong> {{ session('info') }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                    @endif
+
+                    @if(session('warning'))
+                        <div class="alert alert-warning alert-dismissible fade show" role="alert">
+                            <strong><i class="mdi mdi-alert"></i> Peringatan!</strong> {{ session('warning') }}
                             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                         </div>
                     @endif
@@ -89,19 +103,14 @@
 
     <script>
     $(document).ready(function() {
-        // 1. Ambil URL saat ini tanpa query string (menghindari masalah ?page=1 dll)
+
+        // Active menu highlighting
         var currentUrl = window.location.origin + window.location.pathname;
-
-        // 2. Hapus class active dari semua nav-item agar bersih
         $('.sidebar .nav-item').removeClass('active');
-
-        // 3. Cari link yang href-nya SAMA PERSIS dengan URL saat ini
+        
         $('.sidebar .nav-link').each(function() {
-            // Kita bandingkan href asli link dengan URL saat ini
             if (this.href === currentUrl || this.href === window.location.href) {
                 $(this).closest('.nav-item').addClass('active');
-                
-                // Jika menu berada di dalam dropdown/collapse, buka juga induknya
                 $(this).parents('.collapse').addClass('show');
                 $(this).parents('.nav-item').addClass('active');
             }

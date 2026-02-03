@@ -1,4 +1,4 @@
-@extends('layouts.admin')
+@extends('layouts.app')
 
 @section('title', 'Manajemen User')
 
@@ -16,12 +16,7 @@
                     <div>
                         <p class="statistics-title">Admin</p>
                         <h3 class="rate-percentage text-warning">{{ number_format($stats['admin'] ?? 0, 0, ',', '.') }}</h3>
-                        <p class="text-warning d-flex small fw-bold"><i class="mdi mdi-shield-check me-1"></i>Akses Full</p>
-                    </div>
-                    <div>
-                        <p class="statistics-title">Approver</p>
-                        <h3 class="rate-percentage text-primary">{{ number_format($stats['approver'] ?? 0, 0, ',', '.') }}</h3>
-                        <p class="text-primary d-flex small fw-bold"><i class="mdi mdi-verified me-1"></i>Verifikator</p>
+                        <p class="text-warning d-flex small fw-bold"><i class="mdi mdi-shield-check me-1"></i>Administrator</p>
                     </div>
                     <div>
                         <p class="statistics-title">Regular User</p>
@@ -37,71 +32,48 @@
                 <div class="d-sm-flex justify-content-between align-items-center mb-4">
                     <div>
                         <h4 class="card-title card-title-dash">Manajemen User</h4>
-                        <p class="card-subtitle card-subtitle-dash">Kelola data pengguna dan hak akses wilayah</p>
+                        <p class="card-subtitle card-subtitle-dash">Kelola data pengguna aplikasi</p>
                     </div>
+                    @if(auth()->check() && auth()->user()->role === 'admin')
                     <div class="d-flex gap-2">
-                        <a href="{{ route('admin.create') }}" class="btn btn-primary btn-sm text-white">
+                        <a href="{{ route('admin.users.create') }}" class="btn btn-primary btn-sm text-white">
                             <i class="mdi mdi-account-plus"></i> Tambah User
                         </a>
                     </div>
+                    @endif
                 </div>
 
-                @if(session('success'))
-                    <div class="alert alert-success alert-dismissible fade show" role="alert">
-                        <i class="mdi mdi-check-circle me-2"></i>{{ session('success') }}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                    </div>
-                @endif
-
-                @if(session('error'))
-                    <div class="alert alert-danger alert-dismissible fade show" role="alert">
-                        <i class="mdi mdi-alert-circle me-2"></i>{{ session('error') }}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                    </div>
-                @endif
-
+                <!-- Filter -->
                 <div class="bg-light p-3 rounded mb-4 border">
-                    <form method="GET" action="{{ route('admin.index') }}" class="row g-2 align-items-end">
-                        <div class="col-md-2">
+                    <form method="GET" action="{{ route('admin.users.index') }}" class="row g-2 align-items-end">
+                        <div class="col-md-3">
                             <label class="form-label small fw-bold">Role</label>
                             <select name="role" class="form-select form-select-sm text-dark">
                                 <option value="">-- Semua Role --</option>
                                 <option value="admin" {{ request('role') == 'admin' ? 'selected' : '' }}>Admin</option>
-                                <option value="approver" {{ request('role') == 'approver' ? 'selected' : '' }}>Approver</option>
                                 <option value="user" {{ request('role') == 'user' ? 'selected' : '' }}>User</option>
                             </select>
                         </div>
-                        <div class="col-md-3">
-                            <label class="form-label small fw-bold">Kabupaten/Kota</label>
-                            <select name="kdkab" class="form-select form-select-sm text-dark">
-                                <option value="">-- Seluruh Wilayah --</option>
-                                @foreach($kabupatenList as $kab)
-                                    <option value="{{ $kab->kdkab }}" {{ request('kdkab') == $kab->kdkab ? 'selected' : '' }}>
-                                        {{ $kab->nmkab }}
-                                    </option>
-                                @endforeach
-                            </select>
-                        </div>
-                        <div class="col-md-5">
+                        <div class="col-md-7">
                             <label class="form-label small fw-bold">Cari User</label>
                             <input type="text" name="search" class="form-control form-control-sm" 
-                                   placeholder="Cari Username, Nama, atau NIP..." value="{{ request('search') }}">
+                                   placeholder="Cari Username, Nama, Email, atau NIP..." value="{{ request('search') }}">
                         </div>
                         <div class="col-md-2 d-flex gap-1">
                             <button type="submit" class="btn btn-primary btn-sm px-3">
                                 <i class="mdi mdi-magnify"></i> Filter
                             </button>
-                            @if(request('search') || request('role') || request('kdkab'))
-                                <a href="{{ route('admin.index') }}" class="btn btn-light btn-sm border px-3">Reset</a>
+                            @if(request('search') || request('role'))
+                                <a href="{{ route('admin.users.index') }}" class="btn btn-light btn-sm border px-3">Reset</a>
                             @endif
                         </div>
                     </form>
                 </div>
 
+                <!-- Per Page -->
                 <div class="d-flex justify-content-between align-items-center mb-3">
-                    <form method="GET" action="{{ route('admin.index') }}" class="d-flex align-items-center gap-2">
+                    <form method="GET" action="{{ route('admin.users.index') }}" class="d-flex align-items-center gap-2">
                         <input type="hidden" name="role" value="{{ request('role') }}">
-                        <input type="hidden" name="kdkab" value="{{ request('kdkab') }}">
                         <input type="hidden" name="search" value="{{ request('search') }}">
                         <input type="hidden" name="sort" value="{{ request('sort') }}">
                         <input type="hidden" name="order" value="{{ request('order') }}">
@@ -123,23 +95,26 @@
                     </div>
                 </div>
 
+                <!-- Table -->
                 <div class="table-responsive">
                     <table class="table table-sm table-hover">
                         <thead>
                             <tr class="bg-light">
                                 <th class="py-3">
-                                    <a href="{{ route('admin.index', array_merge(request()->all(), ['sort' => 'username', 'order' => request('sort') == 'username' && request('order') == 'asc' ? 'desc' : 'asc'])) }}" class="text-decoration-none text-dark">
+                                    <a href="{{ route('admin.users.index', array_merge(request()->all(), ['sort' => 'username', 'order' => request('sort') == 'username' && request('order') == 'asc' ? 'desc' : 'asc'])) }}" class="text-decoration-none text-dark">
                                         Username @if(request('sort') == 'username') <i class="mdi mdi-chevron-{{ request('order') == 'asc' ? 'up' : 'down' }}"></i> @endif
                                     </a>
                                 </th>
                                 <th class="py-3">
-                                    <a href="{{ route('admin.index', array_merge(request()->all(), ['sort' => 'name', 'order' => request('sort') == 'name' && request('order') == 'asc' ? 'desc' : 'asc'])) }}" class="text-decoration-none text-dark">
-                                        Nama & Jabatan @if(request('sort') == 'name') <i class="mdi mdi-chevron-{{ request('order') == 'asc' ? 'up' : 'down' }}"></i> @endif
+                                    <a href="{{ route('admin.users.index', array_merge(request()->all(), ['sort' => 'name', 'order' => request('sort') == 'name' && request('order') == 'asc' ? 'desc' : 'asc'])) }}" class="text-decoration-none text-dark">
+                                        Nama @if(request('sort') == 'name') <i class="mdi mdi-chevron-{{ request('order') == 'asc' ? 'up' : 'down' }}"></i> @endif
                                     </a>
                                 </th>
-                                <th class="py-3">Wilayah Tugas</th>
+                                <th class="py-3">Info</th>
                                 <th class="py-3 text-center">Role</th>
+                                @if(auth()->check() && auth()->user()->role === 'admin')
                                 <th class="py-3 text-center">Aksi</th>
+                                @endif
                             </tr>
                         </thead>
                         <tbody>
@@ -147,7 +122,6 @@
                             <tr>
                                 <td class="py-3">
                                     <strong class="text-dark">{{ $user->username }}</strong>
-                                    <div class="small text-muted">{{ $user->email ?? '-' }}</div>
                                 </td>
                                 <td class="py-3">
                                     <div class="d-flex align-items-center">
@@ -155,52 +129,52 @@
                                             <img src="{{ $user->foto }}" alt="" class="me-2 avatar-img">
                                         @else
                                             <div class="bg-primary rounded-circle me-2 d-flex align-items-center justify-content-center avatar-placeholder">
-                                                <i class="mdi mdi-account text-white"></i>
+                                                <span class="text-white fw-bold">{{ strtoupper(substr($user->name, 0, 1)) }}</span>
                                             </div>
                                         @endif
                                         <div>
                                             <div class="fw-bold">{{ $user->name }}</div>
-                                            <div class="small text-muted">NIP: {{ $user->nip_baru ?? $user->nip ?? '-' }}</div>
+                                            <div class="small text-muted">{{ $user->jabatan ?? '-' }}</div>
                                         </div>
                                     </div>
                                 </td>
                                 <td class="py-3">
-                                    @if($user->role === 'admin')
-                                        <span class="badge badge-opacity-info">Seluruh Wilayah</span>
-                                    @else
-                                        <div class="small fw-bold">{{ $user->kabupaten ?? 'Seluruh Wilayah' }}</div>
-                                        <div class="small text-muted">{{ $user->provinsi ?? '-' }}</div>
-                                    @endif
+                                    <div class="small">{{ $user->email ?? '-' }}</div>
+                                    <div class="small text-muted">NIP: {{ $user->nip_baru ?? $user->nip ?? '-' }}</div>
                                 </td>
                                 <td class="py-3 text-center">
                                     @if($user->role === 'admin')
-                                        <span class="badge badge-opacity-warning">Admin</span>
-                                    @elseif($user->role === 'approver')
-                                        <span class="badge badge-opacity-primary">Approver</span>
+                                        <span class="badge badge-warning">Admin</span>
                                     @else
-                                        <span class="badge badge-opacity-success">User</span>
+                                        <span class="badge badge-success">User</span>
                                     @endif
                                 </td>
+                                @if(auth()->check() && auth()->user()->role === 'admin')
                                 <td class="py-3 text-center">
                                     <div class="d-flex justify-content-center gap-1">
-                                        <a href="{{ route('admin.edit', $user->id) }}" class="btn btn-outline-primary btn-xs" title="Edit">
+                                        <a href="{{ route('admin.users.edit', $user->id) }}" class="btn btn-outline-primary btn-xs" title="Edit">
                                             <i class="mdi mdi-pencil"></i>
                                         </a>
                                         @if($user->id !== auth()->id())
-                                        <form action="{{ route('admin.destroy', $user->id) }}" method="POST" class="d-inline" onsubmit="return confirm('Yakin ingin menghapus user ini?')">
+                                        <form action="{{ route('admin.users.destroy', $user->id) }}" method="POST" class="d-inline" onsubmit="return confirm('Yakin ingin menghapus user ini?')">
                                             @csrf
                                             @method('DELETE')
                                             <button type="submit" class="btn btn-outline-danger btn-xs" title="Hapus">
                                                 <i class="mdi mdi-delete"></i>
                                             </button>
                                         </form>
+                                        @else
+                                        <button class="btn btn-outline-secondary btn-xs" disabled title="Tidak bisa hapus diri sendiri">
+                                            <i class="mdi mdi-delete"></i>
+                                        </button>
                                         @endif
                                     </div>
                                 </td>
+                                @endif
                             </tr>
                             @empty
                             <tr>
-                                <td colspan="5" class="py-5 text-center">
+                                <td colspan="{{ auth()->check() && auth()->user()->role === 'admin' ? '5' : '4' }}" class="py-5 text-center">
                                     <i class="mdi mdi-account-off text-light mb-3" style="font-size: 60px;"></i>
                                     <h5 class="text-muted fw-normal">Data user tidak ditemukan</h5>
                                 </td>
@@ -210,6 +184,7 @@
                     </table>
                 </div>
 
+                <!-- Pagination -->
                 @if($users->hasPages())
                 <div class="mt-4">
                     {{ $users->links() }}

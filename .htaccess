@@ -5,7 +5,7 @@
 
     RewriteEngine On
     
-    RewriteBase /daerahsulit/
+    RewriteBase /skm/
 
     RewriteCond %{HTTP:Authorization} .
     RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
