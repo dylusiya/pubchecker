@@ -165,6 +165,7 @@ class BpsImportController extends Controller
                         'deskripsi'   => $c['deskripsi'],
                         'status'      => $c['status'],
                         'catatan'     => $c['catatan'] ?: null,
+                        'lokasi'      => DetailPemeriksaan::encodeLokasi($c['lokasi'] ?? null),
                     ], $result['checks']));
                 }
 

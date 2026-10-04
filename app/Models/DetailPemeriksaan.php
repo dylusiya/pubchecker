@@ -17,11 +17,19 @@ class DetailPemeriksaan extends Model
         'status',
         'catatan',
         'ditinjau_at',
+        'lokasi',
     ];
 
     protected $casts = [
         'ditinjau_at' => 'datetime',
+        'lokasi'      => 'array',
     ];
+
+    /** Untuk insert massal (insert() tidak melewati cast). */
+    public static function encodeLokasi(?array $lokasi): ?string
+    {
+        return $lokasi ? json_encode(array_values($lokasi), JSON_UNESCAPED_UNICODE) : null;
+    }
 
     public function hasil()
     {

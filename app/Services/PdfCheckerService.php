@@ -43,6 +43,11 @@ class PdfCheckerService
     private const MAX_PAGES      = 3000;
     private const MAX_PAGE_CHARS = 200000;
 
+    /** Lokasi temuan kriteria yang sedang dievaluasi: [{hal, teks}] (lihat addLokasi). */
+    private const MAX_LOKASI = 5;
+    private array  $lokasi        = [];
+    private string $currentTarget = 'cover';
+
     /** Nomor halaman (1-based) yang teksnya hasil OCR / berupa gambar tanpa teks. */
     private array $ocrPages   = [];
     private array $imagePages = [];
@@ -235,6 +240,7 @@ class PdfCheckerService
         $rules = KriteriaPemeriksaan::aktif()->get();
 
         foreach ($rules as $rule) {
+            $this->lokasi = [];
             if ($this->method === 'secured_unreadable') {
                 $status  = 'PERLU DICEK';
                 $catatan = 'PDF terenkripsi, tidak dapat diperiksa otomatis';
@@ -243,7 +249,7 @@ class PdfCheckerService
             }
 
             $area = $this->areaLabel($rule);
-            $this->add($rule->kode, $rule->kategori, $rule->deskripsi, $status, $catatan, $rule->target, $area);
+            $this->add($rule->kode, $rule->kategori, $rule->deskripsi, $status, $catatan, $rule->target, $area, $this->lokasi);
 
             yield [
                 'type'      => 'check',
@@ -473,7 +479,7 @@ class PdfCheckerService
             [$status, $catatan] = $this->evalRule($rule);
             $catatan .= $this->imageNote($rule);
             $this->add($rule->kode, $rule->kategori, $rule->deskripsi, $status, $catatan,
-                $rule->target, $this->areaLabel($rule));
+                $rule->target, $this->areaLabel($rule), $this->lokasi);
         }
     }
 
@@ -504,6 +510,9 @@ class PdfCheckerService
 
     private function evalRule(KriteriaPemeriksaan $rule): array
     {
+        $this->lokasi        = [];
+        $this->currentTarget = $rule->target;
+
         $param = $rule->parameter ?? [];
         $text  = $this->targetText($rule->target);
         $gagal = $rule->status_gagal;
@@ -528,7 +537,7 @@ class PdfCheckerService
         if (!$pattern) return ['TIDAK DIPERIKSA', 'Parameter pattern kosong'];
         $regex = $this->buildRegex($p);
         try {
-            $found = preg_match($regex, $text, $m);
+            $found = preg_match($regex, $text, $m, PREG_OFFSET_CAPTURE);
         } catch (\Throwable) {
             $found = false;
         }
@@ -536,7 +545,9 @@ class PdfCheckerService
             return ['TIDAK DIPERIKSA', 'Regex tidak valid: ' . $regex];
         }
         if ($found) {
-            $detail = isset($m[0]) ? ' — ditemukan: ' . mb_substr(trim($m[0]), 0, 80) : '';
+            [$hit, $offset] = $m[0];
+            $this->addLokasi($offset, $hit);
+            $detail = trim($hit) !== '' ? ' — ditemukan: ' . mb_substr(trim($hit), 0, 80) : '';
             return ['OK', $ok . $detail];
         }
         return [$gagal, $err];
@@ -551,7 +562,7 @@ class PdfCheckerService
         if (empty($p['pattern'])) return ['TIDAK DIPERIKSA', 'Parameter pattern kosong'];
         $regex = $this->buildRegex($p);
         try {
-            $count = preg_match_all($regex, $text, $m);
+            $count = preg_match_all($regex, $text, $m, PREG_OFFSET_CAPTURE);
         } catch (\Throwable) {
             $count = false;
         }
@@ -560,7 +571,8 @@ class PdfCheckerService
         }
         if ($count === 0) return ['OK', $ok];
 
-        $sample = preg_replace('/\s+/u', ' ', trim($m[0][0])) ?? '';
+        foreach ($m[0] as [$hit, $offset]) $this->addLokasi($offset, $hit);
+        $sample = preg_replace('/\s+/u', ' ', trim($m[0][0][0])) ?? '';
         return [$gagal, sprintf('%s — %d temuan, contoh: "%s"', $err, $count, mb_substr($sample, 0, 80))];
     }
 
@@ -581,8 +593,11 @@ class PdfCheckerService
         $cs       = $p['case'] ?? false;
         $haystack = $cs ? $text   : mb_strtolower($text);
         $needle   = $cs ? $needle : mb_strtolower($needle);
-        $found    = str_contains($haystack, $needle);
+        $at       = strpos($haystack, $needle);
+        $found    = $at !== false;
         $pass     = $invert ? !$found : $found;
+        // mb_strtolower bisa mengubah panjang byte huruf non-ASCII — posisi dihitung ulang dari teks asli
+        if ($found) $this->addLokasi($cs ? $at : strlen(mb_substr($text, 0, mb_strlen(substr($haystack, 0, $at)))), $p['text']);
         return $pass ? ['OK', $ok] : [$gagal, $err];
     }
 
@@ -593,6 +608,7 @@ class PdfCheckerService
         if (!$word || !$area) return ['TIDAK DIPERIKSA', 'Parameter word/area kosong'];
         $w = $this->findWord($word);
         if (!$w) return ['TIDAK DIPERIKSA', "Kata '$word' tidak ditemukan di kover"];
+        $this->lokasi[] = ['hal' => 1, 'teks' => mb_substr($w['text'], 0, 80)];
         $pass = match($area) {
             'top'           => $this->isTopArea($w['y']),
             'top_right'     => $this->isTopRight($w['x'], $w['y']),
@@ -615,6 +631,8 @@ class PdfCheckerService
             $chars = mb_strlen(trim($this->page2Text));
             $max   = (int)$p['max_chars_page2'];
             if ($chars > $max) {
+                $this->currentTarget = 'page2';
+                $this->addLokasi(0, trim($this->page2Text));
                 return [$gagal, $err . " ({$chars} karakter, maks {$max})"];
             }
         }
@@ -625,15 +643,50 @@ class PdfCheckerService
     // INTERNAL — HELPERS
     // ═══════════════════════════════════════════════════════
 
+    /** Halaman yang dibaca sebuah target: [indeks awal (0-based), jumlah halaman]. */
+    private function targetRange(string $target): array
+    {
+        $n = count($this->pageTexts);
+        return match($target) {
+            'page2' => [1, 1],
+            'front' => [0, self::FRONT_PAGES],
+            'last'  => [max(0, $n - 1), 1],
+            'all'   => [0, $n],
+            default => [0, 1],
+        };
+    }
+
     private function targetText(string $target): string
     {
-        return match($target) {
-            'page2' => $this->page2Text,
-            'front' => implode("\n", array_slice($this->pageTexts, 0, self::FRONT_PAGES)),
-            'last'  => $this->pageTexts ? end($this->pageTexts) : '',
-            'all'   => implode("\n", $this->pageTexts),
-            default => $this->coverText,
-        };
+        [$start, $count] = $this->targetRange($target);
+        return implode("\n", array_slice($this->pageTexts, $start, $count));
+    }
+
+    /**
+     * Catat lokasi temuan (nomor halaman + potongan teks) supaya petugas bisa langsung
+     * melompat ke halaman tersebut dari panel tinjauan. $byteOffset = posisi di targetText().
+     */
+    private function addLokasi(int $byteOffset, string $match): void
+    {
+        if (count($this->lokasi) >= self::MAX_LOKASI) return;
+
+        // Potongan teks untuk dicari di viewer: baris pertama yang berisi (pencarian per baris lebih andal)
+        $line = '';
+        foreach (preg_split('/\R/u', $match) as $l) {
+            if (($l = trim(preg_replace('/\s+/u', ' ', $l))) !== '') { $line = $l; break; }
+        }
+        if (mb_strlen($line) < 2) return;
+
+        [$start, $count] = $this->targetRange($this->currentTarget);
+        $pos = 0;
+        $hal = $start + 1;
+        foreach (array_slice($this->pageTexts, $start, $count) as $i => $text) {
+            $len = strlen($text) + 1; // + "\n" pemisah halaman
+            if ($byteOffset < $pos + $len) { $hal = $start + $i + 1; break; }
+            $pos += $len;
+        }
+
+        $this->lokasi[] = ['hal' => $hal, 'teks' => mb_substr($line, 0, 80)];
     }
 
     private function findWord(string $needle): ?array
@@ -658,9 +711,9 @@ class PdfCheckerService
 
     private function add(
         string $id, string $kategori, string $deskripsi, string $status, string $catatan = '',
-        string $target = 'cover', ?string $area = null
+        string $target = 'cover', ?string $area = null, array $lokasi = []
     ): void {
-        $this->checks[] = compact('id', 'kategori', 'deskripsi', 'status', 'catatan', 'target', 'area');
+        $this->checks[] = compact('id', 'kategori', 'deskripsi', 'status', 'catatan', 'target', 'area', 'lokasi');
     }
 
     private function areaLabel(KriteriaPemeriksaan $rule): ?string

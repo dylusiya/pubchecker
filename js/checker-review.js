@@ -131,6 +131,8 @@ const CheckerReview = (() => {
         saveUrlTpl    = saveUrl;
 
         el('items')?.addEventListener('click', e => {
+            const loc = e.target.closest('button[data-hal]');
+            if (loc) { goToLokasi(parseInt(loc.dataset.hal, 10), loc.dataset.teks); return; }
             const btn = e.target.closest('button[data-status]');
             if (!btn) return;
             const card = btn.closest('[data-idx]');
@@ -325,6 +327,7 @@ const CheckerReview = (() => {
                     </span>
                 </div>
                 <div class="small fw-semibold mb-1">${esc(c.deskripsi)}</div>
+                ${lokasiButtons(c.lokasi)}
                 ${c.area ? `<div class="small text-muted mb-1"><i class="mdi mdi-crosshairs-gps me-1"></i>Fokus area: ${esc(c.area)}</div>` : ''}
                 <div class="btn-group btn-group-sm w-100 mb-1" role="group">
                     ${STATUS_BUTTONS.map(([val, label, color]) =>
@@ -343,6 +346,34 @@ const CheckerReview = (() => {
             : 'Simpan Kategori &amp; Lanjut <i class="mdi mdi-chevron-right"></i>';
 
         goToPage();
+    }
+
+    /** Tombol lokasi temuan cek otomatis: lompat ke halaman & sorot teksnya di viewer. */
+    function lokasiButtons(lokasi) {
+        if (!lokasi?.length) return '';
+        const short = s => s.length > 40 ? s.slice(0, 40) + '…' : s;
+        return `<div class="d-flex flex-wrap gap-1 mb-1">${lokasi.map(l => `
+            <button type="button" class="btn btn-outline-primary btn-sm py-0 px-1 text-start"
+                    style="font-size:11px;" data-hal="${l.hal}" data-teks="${esc(l.teks)}"
+                    title="Buka halaman ${l.hal} dan sorot: ${esc(l.teks)}">
+                <i class="mdi mdi-file-find-outline"></i> Hal. ${l.hal}: “${esc(short(l.teks))}”
+            </button>`).join('')}</div>`;
+    }
+
+    function goToLokasi(hal, teks) {
+        const app = el('frame')?.contentWindow?.PDFViewerApplication;
+        if (!app?.pdfDocument) return;
+        try {
+            app.page = Math.min(hal, app.pagesCount || hal);
+            if (!teks) return;
+            // Pencarian dimulai dari halaman aktif, jadi kemunculan di halaman ini yang disorot
+            app.findBar?.open();
+            if (app.findBar?.findField) app.findBar.findField.value = teks;
+            app.eventBus.dispatch('find', {
+                source: null, type: '', query: teks, caseSensitive: false, entireWord: false,
+                highlightAll: true, findPrevious: false, matchDiacritics: false,
+            });
+        } catch (e) { /* viewer belum siap — petugas bisa cari manual */ }
     }
 
     function setItemSelection(card, status) {

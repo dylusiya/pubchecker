@@ -309,6 +309,7 @@ class CheckerController extends Controller
                     ? (KriteriaPemeriksaan::areaOptions()[$k->parameter['area'] ?? ''] ?? null)
                     : null,
                 'reviewed'  => $d->ditinjau_at !== null,
+                'lokasi'    => $d->lokasi ?? [],
             ];
         })->values();
 
@@ -467,6 +468,7 @@ class CheckerController extends Controller
             'deskripsi'   => $c['deskripsi'] ?? 'Tidak ada deskripsi',
             'status'      => $this->normalizeStatus($c['status'] ?? null),
             'catatan'     => $c['catatan']   ?: null,
+            'lokasi'      => DetailPemeriksaan::encodeLokasi($c['lokasi'] ?? null),
         ], $result['checks']);
 
         DetailPemeriksaan::insert($detailRows);
