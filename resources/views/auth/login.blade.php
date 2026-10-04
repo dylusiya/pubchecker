@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <title>Login - Survey Kepuasan BPS Kalsel</title>
+    <title>Login - Publication Checker BPS Kalsel</title>
     
     <!-- plugins:css -->
     <link rel="stylesheet" href="{{ asset('assets/vendors/feather/feather.css') }}">
@@ -98,16 +98,6 @@
         .input-group:focus-within .form-control {
             border-color: #80bdff;
         }
-        .btn-survey {
-            background: white;
-            border: 2px solid #1cc88a;
-            color: #1cc88a;
-            font-weight: 500;
-        }
-        .btn-survey:hover {
-            background: #1cc88a;
-            color: white;
-        }
     </style>
 </head>
 <body>
@@ -117,10 +107,11 @@
                 <div class="row w-100 mx-0">
                     <div class="col-lg-4 mx-auto">
                         <div class="auth-form-light text-left py-5 px-4 px-sm-5">
+
                             <!-- Brand Logo -->
                             <div class="brand-logo text-center mb-4">
                                 <img src="{{ asset('assets/images/logo-bps.png') }}" alt="logo" onerror="this.style.display='none'">
-                                <h4>Survey Kepuasan Masyarakat</h4>
+                                <h4>Publication Checker</h4>
                                 <p>BPS Provinsi Kalimantan Selatan</p>
                             </div>
 
@@ -161,10 +152,10 @@
                                         <span class="input-group-text bg-white">
                                             <i class="mdi mdi-account text-muted"></i>
                                         </span>
-                                        <input type="text" 
-                                               name="username" 
-                                               class="form-control form-control-lg @error('username') is-invalid @enderror" 
-                                               id="username" 
+                                        <input type="text"
+                                               name="username"
+                                               class="form-control form-control-lg @error('username') is-invalid @enderror"
+                                               id="username"
                                                placeholder="Username"
                                                value="{{ old('username') }}"
                                                required>
@@ -173,17 +164,17 @@
                                         @enderror
                                     </div>
                                 </div>
-                                
+
                                 <div class="form-group">
                                     <label for="password" class="form-label">Password</label>
                                     <div class="input-group">
                                         <span class="input-group-text bg-white">
                                             <i class="mdi mdi-lock text-muted"></i>
                                         </span>
-                                        <input type="password" 
-                                               name="password" 
-                                               class="form-control form-control-lg @error('password') is-invalid @enderror" 
-                                               id="password" 
+                                        <input type="password"
+                                               name="password"
+                                               class="form-control form-control-lg @error('password') is-invalid @enderror"
+                                               id="password"
                                                placeholder="Password"
                                                required>
                                         <button class="btn btn-outline-secondary border-start-0" type="button" id="togglePassword">
@@ -194,7 +185,7 @@
                                         @enderror
                                     </div>
                                 </div>
-                                
+
                                 <div class="mt-3">
                                     <button type="submit" class="btn btn-block btn-lg auth-form-btn btn-local">
                                         <i class="mdi mdi-login me-2"></i>
@@ -203,28 +194,13 @@
                                 </div>
                             </form>
 
-                            <!-- Divider -->
-                            <div class="divider mt-4">
-                                <span></span>
-                            </div>
-
-                            <!-- Public Survey Access -->
-                            <div class="text-center">
-                                <a href="{{ route('survey.index') }}" class="btn btn-lg w-100 btn-survey">
-                                    <i class="mdi mdi-clipboard-text me-2"></i>
-                                    Isi Survey Kepuasan
-                                </a>
-                                <p class="text-muted mt-2 mb-0 small">
-                                    Tidak perlu login untuk mengisi survey
-                                </p>
-                            </div>
-
                             <!-- Footer -->
                             <div class="text-center mt-4">
                                 <small class="text-muted">
                                     &copy; {{ date('Y') }} BPS Provinsi Kalimantan Selatan
                                 </small>
                             </div>
+
                         </div>
                     </div>
                 </div>
@@ -239,13 +215,11 @@
     <script src="{{ asset('assets/js/settings.js') }}"></script>
     <script src="{{ asset('assets/js/hoverable-collapse.js') }}"></script>
     <script src="{{ asset('assets/js/todolist.js') }}"></script>
-    
+
     <script>
-        // Toggle password visibility
         document.getElementById('togglePassword').addEventListener('click', function() {
             const passwordInput = document.getElementById('password');
             const eyeIcon = document.getElementById('eyeIcon');
-            
             if (passwordInput.type === 'password') {
                 passwordInput.type = 'text';
                 eyeIcon.classList.remove('mdi-eye');
@@ -257,7 +231,6 @@
             }
         });
 
-        // Auto-dismiss alerts after 5 seconds
         setTimeout(function() {
             const alerts = document.querySelectorAll('.alert');
             alerts.forEach(function(alert) {

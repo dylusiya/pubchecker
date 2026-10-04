@@ -2,90 +2,100 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\SsoController;
-use App\Http\Controllers\SurveyController;
-use App\Http\Controllers\Admin\SurveyAdminController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\HomeController;
+use App\Http\Controllers\CheckerController;
+use App\Http\Controllers\KriteriaController;
+use App\Http\Controllers\BpsImportController;
 
 /*
 |--------------------------------------------------------------------------
-| Web Routes
+| Root
 |--------------------------------------------------------------------------
 */
-
-// Root - redirect ke login jika belum auth
 Route::get('/', [SsoController::class, 'index'])->name('home');
 
 /*
 |--------------------------------------------------------------------------
-| Public Survey Routes
+| SSO & Authentication — tanpa auth middleware
 |--------------------------------------------------------------------------
 */
-Route::prefix('survey')->name('survey.')->group(function () {
-    Route::get('/', [SurveyController::class, 'index'])->name('index');
-    Route::post('/autosave', [SurveyController::class, 'autosave'])->name('autosave');
-    Route::post('/submit', [SurveyController::class, 'store'])->name('store');
-    Route::post('/continue', [SurveyController::class, 'continueDraft'])->name('continue');
-    Route::get('/count', [SurveyController::class, 'getCount'])->name('count');
-});
-
-/*
-|--------------------------------------------------------------------------
-| SSO & Authentication Routes
-|--------------------------------------------------------------------------
-*/
-
 Route::get('/login', [SsoController::class, 'login'])->name('login');
 
-// SSO Keycloak Routes
 Route::prefix('sso')->name('sso.')->group(function () {
-    Route::get('/redirect', [SsoController::class, 'redirect'])->name('redirect');
-    Route::get('/callback', [SsoController::class, 'callback'])->name('callback');
-    Route::post('/callback', [SsoController::class, 'callback']); // Support POST juga
+    Route::get('/redirect',  [SsoController::class, 'redirect'])->name('redirect');
+    Route::get('/callback',  [SsoController::class, 'callback'])->name('callback');
+    Route::post('/callback', [SsoController::class, 'callback']);
 });
 
-// Local Login (Backup)
 Route::post('/login/local', [SsoController::class, 'loginLocal'])->name('login.local');
-
-// Logout
-Route::post('/logout', [SsoController::class, 'logout'])->name('logout');
-Route::get('/logout', [SsoController::class, 'logout'])->name('sso.logout'); // Support GET juga
+Route::post('/logout',      [SsoController::class, 'logout'])->name('logout');
+Route::get('/logout',       [SsoController::class, 'logout'])->name('sso.logout');
 
 /*
 |--------------------------------------------------------------------------
-| Dashboard & Profile
+| Protected Routes — harus login
 |--------------------------------------------------------------------------
 */
+Route::middleware('auth')->group(function () {
 
-Route::get('/dashboard', [HomeController::class, 'index'])->name('dashboard');
-Route::get('/profile', [ProfileController::class, 'index'])->name('profile.index');
+    // Dashboard & Profile
+    Route::get('/dashboard', [HomeController::class,    'index'])->name('dashboard');
+    Route::get('/profile',   [ProfileController::class, 'index'])->name('profile.index');
 
-/*
-|--------------------------------------------------------------------------
-| Admin Routes - Survey Management
-|--------------------------------------------------------------------------
-*/
+    // Publication Checker
+    Route::prefix('checker')->name('checker.')->group(function () {
+        Route::get('/',                      [CheckerController::class, 'index'])        ->name('index');
+        Route::post('/check',                [CheckerController::class, 'check'])        ->name('check');
+        Route::post('/export',               [CheckerController::class, 'export'])       ->name('export');
+        Route::get('/riwayat',               [CheckerController::class, 'riwayat'])      ->name('riwayat');
+        Route::get('/riwayat/{sesi}',        [CheckerController::class, 'riwayatDetail'])->name('riwayat.detail');
+        Route::get('/riwayat/{sesi}/export', [CheckerController::class, 'exportSesi'])   ->name('riwayat.export');
+        Route::delete('/riwayat/{sesi}',     [CheckerController::class, 'deleteSesi'])   ->name('riwayat.delete');
+        Route::patch('/hasil/{hasil}/review', [CheckerController::class, 'reviewDetail'])->name('hasil.review');
+    });
 
-Route::prefix('admin')->name('admin.')->group(function () {
     
-    // Survey Management
-    Route::prefix('survey')->name('survey.')->group(function () {
-        Route::get('/', [SurveyAdminController::class, 'index'])->name('index');
-        Route::get('/dashboard', [SurveyAdminController::class, 'dashboard'])->name('dashboard');
-        Route::get('/export/excel', [SurveyAdminController::class, 'export'])->name('export');
-        Route::get('/{id}', [SurveyAdminController::class, 'show'])->name('show');
-        Route::delete('/{id}', [SurveyAdminController::class, 'destroy'])->name('destroy');
+    Route::get('/checker/bps/pdf-proxy', [BpsImportController::class, 'pdfProxy'])
+        ->name('checker.bps.pdf_proxy');
+    Route::get('/checker/bps/stream', [CheckerController::class, 'stream'])
+        ->name('checker.bps.stream');
+
+    // BPS Import
+    Route::prefix('checker/bps-import')->name('checker.bps.')->group(function () {
+        Route::get('/',           [BpsImportController::class, 'index'])  ->name('index');
+        Route::post('/search',    [BpsImportController::class, 'search']) ->name('search');
+        Route::post('/run',       [BpsImportController::class, 'run'])    ->name('run');
+        
+        // Detail Publikasi
+        Route::get('/detail',     [BpsImportController::class, 'show'])   ->name('detail.show');
+        Route::post('/detail',    [BpsImportController::class, 'detail']) ->name('detail');
+    });
+
+
+    // Admin — Kriteria Pemeriksaan
+    Route::prefix('admin/kriteria')->name('admin.kriteria.')->group(function () {
+        Route::get('/',                    [KriteriaController::class, 'index'])   ->name('index');
+        Route::get('/create',              [KriteriaController::class, 'create'])  ->name('create');
+        Route::post('/',                   [KriteriaController::class, 'store'])   ->name('store');
+        Route::get('/{kriteria}/edit',     [KriteriaController::class, 'edit'])    ->name('edit');
+        Route::put('/{kriteria}',          [KriteriaController::class, 'update'])  ->name('update');
+        Route::delete('/{kriteria}',       [KriteriaController::class, 'destroy']) ->name('destroy');
+        Route::patch('/{kriteria}/toggle', [KriteriaController::class, 'toggle'])  ->name('toggle');
+        Route::post('/reorder',            [KriteriaController::class, 'reorder']) ->name('reorder');
+        Route::post('/import',             [KriteriaController::class, 'import']) ->name('import');
+        Route::get('/import/template',     [KriteriaController::class, 'importTemplate'])->name('import.template');
+    });
+
+    // Admin — User Management
+    Route::prefix('admin/users')->name('admin.users.')->group(function () {
+        Route::get('/',                [App\Http\Controllers\Admin\UserManagementController::class, 'index'])  ->name('index');
+        Route::get('/create',          [App\Http\Controllers\Admin\UserManagementController::class, 'create']) ->name('create');
+        Route::post('/store',          [App\Http\Controllers\Admin\UserManagementController::class, 'store'])  ->name('store');
+        Route::get('/edit/{id}',       [App\Http\Controllers\Admin\UserManagementController::class, 'edit'])   ->name('edit');
+        Route::put('/update/{id}',     [App\Http\Controllers\Admin\UserManagementController::class, 'update']) ->name('update');
+        Route::delete('/destroy/{id}', [App\Http\Controllers\Admin\UserManagementController::class, 'destroy'])->name('destroy');
     });
     
-});
 
-
-// User Management (untuk Admin saja)
-Route::prefix('admin/users')->name('admin.users.')->group(function () {
-    Route::get('/', [App\Http\Controllers\Admin\UserManagementController::class, 'index'])->name('index');
-    Route::get('/create', [App\Http\Controllers\Admin\UserManagementController::class, 'create'])->name('create');
-    Route::post('/store', [App\Http\Controllers\Admin\UserManagementController::class, 'store'])->name('store');
-    Route::get('/edit/{id}', [App\Http\Controllers\Admin\UserManagementController::class, 'edit'])->name('edit');
-    Route::put('/update/{id}', [App\Http\Controllers\Admin\UserManagementController::class, 'update'])->name('update');
-    Route::delete('/destroy/{id}', [App\Http\Controllers\Admin\UserManagementController::class, 'destroy'])->name('destroy');
 });

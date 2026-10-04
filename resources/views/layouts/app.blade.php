@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>@yield('title', 'Survey Kepuasan') - BPS Kalsel</title>
+    <title>@yield('title', 'Pub Checker') - BPS Kalsel</title>
     
     <!-- plugins:css -->
     <link rel="stylesheet" href="{{ asset('assets/vendors/feather/feather.css') }}">
@@ -33,7 +33,7 @@
     
     @stack('styles')
 </head>
-<body class="with-welcome-text">
+<body class="with-welcome-text sidebar-fixed">
     <div class="container-scroller">
         <!-- Navbar -->
         @include('layouts.partials.navbar')

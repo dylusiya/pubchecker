@@ -1,55 +1,43 @@
 <nav class="sidebar sidebar-offcanvas" id="sidebar">
     <ul class="nav">
-        <!-- Dashboard -->
+
+        {{-- Dashboard --}}
         <li class="nav-item {{ request()->routeIs('dashboard') ? 'active' : '' }}">
             <a class="nav-link" href="{{ route('dashboard') }}">
                 <i class="mdi mdi-grid-large menu-icon"></i>
                 <span class="menu-title">Dashboard</span>
             </a>
         </li>
-        
-        <!-- Survey Management -->
-        <li class="nav-item nav-category">Survey Management</li>
-        
-        <li class="nav-item {{ request()->routeIs('admin.survey.dashboard') ? 'active' : '' }}">
-            <a class="nav-link" href="{{ route('admin.survey.dashboard') }}">
-                <i class="menu-icon mdi mdi-chart-bar"></i>
-                <span class="menu-title">Dashboard Analytics</span>
+
+        {{-- Publication Checker --}}
+        <li class="nav-item nav-category">Publication Checker</li>
+
+        <li class="nav-item {{ request()->routeIs('checker.index') ? 'active' : '' }}">
+            <a class="nav-link" href="{{ route('checker.index') }}">
+                <i class="menu-icon mdi mdi-file-search-outline"></i>
+                <span class="menu-title">Pemeriksaan</span>
             </a>
         </li>
-        
-        <li class="nav-item {{ request()->routeIs('admin.survey.index') ? 'active' : '' }}">
-            <a class="nav-link" href="{{ route('admin.survey.index') }}">
-                <i class="menu-icon mdi mdi-table-large"></i>
-                <span class="menu-title">Data Survey</span>
-                @php
-                    $todayCount = \App\Models\SurveyResponse::whereDate('tanggal_submit', today())->count();
-                @endphp
-                @if($todayCount > 0)
-                    <span class="badge badge-success ms-2">{{ $todayCount }}</span>
+
+        <li class="nav-item {{ request()->routeIs('checker.riwayat*') ? 'active' : '' }}">
+            <a class="nav-link" href="{{ route('checker.riwayat') }}">
+                <i class="menu-icon mdi mdi-history"></i>
+                <span class="menu-title">Riwayat Sesi</span>
+                @php $totalSesi = \App\Models\SesiPemeriksaan::count(); @endphp
+                @if($totalSesi > 0)
+                    <span class="badge badge-success ms-2">{{ $totalSesi }}</span>
                 @endif
             </a>
         </li>
 
-        <li class="nav-item">
-            <a class="nav-link" href="{{ route('admin.survey.export') }}">
-                <i class="menu-icon mdi mdi-file-excel"></i>
-                <span class="menu-title">Export Data</span>
-            </a>
-        </li>
-        
-        <!-- Public Survey -->
-        <li class="nav-item nav-category">Public Access</li>
-        
-        <li class="nav-item">
-            <a class="nav-link" href="{{ route('survey.index') }}" target="_blank">
-                <i class="menu-icon mdi mdi-open-in-new"></i>
-                <span class="menu-title">Form Survey Public</span>
-                <i class="mdi mdi-external-link text-muted ms-auto"></i>
+        <li class="nav-item {{ request()->routeIs('checker.bps.*') ? 'active' : '' }}">
+            <a class="nav-link" href="{{ route('checker.bps.index') }}">
+                <i class="menu-icon mdi mdi-cloud-download-outline"></i>
+                <span class="menu-title">Import dari API BPS</span>
             </a>
         </li>
 
-        <!-- User Management - HANYA TAMPIL UNTUK ADMIN -->
+        {{-- Administrator — hanya tampil untuk admin --}}
         @if(auth()->check() && auth()->user()->role === 'admin')
         <li class="nav-item nav-category">Administrator</li>
 
@@ -59,26 +47,39 @@
                 <span class="menu-title">Manajemen User</span>
             </a>
         </li>
+
+        <li class="nav-item {{ request()->routeIs('admin.kriteria.*') ? 'active' : '' }}">
+            <a class="nav-link" href="{{ route('admin.kriteria.index') }}">
+                <i class="menu-icon mdi mdi-format-list-checks"></i>
+                <span class="menu-title">Kelola Kriteria</span>
+                @php $totalKriteria = \App\Models\KriteriaPemeriksaan::where('aktif', true)->count(); @endphp
+                @if($totalKriteria > 0)
+                    <span class="badge badge-primary ms-2">{{ $totalKriteria }}</span>
+                @endif
+            </a>
+        </li>
         @endif
-        
-        <!-- Account -->
+
+        {{-- Akun --}}
         <li class="nav-item nav-category">Akun</li>
-        
+
         <li class="nav-item {{ request()->routeIs('profile.*') ? 'active' : '' }}">
             <a class="nav-link" href="{{ route('profile.index') }}">
                 <i class="menu-icon mdi mdi-account"></i>
                 <span class="menu-title">Profil Saya</span>
             </a>
         </li>
-        
+
         <li class="nav-item">
             <form method="POST" action="{{ route('logout') }}" id="logout-form-sidebar">
                 @csrf
-                <a class="nav-link" href="#" onclick="event.preventDefault(); document.getElementById('logout-form-sidebar').submit();">
+                <a class="nav-link" href="#"
+                   onclick="event.preventDefault(); document.getElementById('logout-form-sidebar').submit();">
                     <i class="menu-icon mdi mdi-logout text-danger"></i>
                     <span class="menu-title text-danger">Logout</span>
                 </a>
             </form>
         </li>
+
     </ul>
 </nav>

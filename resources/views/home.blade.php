@@ -29,34 +29,27 @@
         right: 20px;
         bottom: 20px;
     }
-    .bg-primary-card {
-        background: #667eea;
-    }
-    .bg-success-card {
-        background: #28a745;
-    }
-    .bg-info-card {
-        background: #17a2b8;
-    }
-    .bg-warning-card {
-        background: #ffc107;
-    }
-    .table td { 
-        vertical-align: middle !important; 
+    .bg-primary-card { background: #667eea; }
+    .bg-success-card { background: #28a745; }
+    .bg-info-card    { background: #17a2b8; }
+    .bg-warning-card { background: #ffc107; }
+    .bg-danger-card  { background: #dc3545; }
+    .table td {
+        vertical-align: middle !important;
         font-size: 0.875rem !important;
     }
     .table th {
         font-size: 0.875rem !important;
         font-weight: 600 !important;
     }
-    .badge { 
-        font-weight: 600; 
+    .badge {
+        font-weight: 600;
         font-size: 0.75rem;
         padding: 0.35em 0.65em;
     }
-    .btn-xs { 
-        padding: 0.25rem 0.5rem; 
-        font-size: 0.75rem; 
+    .btn-xs {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.75rem;
     }
     .list-group-item {
         border: 1px solid rgba(0,0,0,.125);
@@ -72,374 +65,151 @@
 @section('content')
 <div class="row">
     <div class="col-sm-12">
-        <!-- Header -->
+
+        {{-- Header --}}
         <div class="card card-rounded mb-3">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <h4 class="card-title mb-1">Dashboard e-SKD</h4>
-                        <p class="text-muted mb-0 small">Sistem Survey Kepuasan Masyarakat BPS Kalsel</p>
+                        <h4 class="card-title mb-1">Dashboard Publication Checker</h4>
+                        <p class="text-muted mb-0 small">Sistem Pemeriksaan Kover Publikasi BPS Kalsel</p>
                     </div>
                     <div>
-                        <a href="{{ route('admin.survey.dashboard') }}" class="btn btn-primary btn-sm">
-                            <i class="mdi mdi-chart-bar"></i> Dashboard Analytics
+                        <a href="{{ route('checker.index') }}" class="btn btn-primary btn-sm">
+                            <i class="mdi mdi-file-search-outline"></i> Mulai Pemeriksaan
                         </a>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Filter Tahun/Periode -->
-        <div class="card card-rounded mb-3">
-            <div class="card-body py-3">
-                <form method="GET" action="{{ route('dashboard') }}" class="row g-2 align-items-center">
-                    <div class="col-auto">
-                        <label class="form-label mb-0 fw-bold">Filter :</label>
-                    </div>
-
-                    <!-- Filter Tahun (Utama) -->
-                    <div class="col-auto">
-                        <label class="form-label mb-0 small">Tahun</label>
-                        <select name="tahun" id="tahun" class="form-select form-select-sm text-dark">
-                            <option value="">Semua Tahun</option>
-                            @for($y = now()->year; $y >= 2020; $y--)
-                                <option value="{{ $y }}" {{ request('tahun') == $y ? 'selected' : '' }}>
-                                    {{ $y }}
-                                </option>
-                            @endfor
-                        </select>
-                    </div>
-
-                    <!-- Filter Periode -->
-                    <div class="col-auto">
-                        <label class="form-label mb-0 small">Periode</label>
-                        <select name="periode" id="periode" class="form-select form-select-sm text-dark" onchange="toggleCustomPeriod()">
-                            <option value="semua" {{ request('periode', 'semua') == 'semua' ? 'selected' : '' }}>Semua Periode</option>
-                            <option value="triwulan" {{ request('periode') == 'triwulan' ? 'selected' : '' }}>Per Triwulan</option>
-                            <option value="bulan" {{ request('periode') == 'bulan' ? 'selected' : '' }}>Per Bulan</option>
-                        </select>
-                    </div>
-
-                    <!-- Filter Triwulan (muncul jika pilih triwulan) -->
-                    <div class="col-auto" id="filter-triwulan" style="display: {{ request('periode') == 'triwulan' ? 'block' : 'none' }};">
-                        <label class="form-label mb-0 small">Triwulan</label>
-                        <select name="triwulan" class="form-select form-select-sm text-dark">
-                            <option value="">Semua Triwulan</option>
-                            <option value="1" {{ request('triwulan') == 1 ? 'selected' : '' }}>Triwulan I (Jan-Mar)</option>
-                            <option value="2" {{ request('triwulan') == 2 ? 'selected' : '' }}>Triwulan II (Apr-Jun)</option>
-                            <option value="3" {{ request('triwulan') == 3 ? 'selected' : '' }}>Triwulan III (Jul-Sep)</option>
-                            <option value="4" {{ request('triwulan') == 4 ? 'selected' : '' }}>Triwulan IV (Okt-Des)</option>
-                        </select>
-                    </div>
-
-                    <!-- Filter Bulan (muncul jika pilih bulan) -->
-                    <div class="col-auto" id="filter-bulan" style="display: {{ request('periode') == 'bulan' ? 'block' : 'none' }};">
-                        <label class="form-label mb-0 small">Bulan</label>
-                        <select name="bulan" class="form-select form-select-sm text-dark">
-                            <option value="">Semua Bulan</option>
-                            @for($m = 1; $m <= 12; $m++)
-                                <option value="{{ $m }}" {{ request('bulan') == $m ? 'selected' : '' }}>
-                                    {{ \Carbon\Carbon::create()->month($m)->translatedFormat('F') }}
-                                </option>
-                            @endfor
-                        </select>
-                    </div>
-
-                    <div class="col-auto">
-                        <label class="form-label mb-0 small text-white">.</label>
-                        <button type="submit" class="btn btn-sm btn-primary d-block">
-                            <i class="mdi mdi-filter"></i> Terapkan
-                        </button>
-                    </div>
-                    <div class="col-auto">
-                        @if(request()->hasAny(['tahun', 'periode', 'bulan', 'triwulan']))
-                            <label class="form-label mb-0 small text-white">.</label>
-                            <a href="{{ route('dashboard') }}" class="btn btn-sm btn-light border d-block">
-                                <i class="mdi mdi-refresh"></i> Reset
-                            </a>
-                        @endif
-                    </div>
-                </form>
-            </div>
-        </div>
-
         @php
-            use App\Models\SurveyResponse;
-            use Illuminate\Support\Facades\DB;
-            
-            $tahun = request('tahun');
-            $periode = request('periode', 'semua');
-            $bulan = request('bulan');
-            $triwulan = request('triwulan');
+            use App\Models\SesiPemeriksaan;
+            use App\Models\HasilPemeriksaan;
 
-            // Base query
-            $query = SurveyResponse::query();
-
-            // Filter berdasarkan tahun dulu
-            if ($tahun) {
-                $query->whereYear('tanggal_submit', $tahun);
-            }
-
-            // Kemudian filter berdasarkan periode
-            if ($periode == 'bulan' && $bulan) {
-                $query->whereMonth('tanggal_submit', $bulan);
-            } elseif ($periode == 'triwulan' && $triwulan) {
-                $startMonth = ($triwulan - 1) * 3 + 1;
-                $endMonth = $triwulan * 3;
-                $query->whereMonth('tanggal_submit', '>=', $startMonth)
-                    ->whereMonth('tanggal_submit', '<=', $endMonth);
-            }
-            
-            $totalResponden = (clone $query)->count();
-            
-            $avgKepuasan = (clone $query)->selectRaw('AVG((
-                informasi_pelayanan_kepuasan + 
-                persyaratan_kepuasan + 
-                prosedur_kepuasan + 
-                jangka_waktu_kepuasan + 
-                biaya_kepuasan + 
-                produk_kepuasan + 
-                sarana_kepuasan + 
-                akses_data_kepuasan + 
-                respons_petugas_kepuasan + 
-                informasi_petugas_kepuasan + 
-                fasilitas_pengaduan_kepuasan + 
-                diskriminasi_kepuasan + 
-                kecurangan_kepuasan + 
-                gratifikasi_kepuasan + 
-                pungli_kepuasan + 
-                percaloan_kepuasan
-            ) / 16) as avg_kepuasan')->value('avg_kepuasan');
-            
-            $totalLakiLaki = (clone $query)->where('jenis_kelamin', 'Laki-laki')->count();
-            $totalPerempuan = (clone $query)->where('jenis_kelamin', 'Perempuan')->count();
+            $totalSesi    = SesiPemeriksaan::count();
+            $totalFile    = HasilPemeriksaan::count();
+            $totalOk      = HasilPemeriksaan::where('status_akhir', 'ok')->count();
+            $totalMasalah = HasilPemeriksaan::where('status_akhir', 'masalah')->count();
+            $totalWarn    = HasilPemeriksaan::where('status_akhir', 'perlu_dicek')->count();
         @endphp
 
-        <!-- Statistics Cards -->
+        {{-- Stat cards --}}
         <div class="row">
             <div class="col-xl-3 col-md-6 mb-3">
                 <div class="stat-card bg-primary-card">
-                    <p>Total Responden</p>
-                    <h3>{{ number_format($totalResponden, 0, ',', '.') }}</h3>
-                    <i class="mdi mdi-account-multiple icon"></i>
+                    <p>Total Sesi Pemeriksaan</p>
+                    <h3>{{ number_format($totalSesi, 0, ',', '.') }}</h3>
+                    <i class="mdi mdi-folder-multiple-outline icon"></i>
                 </div>
             </div>
             <div class="col-xl-3 col-md-6 mb-3">
                 <div class="stat-card bg-success-card">
-                    <p>Rata-rata Kepuasan</p>
-                    <h3>{{ number_format($avgKepuasan ?? 0, 2, ',', '.') }}<small style="font-size: 1.2rem;">/10</small></h3>
-                    <i class="mdi mdi-emoticon-happy-outline icon"></i>
+                    <p>Total File Diperiksa</p>
+                    <h3>{{ number_format($totalFile, 0, ',', '.') }}</h3>
+                    <i class="mdi mdi-file-multiple icon"></i>
                 </div>
             </div>
             <div class="col-xl-3 col-md-6 mb-3">
                 <div class="stat-card bg-info-card">
-                    <p>Responden Laki-laki</p>
-                    <h3>{{ number_format($totalLakiLaki, 0, ',', '.') }}</h3>
-                    <i class="mdi mdi-human-male icon"></i>
+                    <p>Semua Kriteria OK</p>
+                    <h3>{{ number_format($totalOk, 0, ',', '.') }}</h3>
+                    <i class="mdi mdi-check-circle-outline icon"></i>
                 </div>
             </div>
             <div class="col-xl-3 col-md-6 mb-3">
-                <div class="stat-card bg-warning-card">
-                    <p>Responden Perempuan</p>
-                    <h3>{{ number_format($totalPerempuan, 0, ',', '.') }}</h3>
-                    <i class="mdi mdi-human-female icon"></i>
+                <div class="stat-card bg-danger-card">
+                    <p>Ada Masalah</p>
+                    <h3>{{ number_format($totalMasalah, 0, ',', '.') }}</h3>
+                    <i class="mdi mdi-close-circle-outline icon"></i>
                 </div>
             </div>
         </div>
 
-        <!-- Statistik Per Kategori Instansi -->
+        {{-- Riwayat sesi --}}
         <div class="card card-rounded mb-4">
             <div class="card-body">
                 <div class="d-sm-flex justify-content-between align-items-start mb-4">
                     <div>
-                        <h4 class="card-title card-title-dash">Statistik Per Kategori Instansi</h4>
-                        <p class="card-subtitle card-subtitle-dash">Jumlah responden dan rata-rata kepuasan berdasarkan kategori instansi</p>
+                        <h4 class="card-title card-title-dash">Riwayat Sesi Terbaru</h4>
+                        <p class="card-subtitle card-subtitle-dash">10 sesi pemeriksaan terakhir</p>
+                    </div>
+                    <div>
+                        <a href="{{ route('checker.riwayat') }}" class="btn btn-primary text-white btn-sm">
+                            <i class="mdi mdi-history"></i> Lihat Semua Riwayat
+                        </a>
                     </div>
                 </div>
 
                 @php
-                    // Get stats per kategori instansi
-                    $instansiStats = SurveyResponse::selectRaw('
-                            kategori_instansi,
-                            COUNT(*) as total_responden,
-                            AVG((
-                                informasi_pelayanan_kepuasan + 
-                                persyaratan_kepuasan + 
-                                prosedur_kepuasan + 
-                                jangka_waktu_kepuasan + 
-                                biaya_kepuasan + 
-                                produk_kepuasan + 
-                                sarana_kepuasan + 
-                                akses_data_kepuasan + 
-                                respons_petugas_kepuasan + 
-                                informasi_petugas_kepuasan + 
-                                fasilitas_pengaduan_kepuasan + 
-                                diskriminasi_kepuasan + 
-                                kecurangan_kepuasan + 
-                                gratifikasi_kepuasan + 
-                                pungli_kepuasan + 
-                                percaloan_kepuasan
-                            ) / 16) as avg_kepuasan
-                        ')
-                        ->when($tahun, function($q) use ($tahun) {
-                            $q->whereYear('tanggal_submit', $tahun);
-                        })
-                        ->when($periode == 'bulan' && $bulan, function($q) use ($bulan) {
-                            $q->whereMonth('tanggal_submit', $bulan);
-                        })
-                        ->when($periode == 'triwulan' && $triwulan, function($q) use ($triwulan) {
-                            $startMonth = ($triwulan - 1) * 3 + 1;
-                            $endMonth = $triwulan * 3;
-                            $q->whereMonth('tanggal_submit', '>=', $startMonth)
-                            ->whereMonth('tanggal_submit', '<=', $endMonth);
-                        })
-                        ->groupBy('kategori_instansi')
-                        ->orderBy('total_responden', 'desc')
-                        ->get();
+                    $recentSesi = SesiPemeriksaan::latest()->take(10)->get();
                 @endphp
 
                 <div class="table-responsive">
                     <table class="table table-hover table-sm">
                         <thead class="bg-light">
                             <tr>
-                                <th class="py-3">#</th>
-                                <th class="py-3">Kategori Instansi</th>
-                                <th class="py-3 text-center">
-                                    <i class="mdi mdi-account-multiple text-primary"></i> Jumlah Responden
-                                </th>
-                                <th class="py-3 text-center">
-                                    <i class="mdi mdi-emoticon-happy text-success"></i> Rata-rata Kepuasan
-                                </th>
+                                <th class="py-3">Tanggal</th>
+                                <th class="py-3">UUID Sesi</th>
+                                <th class="py-3 text-center">Total File</th>
+                                <th class="py-3 text-center">OK</th>
+                                <th class="py-3 text-center">Perlu Dicek</th>
+                                <th class="py-3 text-center">Masalah</th>
                                 <th class="py-3 text-center">Aksi</th>
                             </tr>
                         </thead>
                         <tbody>
-                            @forelse($instansiStats as $index => $stat)
+                            @forelse($recentSesi as $sesi)
                             <tr>
-                                <td class="py-3">{{ $index + 1 }}</td>
                                 <td class="py-3">
-                                    <div class="fw-bold">{{ $stat->kategori_instansi }}</div>
+                                    <div class="fw-bold">{{ $sesi->created_at->format('d/m/Y') }}</div>
+                                    <small class="text-muted">
+                                        <i class="mdi mdi-clock-outline"></i>
+                                        {{ $sesi->created_at->diffForHumans() }}
+                                    </small>
+                                </td>
+                                <td class="py-3">
+                                    <code class="text-primary" style="font-size: 11px;">{{ $sesi->uuid }}</code>
                                 </td>
                                 <td class="py-3 text-center">
-                                    <span class="badge badge-primary px-3">{{ number_format($stat->total_responden, 0, ',', '.') }} Responden</span>
+                                    <span class="badge badge-primary px-3">{{ $sesi->total_file }} file</span>
                                 </td>
                                 <td class="py-3 text-center">
-                                    <strong class="text-success">{{ number_format($stat->avg_kepuasan, 2, ',', '.') }}/10</strong>
+                                    @if($sesi->total_ok > 0)
+                                        <span class="badge badge-success">{{ $sesi->total_ok }}</span>
+                                    @else
+                                        <span class="text-muted">—</span>
+                                    @endif
                                 </td>
                                 <td class="py-3 text-center">
-                                    <a href="{{ route('admin.survey.index', ['kategori_instansi' => $stat->kategori_instansi]) }}" 
+                                    @if($sesi->total_warn > 0)
+                                        <span class="badge badge-warning text-dark">{{ $sesi->total_warn }}</span>
+                                    @else
+                                        <span class="text-muted">—</span>
+                                    @endif
+                                </td>
+                                <td class="py-3 text-center">
+                                    @if($sesi->total_err > 0)
+                                        <span class="badge badge-danger">{{ $sesi->total_err }}</span>
+                                    @else
+                                        <span class="text-muted">—</span>
+                                    @endif
+                                </td>
+                                <td class="py-3 text-center">
+                                    <a href="{{ route('checker.riwayat.detail', $sesi) }}"
                                        class="btn btn-outline-primary btn-xs">
-                                        <i class="mdi mdi-eye"></i> Lihat
-                                    </a>
-                                </td>
-                            </tr>
-                            @empty
-                            <tr>
-                                <td colspan="5" class="py-5 text-center">
-                                    <i class="mdi mdi-chart-bar text-light" style="font-size: 48px;"></i>
-                                    <p class="text-muted mt-2">Belum ada data survey</p>
-                                </td>
-                            </tr>
-                            @endforelse
-                        </tbody>
-                        @if($instansiStats->count() > 0)
-                        <tfoot class="bg-light">
-                            <tr>
-                                <th colspan="2" class="py-3">TOTAL</th>
-                                <th class="py-3 text-center">
-                                    <span class="badge badge-primary px-3">{{ number_format($instansiStats->sum('total_responden'), 0, ',', '.') }} Responden</span>
-                                </th>
-                                <th class="py-3 text-center">
-                                    <strong class="text-success">{{ number_format($instansiStats->avg('avg_kepuasan'), 2, ',', '.') }}/10</strong>
-                                </th>
-                                <th></th>
-                            </tr>
-                        </tfoot>
-                        @endif
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <!-- Survey Terbaru -->
-        <div class="card card-rounded mb-4">
-            <div class="card-body">
-                <div class="d-sm-flex justify-content-between align-items-start mb-4">
-                    <div>
-                        <h4 class="card-title card-title-dash">Survey Terbaru</h4>
-                        <p class="card-subtitle card-subtitle-dash">10 survey terakhir yang masuk</p>
-                    </div>
-                    <div>
-                        <a href="{{ route('admin.survey.index') }}" class="btn btn-primary text-white btn-sm">
-                            <i class="mdi mdi-database"></i> Lihat Semua Data
-                        </a>
-                    </div>
-                </div>
-                
-                <div class="table-responsive">
-                    <table class="table table-hover table-sm">
-                        <thead class="bg-light">
-                            <tr>
-                                <th class="py-3">Waktu Submit</th>
-                                <th class="py-3">Nama Responden</th>
-                                <th class="py-3">Instansi</th>
-                                <th class="py-3 text-center">Kepuasan</th>
-                                <th class="py-3 text-center">Aksi</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @php
-                                // Recent surveys
-                                $recentSurveys = \App\Models\SurveyResponse::latest('updated_at')
-                                    ->take(10)
-                                    ->get();
-                            @endphp
-                            
-                            @forelse($recentSurveys as $survey)
-                            <tr>
-                                <td class="py-3">
-                                    @if($survey->tanggal_submit)
-                                        <div class="fw-bold">{{ $survey->tanggal_submit->format('d/m/Y H:i') }}</div>
-                                        <small class="text-muted">
-                                            <i class="mdi mdi-clock-outline"></i> 
-                                            {{ $survey->tanggal_submit->diffForHumans() }}
-                                        </small>
-                                    @else
-                                        <div class="badge badge-opacity-warning">Belum Submit</div>
-                                        <div class="small text-muted mt-1">
-                                            Updated: {{ $survey->updated_at->format('d/m/Y') }}
-                                        </div>
-                                    @endif
-                                </td>
-                                <td class="py-3">
-                                    <div>{{ $survey->nama }}</div>
-                                    <small class="text-muted">{{ $survey->email }}</small>
-                                </td>
-                                <td class="py-3">
-                                    <div class="small fw-bold">{{ $survey->nama_instansi }}</div>
-                                    <div class="small text-muted">{{ $survey->kategori_instansi }}</div>
-                                </td>
-                                <td class="py-3 text-center">
-                                    @if($survey->average_kepuasan)
-                                        <span class="badge badge-success">
-                                            {{ number_format($survey->average_kepuasan, 2) }}/10
-                                        </span>
-                                    @else
-                                        <span class="text-muted">-</span>
-                                    @endif
-                                </td>
-                                <td class="py-3 text-center">
-                                    <a href="{{ route('admin.survey.show', $survey->id) }}" 
-                                       class="btn btn-outline-info btn-xs">
                                         <i class="mdi mdi-eye"></i> Detail
                                     </a>
                                 </td>
                             </tr>
                             @empty
                             <tr>
-                                <td colspan="5" class="py-5 text-center">
-                                    <i class="mdi mdi-clipboard-text-outline text-light" style="font-size: 48px;"></i>
-                                    <p class="text-muted mt-2">Belum ada data survey</p>
+                                <td colspan="7" class="py-5 text-center">
+                                    <i class="mdi mdi-history text-light" style="font-size: 48px;"></i>
+                                    <p class="text-muted mt-2">Belum ada sesi pemeriksaan</p>
+                                    <a href="{{ route('checker.index') }}" class="btn btn-primary btn-sm">
+                                        Mulai Pemeriksaan Pertama
+                                    </a>
                                 </td>
                             </tr>
                             @endforelse
@@ -449,41 +219,49 @@
             </div>
         </div>
 
-        <!-- Quick Actions -->
+        {{-- Quick Actions + Info Sistem --}}
         <div class="row">
             <div class="col-md-6 grid-margin stretch-card">
                 <div class="card card-rounded">
                     <div class="card-body">
                         <h4 class="card-title card-title-dash">Quick Actions</h4>
                         <div class="list-group">
-                            <a href="{{ route('admin.survey.dashboard') }}" class="list-group-item list-group-item-action d-flex align-items-center py-3">
-                                <i class="mdi mdi-chart-bar text-primary me-3" style="font-size: 24px;"></i>
+                            <a href="{{ route('checker.index') }}"
+                               class="list-group-item list-group-item-action d-flex align-items-center py-3">
+                                <i class="mdi mdi-file-search-outline text-primary me-3" style="font-size: 24px;"></i>
                                 <div>
-                                    <div class="fw-bold">Dashboard Analytics</div>
-                                    <small class="text-muted">Lihat visualisasi data survey</small>
+                                    <div class="fw-bold">Pemeriksaan Baru</div>
+                                    <small class="text-muted">Upload dan periksa PDF publikasi BPS</small>
                                 </div>
                             </a>
-                            <a href="{{ route('admin.survey.index') }}" class="list-group-item list-group-item-action d-flex align-items-center py-3">
-                                <i class="mdi mdi-table text-success me-3" style="font-size: 24px;"></i>
+                            <a href="{{ route('checker.riwayat') }}"
+                               class="list-group-item list-group-item-action d-flex align-items-center py-3">
+                                <i class="mdi mdi-history text-success me-3" style="font-size: 24px;"></i>
                                 <div>
-                                    <div class="fw-bold">Data Survey</div>
-                                    <small class="text-muted">Kelola dan filter data survey</small>
+                                    <div class="fw-bold">Riwayat Sesi</div>
+                                    <small class="text-muted">Lihat semua sesi dan hasil pemeriksaan</small>
                                 </div>
                             </a>
-                            <a href="{{ route('survey.index') }}" target="_blank" class="list-group-item list-group-item-action d-flex align-items-center py-3">
-                                <i class="mdi mdi-open-in-new text-info me-3" style="font-size: 24px;"></i>
+                            @if($recentSesi->first())
+                            <a href="{{ route('checker.riwayat.export', $recentSesi->first()) }}"
+                               class="list-group-item list-group-item-action d-flex align-items-center py-3">
+                                <i class="mdi mdi-microsoft-excel text-warning me-3" style="font-size: 24px;"></i>
                                 <div>
-                                    <div class="fw-bold">Form Survey Public</div>
-                                    <small class="text-muted">Buka formulir survey untuk masyarakat</small>
+                                    <div class="fw-bold">Export Sesi Terakhir</div>
+                                    <small class="text-muted">Download rekap Excel sesi terbaru</small>
                                 </div>
                             </a>
-                            <a href="{{ route('admin.survey.export') }}" class="list-group-item list-group-item-action d-flex align-items-center py-3">
-                                <i class="mdi mdi-file-excel text-warning me-3" style="font-size: 24px;"></i>
+                            @endif
+                            @if(auth()->check() && auth()->user()->role === 'admin')
+                            <a href="{{ route('admin.users.index') }}"
+                               class="list-group-item list-group-item-action d-flex align-items-center py-3">
+                                <i class="mdi mdi-account-multiple text-info me-3" style="font-size: 24px;"></i>
                                 <div>
-                                    <div class="fw-bold">Export Data</div>
-                                    <small class="text-muted">Download data dalam format Excel</small>
+                                    <div class="fw-bold">Manajemen User</div>
+                                    <small class="text-muted">Kelola akun pengguna aplikasi</small>
                                 </div>
                             </a>
+                            @endif
                         </div>
                     </div>
                 </div>
@@ -504,31 +282,44 @@
                             <p class="mb-2"><strong>Instansi:</strong> {{ Auth::user()->provinsi ?? 'BPS Kalsel' }}</p>
                             <p class="mb-0"><strong>Login:</strong> {{ now()->format('d/m/Y H:i:s') }}</p>
                         </div>
+
+                        {{-- Ringkasan status --}}
+                        <div class="mt-3">
+                            <h6 class="fw-bold mb-2">Ringkasan Keseluruhan</h6>
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="small">File OK</span>
+                                <span class="badge badge-success">{{ $totalOk }}</span>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="small">Perlu Dicek</span>
+                                <span class="badge badge-warning text-dark">{{ $totalWarn }}</span>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="small">Ada Masalah</span>
+                                <span class="badge badge-danger">{{ $totalMasalah }}</span>
+                            </div>
+                            @if($totalFile > 0)
+                            <div class="progress mt-3" style="height: 8px;">
+                                <div class="progress-bar bg-success"
+                                     style="width: {{ round($totalOk / $totalFile * 100) }}%"
+                                     title="OK"></div>
+                                <div class="progress-bar bg-warning"
+                                     style="width: {{ round($totalWarn / $totalFile * 100) }}%"
+                                     title="Perlu Dicek"></div>
+                                <div class="progress-bar bg-danger"
+                                     style="width: {{ round($totalMasalah / $totalFile * 100) }}%"
+                                     title="Masalah"></div>
+                            </div>
+                            <small class="text-muted">
+                                {{ round($totalOk / $totalFile * 100) }}% file lolos semua kriteria
+                            </small>
+                            @endif
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
+
     </div>
 </div>
-
-@push('scripts')
-<script>
-function toggleCustomPeriod() {
-    const periode = document.getElementById('periode').value;
-    const filterBulan = document.getElementById('filter-bulan');
-    const filterTriwulan = document.getElementById('filter-triwulan');
-    
-    // Hide all first
-    filterBulan.style.display = 'none';
-    filterTriwulan.style.display = 'none';
-    
-    // Show based on selection
-    if (periode === 'bulan') {
-        filterBulan.style.display = 'block';
-    } else if (periode === 'triwulan') {
-        filterTriwulan.style.display = 'block';
-    }
-}
-</script>
-@endpush
 @endsection

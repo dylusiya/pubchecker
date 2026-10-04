@@ -39,4 +39,9 @@ return [
         'redirect_uri' => env('SSO_REDIRECT_URI'),
     ],
 
+    'bps_api' => [
+        'key'    => env('BPS_API_KEY', ''),
+        'domain' => env('BPS_DOMAIN', '0000'),
+    ],
+
 ];
