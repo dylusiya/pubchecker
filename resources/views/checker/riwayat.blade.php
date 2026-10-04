@@ -38,7 +38,7 @@
                 <tr>
                   <th class="ps-3" style="width:50px;">#</th>
                   <th>Tanggal</th>
-                  <th>UUID Sesi</th>
+                  <th style="min-width:280px;">Publikasi</th>
                   <th class="text-center">Total File</th>
                   <th class="text-center">✓ OK</th>
                   <th class="text-center">⚠ Perlu Dicek</th>
@@ -56,8 +56,40 @@
                     </div>
                     <small class="text-muted">{{ $sesi->created_at->format('H:i') }}</small>
                   </td>
-                  <td>
-                    <code style="font-size:11px; color:#9155fd;">{{ $sesi->uuid }}</code>
+                  <td style="white-space:normal; max-width:420px;">
+                    @forelse($sesi->hasilPemeriksaan as $hasil)
+                      @php $selesai = $hasil->detail_count > 0 && $hasil->ditinjau_count >= $hasil->detail_count; @endphp
+                      <div class="{{ !$loop->last ? 'mb-2 pb-2 border-bottom' : '' }}">
+                        <a href="{{ route('checker.riwayat.detail', $sesi) }}#pub-{{ $hasil->id }}"
+                           class="fw-semibold text-dark text-decoration-none d-block" style="line-height:1.35;">
+                          {{ $hasil->judul }}
+                        </a>
+                        <div class="d-flex align-items-center flex-wrap gap-2 mt-1">
+                          @if($hasil->sumber)
+                            <span class="badge {{ $hasil->sumber === 'BPS' ? 'bg-info text-dark' : 'bg-secondary' }} fw-normal">{{ $hasil->sumber }}</span>
+                          @endif
+                          @if($hasil->total_halaman)
+                            <small class="text-muted">{{ $hasil->total_halaman }} hal.</small>
+                          @endif
+                          @if($hasil->detail_count > 0)
+                            <small class="text-muted" title="Kriteria yang sudah ditinjau manual">
+                              <i class="mdi mdi-clipboard-check-outline"></i> {{ $hasil->ditinjau_count }}/{{ $hasil->detail_count }}
+                            </small>
+                            @if($hasil->hasPdf())
+                              <a href="{{ route('checker.hasil.tinjau', $hasil) }}"
+                                 class="btn btn-sm {{ $selesai ? 'btn-outline-success' : 'btn-primary' }} py-0 px-2 text-nowrap">
+                                <i class="mdi mdi-{{ $selesai ? 'check' : 'play' }}"></i>
+                                {{ $selesai ? 'Selesai' : ($hasil->ditinjau_count ? 'Lanjutkan' : 'Mulai Tinjauan') }}
+                              </a>
+                            @else
+                              <small class="text-muted fst-italic" title="Pemeriksaan lama — file PDF tidak disimpan">PDF tidak tersimpan</small>
+                            @endif
+                          @endif
+                        </div>
+                      </div>
+                    @empty
+                      <span class="text-muted">—</span>
+                    @endforelse
                   </td>
                   <td class="text-center">
                     <span class="badge bg-label-primary">{{ $sesi->total_file }}</span>

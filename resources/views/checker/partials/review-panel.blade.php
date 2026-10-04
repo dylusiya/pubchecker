@@ -1,5 +1,5 @@
 {{--
-    Panel tinjau manual step-by-step (kiri: halaman PDF, kanan: kriteria).
+    Panel tinjau manual per kategori (kiri: halaman PDF, kanan: semua kriteria dalam kategori).
     Dipakai bersama oleh checker.blade.php (upload) & bps-detail.blade.php (import API)
     lewat CheckerReview (public/js/checker-review.js) — satu tempat perbaikan untuk keduanya.
 --}}
@@ -19,7 +19,7 @@
                             style="display:none;" onclick="CheckerReview.toggleSiblings()">
                         <i class="mdi mdi-eye-outline me-1"></i> Tampilkan Info Lain
                     </button>
-                    <span class="badge bg-primary" id="revStepBadge">Kriteria 1/1</span>
+                    <span class="badge bg-primary" id="revStepBadge">Kategori 1/1</span>
                 </div>
             </div>
             <div class="progress mb-3" style="height:6px;">
@@ -35,40 +35,35 @@
                     <small class="text-muted d-block mt-2" id="revPageHint">-</small>
                 </div>
 
-                {{-- RIGHT: apa yang harus diperiksa --}}
+                {{-- RIGHT: semua kriteria dalam satu kategori --}}
                 <div class="col-lg-4">
-                    <div class="border rounded p-3 d-flex flex-column" style="min-height:750px;">
-                        <div class="mb-2 d-flex align-items-center gap-2 flex-wrap">
-                            <span class="badge bg-light text-dark border font-monospace" id="revKode">-</span>
-                            <span class="badge bg-secondary" id="revKategori">-</span>
-                        </div>
-                        <h6 class="fw-semibold mb-1" id="revDeskripsi">-</h6>
-                        <small class="text-muted mb-3" id="revAreaHint" style="display:none;">
-                            <i class="mdi mdi-crosshairs-gps me-1"></i><span></span>
-                        </small>
+                    <div class="border rounded p-3 d-flex flex-column" style="height:85vh; min-height:750px;">
+                        <label class="small fw-semibold mb-1" for="revKategoriSelect">Kategori</label>
+                        <select class="form-select form-select-sm mb-2" id="revKategoriSelect"
+                                title="✓ = sudah disimpan, ○ = belum"></select>
 
-                        <div class="alert alert-light border py-2 px-3 mb-3">
-                            <small class="text-muted d-block mb-1">Hasil Cek Otomatis</small>
-                            <span class="badge" id="revAutoStatus">-</span>
-                            <div class="small text-muted mt-1" id="revAutoCatatan"></div>
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <small class="text-muted" id="revItemCount">-</small>
+                            <button type="button" class="btn btn-link btn-sm p-0 text-success"
+                                    onclick="CheckerReview.setAll('OK')">
+                                <i class="mdi mdi-check-all me-1"></i>Tandai semua OK
+                            </button>
                         </div>
 
-                        <label class="small fw-semibold mb-2">Verifikasi Anda</label>
-                        <div class="btn-group w-100 mb-3" role="group" id="revStatusButtons">
-                            <button type="button" class="btn btn-outline-success btn-sm" data-status="OK">OK</button>
-                            <button type="button" class="btn btn-outline-warning btn-sm" data-status="PERLU DICEK">Perlu Dicek</button>
-                            <button type="button" class="btn btn-outline-danger btn-sm" data-status="TIDAK ADA">Tidak Ada</button>
-                            <button type="button" class="btn btn-outline-secondary btn-sm" data-status="TIDAK DIPERIKSA">Skip</button>
-                        </div>
+                        <div id="revItems" class="flex-grow-1 overflow-auto pe-1" style="min-height:0;"></div>
 
-                        <textarea class="form-control form-control-sm mb-3" id="revCatatan" rows="3" placeholder="Catatan (opsional)"></textarea>
+                        <div class="alert alert-danger py-2 small mt-2 mb-0" id="revSaveError" style="display:none;"></div>
 
-                        <div class="mt-auto d-flex gap-2">
+                        <div class="mt-2 d-flex gap-2 flex-wrap">
                             <button class="btn btn-light border btn-sm" id="revBtnPrev" onclick="CheckerReview.prev()">
                                 <i class="mdi mdi-chevron-left"></i> Sebelumnya
                             </button>
                             <button class="btn btn-primary btn-sm flex-grow-1" id="revBtnNext" onclick="CheckerReview.next()">
-                                Simpan &amp; Lanjut <i class="mdi mdi-chevron-right"></i>
+                                Simpan Kategori &amp; Lanjut <i class="mdi mdi-chevron-right"></i>
+                            </button>
+                            <button class="btn btn-outline-secondary btn-sm w-100" id="revBtnExit" onclick="CheckerReview.saveAndExit()"
+                                    title="Simpan kategori ini lalu keluar; sisanya bisa dilanjutkan dari menu Riwayat">
+                                <i class="mdi mdi-content-save-outline me-1"></i> Simpan &amp; Lanjutkan Nanti
                             </button>
                         </div>
                     </div>

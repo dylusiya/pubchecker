@@ -5,12 +5,14 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use App\Services\PdfCheckerService;
 use App\Services\ExcelExportService;
 use App\Models\SesiPemeriksaan;
 use App\Models\HasilPemeriksaan;
 use App\Models\DetailPemeriksaan;
+use App\Models\KriteriaPemeriksaan;
 
 class CheckerController extends Controller
 {
@@ -33,9 +35,11 @@ class CheckerController extends Controller
 
         try {
             $request->validate([
-                'files'   => 'required|array|min:1|max:20',
+                'files'   => 'required|array|size:1', // satu publikasi per pemeriksaan
                 'files.*' => 'required|file|mimes:pdf|max:51200',
                 'sesi_id' => 'nullable|integer|exists:sesi_pemeriksaan,id',
+                // teks hasil ekstraksi di browser (js/pdf-extract.js), JSON
+                'extracted' => 'nullable|string',
             ]);
         } catch (\Throwable $e) {
             return response()->json([
@@ -57,8 +61,15 @@ class CheckerController extends Controller
         try {
             foreach ($request->file('files') as $file) {
                 try {
-                    $result = $this->checker->check($file);
-                    $hasil  = $this->saveResult($sesi->id, $result);
+                    $extracted = json_decode((string) $request->input('extracted'), true);
+                    $result    = is_array($extracted)
+                        ? $this->checker->checkFromText($extracted, $file->getClientOriginalName(), $file->getSize())
+                        : $this->checker->check($file); // fallback: ekstraksi di server (butuh exec untuk PDF terenkripsi)
+                    // Simpan PDF supaya tinjauan manual bisa dilanjutkan dari riwayat
+                    $hasil  = $this->saveResult($sesi->id, $result, [
+                        'pdf_path'  => $file->store('pdf-hasil') ?: null,
+                        'ocr_lines' => is_array($extracted) ? PdfCheckerService::ocrLinesFrom($extracted) : null,
+                    ]);
                     $result['hasil_id'] = $hasil->id;
                     $results[] = $result;
                 } catch (\Throwable $e) {
@@ -170,7 +181,7 @@ class CheckerController extends Controller
                                     $sesi   = SesiPemeriksaan::create([
                                         'dibuat_oleh' => auth()->user()?->name ?? 'bps-import',
                                     ]);
-                                    $hasil  = $this->saveResult($sesi->id, $result);
+                                    $hasil  = $this->saveResult($sesi->id, $result, ['pdf_url' => $pdfUrl]);
                                     $sesi->recalcSummary();
                                     $result['hasil_id'] = $hasil->id;
                                     $result['sesi_id']  = $sesi->id;
@@ -235,29 +246,111 @@ class CheckerController extends Controller
         }
 
         $detail->update([
-            'status'  => $data['status'],
-            'catatan' => $data['catatan'] ?: null,
+            'status'      => $data['status'],
+            'catatan'     => $data['catatan'] ?: null,
+            'ditinjau_at' => now(),
         ]);
 
         $hasil->recalcFromDetail();
         $hasil->sesi->recalcSummary();
 
-        return response()->json([
-            'ok'      => true,
-            'summary' => [
-                'ok'              => $hasil->total_ok,
-                'perlu_dicek'     => $hasil->total_perlu_dicek,
-                'tidak_ada'       => $hasil->total_tidak_ada,
-                'tidak_diperiksa' => $hasil->total_tdk_diperiksa,
-                'status_akhir'    => $hasil->status_akhir,
-            ],
+        return response()->json(['ok' => true, 'summary' => $this->summaryOf($hasil)]);
+    }
+
+    // ── PATCH /checker/hasil/{hasil}/review-kategori ──────────
+    // Simpan hasil verifikasi semua kriteria dalam satu kategori sekaligus.
+    public function reviewKategori(Request $request, HasilPemeriksaan $hasil): JsonResponse
+    {
+        $data = $request->validate([
+            'items'               => 'required|array|min:1',
+            'items.*.kriteria_id' => 'required|string',
+            'items.*.status'      => 'required|in:OK,PERLU DICEK,TIDAK ADA,TIDAK DIPERIKSA',
+            'items.*.catatan'     => 'nullable|string',
         ]);
+
+        DB::transaction(function () use ($hasil, $data) {
+            foreach ($data['items'] as $item) {
+                $hasil->detail()->where('kriteria_id', $item['kriteria_id'])->update([
+                    'status'      => $item['status'],
+                    'catatan'     => ($item['catatan'] ?? '') ?: null,
+                    'ditinjau_at' => now(),
+                ]);
+            }
+            $hasil->recalcFromDetail();
+            $hasil->sesi->recalcSummary();
+        });
+
+        return response()->json(['ok' => true, 'summary' => $this->summaryOf($hasil)]);
+    }
+
+    // ── GET /checker/hasil/{hasil}/tinjau ─────────────────────
+    // Lanjutkan tinjauan manual dari riwayat (mulai di kategori pertama yang belum ditinjau).
+    public function tinjau(HasilPemeriksaan $hasil)
+    {
+        if (!$hasil->hasPdf()) {
+            return redirect()->route('checker.riwayat.detail', $hasil->sesi_id)
+                ->with('error', 'File PDF untuk hasil ini tidak tersimpan, tinjauan tidak bisa dilanjutkan.');
+        }
+
+        // target/area tidak disimpan di detail — ambil dari master kriteria untuk petunjuk halaman
+        $kriteria = KriteriaPemeriksaan::whereIn('kode', $hasil->detail()->pluck('kriteria_id'))
+            ->get()->keyBy('kode');
+
+        $checks = $hasil->detail()->orderBy('id')->get()->map(function ($d) use ($kriteria) {
+            $k = $kriteria->get($d->kriteria_id);
+            return [
+                'id'        => $d->kriteria_id,
+                'kategori'  => $d->kategori,
+                'deskripsi' => $d->deskripsi,
+                'status'    => $d->status,
+                'catatan'   => $d->catatan,
+                'target'    => $k->target ?? 'all',
+                'area'      => $k && $k->tipe_cek === 'posisi_area'
+                    ? (KriteriaPemeriksaan::areaOptions()[$k->parameter['area'] ?? ''] ?? null)
+                    : null,
+                'reviewed'  => $d->ditinjau_at !== null,
+            ];
+        })->values();
+
+        return view('checker.tinjau', [
+            'hasil'  => $hasil,
+            'checks' => $checks,
+            'pdfUrl' => route('checker.hasil.pdf', $hasil),
+        ]);
+    }
+
+    // ── GET /checker/hasil/{hasil}/pdf ────────────────────────
+    public function pdf(HasilPemeriksaan $hasil)
+    {
+        if ($hasil->pdf_path && Storage::exists($hasil->pdf_path)) {
+            return response()->file(Storage::path($hasil->pdf_path), ['Content-Type' => 'application/pdf']);
+        }
+        if ($hasil->pdf_url) {
+            return redirect()->route('checker.bps.pdf_proxy', ['url' => $hasil->pdf_url]);
+        }
+        abort(404, 'File PDF tidak tersimpan.');
+    }
+
+    private function summaryOf(HasilPemeriksaan $hasil): array
+    {
+        return [
+            'ok'              => $hasil->total_ok,
+            'perlu_dicek'     => $hasil->total_perlu_dicek,
+            'tidak_ada'       => $hasil->total_tidak_ada,
+            'tidak_diperiksa' => $hasil->total_tdk_diperiksa,
+            'status_akhir'    => $hasil->status_akhir,
+        ];
     }
 
     // ── GET /checker/riwayat ──────────────────────────────────
     public function riwayat(Request $request)
     {
-        $sesiList = SesiPemeriksaan::orderByDesc('created_at')->paginate(15);
+        $sesiList = SesiPemeriksaan::with(['hasilPemeriksaan' => fn($q) => $q->withCount([
+                'detail',
+                'detail as ditinjau_count' => fn($d) => $d->whereNotNull('ditinjau_at'),
+            ])])
+            ->orderByDesc('created_at')
+            ->paginate(15);
         return view('checker.riwayat', compact('sesiList'));
     }
 
@@ -280,7 +373,9 @@ class CheckerController extends Controller
     // ── DELETE /checker/riwayat/{sesi} ───────────────────────
     public function deleteSesi(SesiPemeriksaan $sesi)
     {
+        $paths = $sesi->hasilPemeriksaan()->whereNotNull('pdf_path')->pluck('pdf_path')->all();
         $sesi->delete();
+        Storage::delete($paths);
         return redirect()->route('checker.riwayat')
                          ->with('success', 'Sesi pemeriksaan berhasil dihapus.');
     }
@@ -348,9 +443,9 @@ class CheckerController extends Controller
         echo 'data: ' . json_encode($data, JSON_UNESCAPED_UNICODE) . "\n\n";
     }
 
-    private function saveResult(int $sesiId, array $result): HasilPemeriksaan
+    private function saveResult(int $sesiId, array $result, array $extra = []): HasilPemeriksaan
     {
-        $hasil = HasilPemeriksaan::create([
+        $hasil = HasilPemeriksaan::create($extra + [
             'sesi_id'             => $sesiId,
             'nama_file'           => $result['filename'],
             'ukuran_file'         => $result['ukuran_file'],

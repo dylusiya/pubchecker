@@ -301,11 +301,13 @@
 
 @push('scripts')
 <script src="{{ asset('pdfjs/build/pdf.mjs') }}" type="module"></script>
-<script src="{{ asset('js/checker-review.js') }}"></script>
+<script src="{{ asset('js/checker-review.js') }}?v={{ filemtime(base_path('js/checker-review.js')) }}"></script>
+<script src="{{ asset('js/pdf-extract.js') }}?v={{ filemtime(base_path('js/pdf-extract.js')) }}"></script>
 <script>
 const CSRF = document.querySelector('meta[name=csrf-token]')?.content ?? '';
 const PDFJS_VIEWER = '{{ asset("pdfjs/web/viewer.html") }}';
-CheckerReview.init({ viewerUrl: PDFJS_VIEWER, csrf: CSRF });
+CheckerReview.init({ viewerUrl: PDFJS_VIEWER, csrf: CSRF, saveUrl: '{{ route("checker.hasil.review_kategori", "__ID__") }}' });
+PdfExtract.init({ pdfjsBuild: '{{ asset("pdfjs/build") }}/' });
 
 let publicationData = null;
 let pdfUrl          = null;
@@ -584,6 +586,18 @@ async function checkQuality() {
     btn.innerHTML = '<i class="mdi mdi-loading mdi-spin me-1"></i> Memeriksa...';
     document.getElementById('qualitySection').style.display = 'none';
 
+    // Baca teks PDF di browser (pdf.js + OCR halaman gambar) — server hosting tidak bisa
+    // menjalankan Ghostscript/Tesseract. Jika gagal, server mengunduh & membaca sendiri.
+    let extracted = null;
+    try {
+        extracted = await PdfExtract.extract(getProxiedPdfUrl(), {
+            onProgress: msg => { btn.innerHTML = `<i class="mdi mdi-loading mdi-spin me-1"></i> ${msg}`; },
+        });
+    } catch (e) {
+        console.warn('Ekstraksi teks di browser gagal, dibaca di server', e);
+    }
+    btn.innerHTML = '<i class="mdi mdi-loading mdi-spin me-1"></i> Memeriksa kriteria...';
+
     try {
         const res  = await fetch('{{ route("checker.bps.run") }}', {
             method: 'POST',
@@ -594,7 +608,8 @@ async function checkQuality() {
                     title:  publicationData.title,
                     pdf:    pdfUrl
                 }],
-                domain: publicationData.domain
+                domain: publicationData.domain,
+                extracted: extracted ? JSON.stringify(extracted) : null,
             })
         });
         const data = await res.json();
@@ -608,6 +623,7 @@ async function checkQuality() {
                     hasilId:  result.hasil_id,
                     summary:  result.summary,
                     url:      getProxiedPdfUrl(),
+                    ocrLines: extracted?.ocr_lines,
                 }], { onFinish: () => renderQualityResults(result) });
             } else {
                 renderQualityResults(result);
@@ -656,7 +672,9 @@ function showAlert(type, msg) {
     div.className = `alert alert-${type} alert-dismissible fade show`;
     div.innerHTML = `${msg}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
     document.querySelector('.content-wrapper').prepend(div);
-    setTimeout(() => div.remove(), 6000);
+    div.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // Pesan error dibiarkan sampai ditutup manual supaya tidak terlewat
+    if (type !== 'danger') setTimeout(() => div.remove(), 6000);
 }
 
 // ── INIT ──────────────────────────────────────────────────────

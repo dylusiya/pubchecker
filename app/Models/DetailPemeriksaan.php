@@ -16,6 +16,11 @@ class DetailPemeriksaan extends Model
         'deskripsi',
         'status',
         'catatan',
+        'ditinjau_at',
+    ];
+
+    protected $casts = [
+        'ditinjau_at' => 'datetime',
     ];
 
     public function hasil()

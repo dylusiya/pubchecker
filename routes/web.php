@@ -53,6 +53,9 @@ Route::middleware('auth')->group(function () {
         Route::get('/riwayat/{sesi}/export', [CheckerController::class, 'exportSesi'])   ->name('riwayat.export');
         Route::delete('/riwayat/{sesi}',     [CheckerController::class, 'deleteSesi'])   ->name('riwayat.delete');
         Route::patch('/hasil/{hasil}/review', [CheckerController::class, 'reviewDetail'])->name('hasil.review');
+        Route::patch('/hasil/{hasil}/review-kategori', [CheckerController::class, 'reviewKategori'])->name('hasil.review_kategori');
+        Route::get('/hasil/{hasil}/tinjau',  [CheckerController::class, 'tinjau'])        ->name('hasil.tinjau');
+        Route::get('/hasil/{hasil}/pdf',     [CheckerController::class, 'pdf'])           ->name('hasil.pdf');
     });
 
     

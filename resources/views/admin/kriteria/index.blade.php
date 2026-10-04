@@ -85,7 +85,7 @@
                                 <th style="width:40px;" class="text-center ps-3">#</th>
                                 <th style="width:90px;">Kode</th>
                                 <th style="width:180px;">Kategori</th>
-                                <th>Deskripsi</th>
+                                <th style="min-width:200px; max-width:320px;">Deskripsi</th>
                                 <th style="width:120px;">Tipe Cek</th>
                                 <th style="width:90px;">Target</th>
                                 <th style="width:110px;">Jika Gagal</th>
@@ -101,11 +101,14 @@
                                     <code class="text-primary">{{ $item->kode }}</code>
                                 </td>
                                 <td class="text-muted small">{{ $item->kategori }}</td>
-                                <td>{{ $item->deskripsi }}</td>
+                                <td style="max-width:320px; white-space:normal;" title="{{ $item->deskripsi }}">
+                                    {{ \Illuminate\Support\Str::limit($item->deskripsi, 120) }}
+                                </td>
                                 <td>
                                     @php
                                         $tipeBadge = [
                                             'regex'        => 'bg-info text-dark',
+                                            'not_regex'    => 'bg-info text-dark',
                                             'contains'     => 'bg-primary',
                                             'not_contains' => 'bg-secondary',
                                             'posisi_area'  => 'bg-warning text-dark',

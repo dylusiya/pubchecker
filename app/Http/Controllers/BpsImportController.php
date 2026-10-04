@@ -95,7 +95,10 @@ class BpsImportController extends Controller
             'publications.*.pdf'    => 'required|url',
             'publications.*.title'  => 'required|string',
             'publications.*.pub_id' => 'nullable|string',
+            // teks hasil ekstraksi di browser (js/pdf-extract.js), JSON — hanya untuk satu publikasi
+            'extracted'             => 'nullable|string',
         ]);
+        $extracted = json_decode((string) $request->input('extracted'), true);
 
         if (empty(config('services.bps_api.key', ''))) {
             return response()->json(['error' => 'API Key BPS belum dikonfigurasi.'], 422);
@@ -117,13 +120,18 @@ class BpsImportController extends Controller
                 $tmpPath  = null;
 
                 try {
-                    $tmpPath = $this->bps->downloadPdf($pdfUrl);
+                    if (is_array($extracted) && count($request->input('publications')) === 1) {
+                        // Teks sudah dibaca di browser — tidak perlu unduh & parse PDF di server
+                        $result = $this->checker->checkFromText($extracted, $filename, (int) ($extracted['file_size'] ?? 0));
+                    } else {
+                        $tmpPath = $this->bps->downloadPdf($pdfUrl);
 
-                    $uploadedFile = new \Illuminate\Http\UploadedFile(
-                        $tmpPath, $filename, 'application/pdf', null, true
-                    );
+                        $uploadedFile = new \Illuminate\Http\UploadedFile(
+                            $tmpPath, $filename, 'application/pdf', null, true
+                        );
 
-                    $result = $this->checker->check($uploadedFile);
+                        $result = $this->checker->check($uploadedFile);
+                    }
 
                 } catch (\Throwable $e) {
                     $result = $this->buildErrorResult($filename, $e->getMessage());
@@ -145,6 +153,8 @@ class BpsImportController extends Controller
                     'total_tdk_diperiksa' => $result['summary']['tidak_diperiksa'],
                     'status_akhir'        => $result['summary']['status_akhir'],
                     'error_msg'           => $result['error'] ?: null,
+                    'pdf_url'             => $pdfUrl,
+                    'ocr_lines'           => is_array($extracted) ? PdfCheckerService::ocrLinesFrom($extracted) : null,
                 ]);
 
                 if (!empty($result['checks'])) {
@@ -167,6 +177,7 @@ class BpsImportController extends Controller
 
         } catch (\Throwable $e) {
             DB::rollBack();
+            report($e);
             return response()->json(['error' => 'Gagal: ' . $e->getMessage()], 500);
         }
 

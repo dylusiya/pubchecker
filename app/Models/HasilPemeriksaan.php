@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Storage;
 
 class HasilPemeriksaan extends Model
 {
@@ -21,10 +22,14 @@ class HasilPemeriksaan extends Model
         'total_tdk_diperiksa',
         'status_akhir',
         'error_msg',
+        'pdf_path',
+        'pdf_url',
+        'ocr_lines',
     ];
 
     protected $casts = [
         'created_at' => 'datetime',
+        'ocr_lines'  => 'array',
     ];
 
     public function sesi()
@@ -35,6 +40,32 @@ class HasilPemeriksaan extends Model
     public function detail()
     {
         return $this->hasMany(DetailPemeriksaan::class, 'hasil_id');
+    }
+
+    /**
+     * Judul publikasi yang mudah dibaca dari nama file
+     * (nama file BPS import memakai '_' sebagai pengganti spasi).
+     */
+    public function getJudulAttribute(): string
+    {
+        $judul = preg_replace('/\.pdf$/i', '', $this->nama_file);
+        return trim(str_replace('_', ' ', $judul));
+    }
+
+    /** Sumber PDF: 'BPS' (import web BPS) atau 'Upload'. */
+    public function getSumberAttribute(): ?string
+    {
+        if ($this->pdf_url)  return 'BPS';
+        if ($this->pdf_path) return 'Upload';
+        return null;
+    }
+
+    /**
+     * PDF tersedia untuk ditinjau ulang (file upload tersimpan atau URL BPS).
+     */
+    public function hasPdf(): bool
+    {
+        return ($this->pdf_path && Storage::exists($this->pdf_path)) || (bool) $this->pdf_url;
     }
 
     /**

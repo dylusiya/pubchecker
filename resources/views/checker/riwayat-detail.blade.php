@@ -33,6 +33,13 @@
             </div>
         </div>
 
+        @if(session('error'))
+        <div class="alert alert-danger alert-dismissible fade show py-2 small" role="alert">
+            <i class="mdi mdi-alert-circle me-1"></i>{{ session('error') }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        @endif
+
         {{-- Stat Cards --}}
         <div class="row mb-3">
             <div class="col-xl-3 col-md-6 mb-3">
@@ -87,7 +94,7 @@
                            style="font-size:18px; flex-shrink:0;"></i>
 
                         <span class="flex-grow-1 fw-semibold small text-truncate"
-                              title="{{ $hasil->nama_file }}">{{ $hasil->nama_file }}</span>
+                              title="{{ $hasil->nama_file }}">{{ $hasil->judul }}</span>
 
                         <div class="d-flex gap-1 flex-shrink-0">
                             @if($hasil->total_ok)
@@ -104,6 +111,24 @@
                             @endif
                         </div>
 
+                        @php
+                            $grupKategori   = $hasil->detail->groupBy('kategori');
+                            $kategoriSelesai = $grupKategori->filter(fn($g) => $g->every(fn($d) => $d->ditinjau_at))->count();
+                            $tinjauSelesai  = $grupKategori->isNotEmpty() && $kategoriSelesai === $grupKategori->count();
+                        @endphp
+                        @if($grupKategori->isNotEmpty())
+                        <span class="badge {{ $tinjauSelesai ? 'bg-success' : 'bg-light text-dark border' }} flex-shrink-0 ms-1"
+                              title="Kategori yang sudah ditinjau manual">
+                            <i class="mdi mdi-clipboard-check-outline"></i> {{ $kategoriSelesai }}/{{ $grupKategori->count() }}
+                        </span>
+                        @if($hasil->hasPdf())
+                        <a href="{{ route('checker.hasil.tinjau', $hasil) }}" onclick="event.stopPropagation()"
+                           class="btn btn-sm {{ $tinjauSelesai ? 'btn-outline-success' : 'btn-primary' }} py-0 px-2 flex-shrink-0 ms-1 text-nowrap">
+                            <i class="mdi mdi-{{ $tinjauSelesai ? 'pencil' : 'play' }}"></i>
+                            {{ $tinjauSelesai ? 'Tinjau Ulang' : ($kategoriSelesai ? 'Lanjutkan' : 'Mulai Tinjauan') }}
+                        </a>
+                        @endif
+                        @endif
                         <small class="text-muted flex-shrink-0 ms-1">
                             {{ $hasil->total_halaman ?? '?' }} hal.
                         </small>
@@ -119,6 +144,22 @@
                             <div class="alert alert-danger py-2 small mb-3">
                                 <i class="mdi mdi-alert me-1"></i>{{ $hasil->error_msg }}
                             </div>
+                        @endif
+
+                        @if($grupKategori->isNotEmpty())
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                            <small class="text-muted">
+                                Tinjauan manual: {{ $kategoriSelesai }} dari {{ $grupKategori->count() }} kategori selesai
+                            </small>
+                            @if($hasil->hasPdf())
+                                <a href="{{ route('checker.hasil.tinjau', $hasil) }}" class="btn btn-primary btn-sm">
+                                    <i class="mdi mdi-{{ $tinjauSelesai ? 'pencil' : 'play' }} me-1"></i>
+                                    {{ $tinjauSelesai ? 'Tinjau Ulang' : ($kategoriSelesai ? 'Lanjutkan Tinjauan' : 'Mulai Tinjauan') }}
+                                </a>
+                            @else
+                                <small class="text-muted fst-italic">PDF tidak tersimpan — tinjauan tidak bisa dilanjutkan</small>
+                            @endif
+                        </div>
                         @endif
 
                         <div class="table-responsive">

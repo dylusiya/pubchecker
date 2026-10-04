@@ -31,6 +31,7 @@ class KriteriaPemeriksaan extends Model
     {
         return [
             'regex'        => 'Regex — cocokkan pola teks',
+            'not_regex'    => 'Not Regex — pola teks TIDAK boleh ditemukan',
             'contains'     => 'Contains — cari teks tertentu',
             'not_contains' => 'Not Contains — teks TIDAK boleh ada',
             'posisi_area'  => 'Posisi Area — cek letak kata di halaman',
@@ -44,6 +45,8 @@ class KriteriaPemeriksaan extends Model
         return [
             'cover' => 'Halaman 1 (Kover)',
             'page2' => 'Halaman 2',
+            'front' => 'Bagian awal (20 halaman pertama)',
+            'last'  => 'Halaman terakhir (Kover Belakang)',
             'all'   => 'Semua halaman',
         ];
     }

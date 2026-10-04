@@ -277,7 +277,7 @@ class KriteriaController extends Controller
     private function parameterFromRow(string $tipe, array $row, \Closure $get): ?array
     {
         $param = match ($tipe) {
-            'regex' => array_filter([
+            'regex', 'not_regex' => array_filter([
                 'pattern' => $get($row, 'param_pattern') ?: null,
                 'flags'   => $get($row, 'param_flags') ?: null,
             ]),
@@ -306,8 +306,8 @@ class KriteriaController extends Controller
             'kode'         => 'required|string|max:20|unique:kriteria_pemeriksaan,kode' . ($excludeId ? ",$excludeId" : ''),
             'kategori'     => 'required|string|max:100',
             'deskripsi'    => 'required|string|max:5000',
-            'tipe_cek'     => 'required|in:regex,contains,not_contains,posisi_area,min_pages,manual',
-            'target'       => 'required|in:cover,page2,all',
+            'tipe_cek'     => 'required|in:' . implode(',', array_keys(KriteriaPemeriksaan::tipeOptions())),
+            'target'       => 'required|in:' . implode(',', array_keys(KriteriaPemeriksaan::targetOptions())),
             'status_gagal' => 'required|in:TIDAK ADA,PERLU DICEK',
             'pesan_ok'     => 'nullable|string|max:255',
             'pesan_gagal'  => 'nullable|string|max:255',
@@ -325,7 +325,7 @@ class KriteriaController extends Controller
 
         $tipe  = $data['tipe_cek'];
         $param = match($tipe) {
-            'regex' => array_filter([
+            'regex', 'not_regex' => array_filter([
                 'pattern' => $request->input('param_pattern'),
                 'flags'   => $request->input('param_flags') ?: null,
             ]),

@@ -68,6 +68,11 @@
         "platform": {
             "php": "8.1.25"
         },
+        "policy": {
+            "advisories": {
+                "block": false
+            }
+        },
         "platform-check": false
     },
     "minimum-stability": "stable",

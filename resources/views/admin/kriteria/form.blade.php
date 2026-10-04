@@ -286,6 +286,7 @@ function showParamPanel() {
 
     const map = {
         regex:        'panel_regex',
+        not_regex:    'panel_regex',
         contains:     'panel_contains',
         not_contains: 'panel_contains',
         posisi_area:  'panel_posisi_area',

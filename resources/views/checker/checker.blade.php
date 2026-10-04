@@ -33,7 +33,7 @@
         <div class="card card-rounded mb-3">
             <div class="card-body">
                 <h5 class="card-title mb-1">Upload File PDF</h5>
-                <p class="text-muted small mb-3">Drag &amp; drop atau pilih satu / banyak PDF — diproses per batch 5 file</p>
+                <p class="text-muted small mb-3">Drag &amp; drop atau pilih satu PDF publikasi untuk diperiksa</p>
 
                 <div id="dropzone"
                      class="border border-2 rounded-3 p-5 text-center"
@@ -44,12 +44,12 @@
                      ondrop="handleDrop(event)">
                     <i class="mdi mdi-file-upload-outline text-primary" style="font-size: 48px; opacity: .7;"></i>
                     <h6 class="mt-2 mb-1 fw-semibold">Drag &amp; drop file PDF di sini</h6>
-                    <p class="text-muted small mb-3">Maksimal 20 file, 20MB per file</p>
+                    <p class="text-muted small mb-3">Satu file PDF per pemeriksaan, maksimal 50MB</p>
                     <button class="btn btn-primary btn-sm px-4"
                             onclick="event.stopPropagation(); document.getElementById('fileInput').click()">
                         <i class="mdi mdi-paperclip me-1"></i> Pilih File PDF
                     </button>
-                    <input type="file" id="fileInput" multiple accept=".pdf"
+                    <input type="file" id="fileInput" accept=".pdf"
                            style="display:none" onchange="addFiles(this.files)">
                 </div>
             </div>
@@ -62,20 +62,17 @@
                     <div class="d-flex justify-content-between align-items-center mb-3">
                         <div>
                             <h5 class="card-title mb-0">
-                                <span id="fileCount">0</span> File Dipilih
+                                File Dipilih<span id="fileCount" class="d-none">0</span>
                             </h5>
                             <small class="text-muted" id="actionNote"></small>
                         </div>
-                        <button class="btn btn-light btn-sm border" onclick="clearAll()">
-                            <i class="mdi mdi-close me-1"></i> Hapus Semua
-                        </button>
                     </div>
 
                     <div class="d-flex flex-wrap gap-2 mb-4" id="fileChips"></div>
 
                     <div class="d-flex gap-2 align-items-center">
                         <button class="btn btn-primary" id="btnCheck" onclick="startCheck()">
-                            <i class="mdi mdi-play me-1"></i> Periksa Semua PDF
+                            <i class="mdi mdi-play me-1"></i> Periksa PDF
                         </button>
                         <button class="btn btn-light border" onclick="clearAll()">
                             <i class="mdi mdi-refresh me-1"></i> Reset
@@ -254,23 +251,27 @@
 @endpush
 
 @push('scripts')
-<script src="{{ asset('js/checker-review.js') }}"></script>
+<script src="{{ asset('js/checker-review.js') }}?v={{ filemtime(base_path('js/checker-review.js')) }}"></script>
+<script src="{{ asset('js/pdf-extract.js') }}?v={{ filemtime(base_path('js/pdf-extract.js')) }}"></script>
 <script>
 const CSRF = document.querySelector('meta[name=csrf-token]')?.content ?? '';
-CheckerReview.init({ viewerUrl: '{{ asset("pdfjs/web/viewer.html") }}', csrf: CSRF });
+CheckerReview.init({ viewerUrl: '{{ asset("pdfjs/web/viewer.html") }}', csrf: CSRF, saveUrl: '{{ route("checker.hasil.review_kategori", "__ID__") }}' });
+PdfExtract.init({ pdfjsBuild: '{{ asset("pdfjs/build") }}/' });
 
 let selectedFiles = [];
 let allResults    = [];
 let sesiId        = null;
 let currentFilter = 'all';
 
+// Satu pemeriksaan = satu publikasi, supaya tinjauan manual fokus per publikasi
 function addFiles(files) {
-    [...files].forEach(f => {
-        if (f.name.toLowerCase().endsWith('.pdf') &&
-            !selectedFiles.find(s => s.name === f.name && s.size === f.size)) {
-            selectedFiles.push(f);
-        }
-    });
+    const pdfs = [...files].filter(f => f.name.toLowerCase().endsWith('.pdf'));
+    if (!pdfs.length) return;
+    if (pdfs.length > 1) {
+        showAlert('warning', 'Hanya satu PDF per pemeriksaan — yang dipakai: ' + pdfs[0].name);
+    }
+    selectedFiles = [pdfs[0]];
+    document.getElementById('fileInput').value = '';
     renderQueue();
 }
 
@@ -286,7 +287,7 @@ function renderQueue() {
     if (!selectedFiles.length) { sec.style.display = 'none'; return; }
     sec.style.display = 'block';
     document.getElementById('fileCount').textContent = selectedFiles.length;
-    document.getElementById('actionNote').textContent = selectedFiles.length + ' PDF siap diperiksa';
+    document.getElementById('actionNote').textContent = 'PDF siap diperiksa — pilih file lain untuk mengganti';
     chips.innerHTML = selectedFiles.map((f, i) => `
         <span class="file-chip">
             <i class="mdi mdi-file-pdf-box text-danger"></i>
@@ -317,7 +318,19 @@ async function startCheck() {
         batch.forEach(f => fd.append('files[]', f));
         if (sesiId) fd.append('sesi_id', sesiId);
         fd.append('_token', CSRF);
-        setProgress(done, total, 'Memproses: ' + batch[0].name);
+
+        // Baca teks PDF di browser (pdf.js + OCR halaman gambar) — server hosting tidak bisa
+        // menjalankan Ghostscript/Tesseract. Jika gagal, server mencoba membaca sendiri.
+        let extracted = null;
+        try {
+            extracted = await PdfExtract.extract(await batch[0].arrayBuffer(), {
+                onProgress: msg => setProgress(done, total, msg),
+            });
+            fd.append('extracted', JSON.stringify(extracted));
+        } catch (err) {
+            console.warn('Ekstraksi teks di browser gagal, dibaca di server', err);
+        }
+        setProgress(done, total, 'Memeriksa kriteria: ' + batch[0].name);
         try {
             const res  = await fetch('{{ route("checker.check") }}', { method:'POST', body:fd });
             const text = await res.text();
@@ -328,6 +341,8 @@ async function startCheck() {
             const data = JSON.parse(text);
             if (data.error) { showAlert('danger', data.error); break; }
             sesiId = data.sesi_id ?? sesiId;
+            // baris OCR untuk pencarian (Ctrl+F) di viewer panel tinjauan
+            (data.results ?? []).forEach(r => { r.ocr_lines = extracted?.ocr_lines; });
             allResults.push(...(data.results ?? []));
         } catch (err) { showAlert('danger', 'Request gagal: ' + err.message); }
         done += batch.length;
@@ -442,6 +457,7 @@ function beginReview() {
                 filename: r.filename,
                 checks:   r.checks,
                 hasilId:  r.hasil_id,
+                ocrLines: r.ocr_lines,
                 summary:  r.summary,
                 url,
                 cleanup: () => URL.revokeObjectURL(url),

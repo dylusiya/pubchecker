@@ -34,6 +34,18 @@ class PdfCheckerService
     private float  $pageW      = 595.0;
     private float  $pageH      = 842.0;
     private string $page2Text  = '';
+    private array  $pageTexts  = [];
+
+    /** Jumlah halaman awal yang dipakai target 'front' (katalog, kata pengantar, daftar isi). */
+    private const FRONT_PAGES = 20;
+
+    /** Batas data teks dari browser (checkFromText). */
+    private const MAX_PAGES      = 3000;
+    private const MAX_PAGE_CHARS = 200000;
+
+    /** Nomor halaman (1-based) yang teksnya hasil OCR / berupa gambar tanpa teks. */
+    private array $ocrPages   = [];
+    private array $imagePages = [];
 
     // ═══════════════════════════════════════════════════════
     // PUBLIC API
@@ -78,6 +90,63 @@ class PdfCheckerService
     }
 
     /**
+     * Mode 4 — Teks sudah diekstrak di browser (pdf.js + OCR Tesseract.js, lihat js/pdf-extract.js).
+     * Dipakai di hosting yang tidak mengizinkan exec() sehingga Ghostscript/Tesseract tidak tersedia.
+     *
+     * @param array $x { pages: string[], cover_words: {text,x,y}[], page_w, page_h, method, ocr_pages: int[], image_pages: int[] }
+     */
+    public function checkFromText(array $x, string $filename, int $fileSize): array
+    {
+        $this->reset();
+
+        $pages = array_values(array_filter($x['pages'] ?? [], 'is_string'));
+        if (!$pages) {
+            $this->errorMsg = 'PDF tidak memiliki halaman yang dapat dibaca.';
+            return $this->buildResult($filename, $fileSize);
+        }
+        foreach (array_slice($pages, 0, self::MAX_PAGES) as $i => $text) {
+            $this->storePageText($i, mb_substr($text, 0, self::MAX_PAGE_CHARS));
+        }
+
+        $this->pageW = is_numeric($x['page_w'] ?? null) && $x['page_w'] > 0 ? (float) $x['page_w'] : 595.0;
+        $this->pageH = is_numeric($x['page_h'] ?? null) && $x['page_h'] > 0 ? (float) $x['page_h'] : 842.0;
+        foreach (array_slice($x['cover_words'] ?? [], 0, 5000) as $w) {
+            if (isset($w['text'], $w['x'], $w['y']) && is_string($w['text']) && is_numeric($w['x']) && is_numeric($w['y'])) {
+                $this->coverWords[] = ['text' => $w['text'], 'x' => (float) $w['x'], 'y' => (float) $w['y']];
+            }
+        }
+
+        $toInts = fn($v) => array_values(array_filter(array_map('intval', (array) ($v ?? [])), fn($n) => $n > 0));
+        $this->ocrPages   = $toInts($x['ocr_pages'] ?? []);
+        $this->imagePages = $toInts($x['image_pages'] ?? []);
+        $this->method     = in_array($x['method'] ?? '', ['pdfjs', 'pdfjs+ocr'], true) ? $x['method'] : 'pdfjs';
+
+        $this->runAllRules();
+        return $this->buildResult($filename, $fileSize);
+    }
+
+    /**
+     * Ambil baris OCR yang valid dari hasil ekstraksi browser ({ halaman: [{s,x,y,w,h}] }),
+     * untuk disimpan dan disisipkan kembali ke viewer saat tinjauan dilanjutkan.
+     */
+    public static function ocrLinesFrom(?array $extracted): ?array
+    {
+        $out = [];
+        foreach (array_slice((array) ($extracted['ocr_lines'] ?? []), 0, 50, true) as $page => $lines) {
+            if (!is_numeric($page) || (int) $page < 1 || !is_array($lines)) continue;
+            foreach (array_slice($lines, 0, 500) as $l) {
+                if (!isset($l['s'], $l['x'], $l['y'], $l['w'], $l['h']) || !is_string($l['s'])) continue;
+                if (!is_numeric($l['x']) || !is_numeric($l['y']) || !is_numeric($l['w']) || !is_numeric($l['h'])) continue;
+                $out[(int) $page][] = [
+                    's' => mb_substr($l['s'], 0, 500),
+                    'x' => (float) $l['x'], 'y' => (float) $l['y'], 'w' => (float) $l['w'], 'h' => (float) $l['h'],
+                ];
+            }
+        }
+        return $out ?: null;
+    }
+
+    /**
      * Mode 3 — Streaming Generator untuk SSE.
      *
      * Yield event satu per satu sehingga controller bisa
@@ -105,16 +174,12 @@ class PdfCheckerService
 
             foreach ($allPages as $i => $page) {
                 // Kumpulkan teks yang dibutuhkan untuk evaluasi
-                if ($i === 0) {
-                    $this->coverText  = $page->getText() ?? '';
-                    $this->coverWords = $this->extractWords($page);
-                } elseif ($i === 1) {
-                    $this->page2Text = $page->getText() ?? '';
-                }
-                $this->pages = $i + 1;
+                $this->collectPage($i, $page);
 
                 yield ['type' => 'parse_page', 'current' => $i + 1, 'total' => $total];
             }
+
+            $this->assertHasText();
 
         } catch (\Throwable $e) {
             $msg = strtolower($e->getMessage());
@@ -136,17 +201,12 @@ class PdfCheckerService
                         $allPages = $pdf->getPages();
                         $total    = count($allPages);
                         $this->method = 'gs_decrypt';
+                        $this->pageTexts = [];
 
                         yield ['type' => 'parse_start', 'total_pages' => $total];
 
                         foreach ($allPages as $i => $page) {
-                            if ($i === 0) {
-                                $this->coverText  = $page->getText() ?? '';
-                                $this->coverWords = $this->extractWords($page);
-                            } elseif ($i === 1) {
-                                $this->page2Text = $page->getText() ?? '';
-                            }
-                            $this->pages = $i + 1;
+                            $this->collectPage($i, $page);
 
                             yield ['type' => 'parse_page', 'current' => $i + 1, 'total' => $total];
                         }
@@ -210,6 +270,7 @@ class PdfCheckerService
 
         try {
             $this->parseAllPages($path);
+            $this->assertHasText();
         } catch (\Throwable $e) {
             $msg = strtolower($e->getMessage());
 
@@ -244,17 +305,63 @@ class PdfCheckerService
         $pdf      = $parser->parseFile($path);
         $pages    = $pdf->getPages();
         $this->pages = count($pages);
+        $this->pageTexts = [];
 
         if ($this->pages === 0) {
             throw new \RuntimeException('PDF tidak memiliki halaman yang dapat dibaca.');
         }
 
-        $this->coverText  = $pages[0]->getText() ?? '';
-        $this->coverWords = $this->extractWords($pages[0]);
-
-        if ($this->pages >= 2) {
-            $this->page2Text = $pages[1]->getText() ?? '';
+        foreach ($pages as $i => $page) {
+            $this->collectPage($i, $page);
         }
+    }
+
+    /**
+     * Simpan teks satu halaman. Halaman 1 juga diambil posisi kata-katanya
+     * untuk cek posisi_area.
+     */
+    private function collectPage(int $i, \Smalot\PdfParser\Page $page): void
+    {
+        try {
+            $text = $page->getText() ?? '';
+        } catch (\Throwable) {
+            $text = '';
+        }
+
+        $this->storePageText($i, $text);
+
+        if ($i === 0) {
+            $this->coverWords = $this->extractWords($page);
+        }
+    }
+
+    private function storePageText(int $i, string $text): void
+    {
+        // NBSP → spasi biasa supaya \s di regex tetap cocok
+        $text = str_replace("\xC2\xA0", ' ', $text);
+        // Watermark unduhan website BPS ("https:// kalsel.bps.go.id") ada di tiap halaman — bukan isi publikasi
+        $text = preg_replace('~https?://\s+[\w.-]+\.bps\.go\.id/?~iu', '', $text) ?? $text;
+
+        $this->pageTexts[$i] = $text;
+        $this->pages         = $i + 1;
+
+        if ($i === 0) {
+            $this->coverText = $text;
+        } elseif ($i === 1) {
+            $this->page2Text = $text;
+        }
+    }
+
+    /**
+     * PDF terenkripsi tetap bisa di-parse karena setIgnoreEncryption(true), tetapi
+     * teksnya kosong. Lempar error 'secured' supaya jalur decrypt Ghostscript dipakai.
+     */
+    private function assertHasText(): void
+    {
+        foreach ($this->pageTexts as $t) {
+            if (trim($t) !== '') return;
+        }
+        throw new \RuntimeException('PDF secured: tidak ada teks yang terbaca');
     }
 
     private function makeParser(): Parser
@@ -364,9 +471,35 @@ class PdfCheckerService
 
         foreach ($rules as $rule) {
             [$status, $catatan] = $this->evalRule($rule);
+            $catatan .= $this->imageNote($rule);
             $this->add($rule->kode, $rule->kategori, $rule->deskripsi, $status, $catatan,
                 $rule->target, $this->areaLabel($rule));
         }
+    }
+
+    /**
+     * Keterangan jika halaman yang diperiksa kriteria ini berupa gambar:
+     * hasil OCR bisa salah baca, dan halaman gambar yang tidak di-OCR tidak terbaca sama sekali.
+     */
+    private function imageNote(KriteriaPemeriksaan $rule): string
+    {
+        if ($rule->tipe_cek === 'manual' || (!$this->ocrPages && !$this->imagePages)) return '';
+
+        $pages = match ($rule->target) {
+            'cover' => [1],
+            'page2' => [2],
+            'front' => range(1, min(self::FRONT_PAGES, max(1, $this->pages))),
+            'last'  => [$this->pages],
+            default => [], // 'all': halaman foto/pembatas bab terlalu umum, catatan jadi tidak bermakna
+        };
+
+        if (array_intersect($pages, $this->ocrPages)) {
+            return ' [teks hasil OCR — cek ulang]';
+        }
+        if (array_intersect($pages, $this->imagePages)) {
+            return ' [halaman berupa gambar, tidak di-OCR]';
+        }
+        return '';
     }
 
     private function evalRule(KriteriaPemeriksaan $rule): array
@@ -379,6 +512,7 @@ class PdfCheckerService
 
         return match($rule->tipe_cek) {
             'regex'        => $this->evalRegex($param, $text, $gagal, $msgOk, $msgErr),
+            'not_regex'    => $this->evalNotRegex($param, $text, $gagal, $msgOk, $msgErr),
             'contains'     => $this->evalContains($param, $text, false, $gagal, $msgOk, $msgErr),
             'not_contains' => $this->evalContains($param, $text, true,  $gagal, $msgOk, $msgErr),
             'posisi_area'  => $this->evalPosisi($param, $gagal, $msgOk, $msgErr),
@@ -392,10 +526,13 @@ class PdfCheckerService
     {
         $pattern = $p['pattern'] ?? null;
         if (!$pattern) return ['TIDAK DIPERIKSA', 'Parameter pattern kosong'];
-        $regex = '/' . $pattern . '/' . ($p['flags'] ?? '');
+        $regex = $this->buildRegex($p);
         try {
-            $found = (bool) preg_match($regex, $text, $m);
+            $found = preg_match($regex, $text, $m);
         } catch (\Throwable) {
+            $found = false;
+        }
+        if ($found === false) {
             return ['TIDAK DIPERIKSA', 'Regex tidak valid: ' . $regex];
         }
         if ($found) {
@@ -403,6 +540,38 @@ class PdfCheckerService
             return ['OK', $ok . $detail];
         }
         return [$gagal, $err];
+    }
+
+    /**
+     * Kebalikan regex: pola yang ditemukan dianggap pelanggaran.
+     * Menampilkan jumlah temuan + contoh pertama agar petugas mudah mengecek.
+     */
+    private function evalNotRegex(array $p, string $text, string $gagal, string $ok, string $err): array
+    {
+        if (empty($p['pattern'])) return ['TIDAK DIPERIKSA', 'Parameter pattern kosong'];
+        $regex = $this->buildRegex($p);
+        try {
+            $count = preg_match_all($regex, $text, $m);
+        } catch (\Throwable) {
+            $count = false;
+        }
+        if ($count === false) {
+            return ['TIDAK DIPERIKSA', 'Regex tidak valid: ' . $regex];
+        }
+        if ($count === 0) return ['OK', $ok];
+
+        $sample = preg_replace('/\s+/u', ' ', trim($m[0][0])) ?? '';
+        return [$gagal, sprintf('%s — %d temuan, contoh: "%s"', $err, $count, mb_substr($sample, 0, 80))];
+    }
+
+    /**
+     * Delimiter '~' supaya pola boleh memuat '/' tanpa di-escape.
+     * Pola lama yang sudah memakai '\/' tetap valid.
+     */
+    private function buildRegex(array $p): string
+    {
+        $pattern = preg_replace('/(?<!\\\\)~/', '\\~', $p['pattern']);
+        return '~' . $pattern . '~' . ($p['flags'] ?? '');
     }
 
     private function evalContains(array $p, string $text, bool $invert, string $gagal, string $ok, string $err): array
@@ -460,7 +629,9 @@ class PdfCheckerService
     {
         return match($target) {
             'page2' => $this->page2Text,
-            'all'   => $this->coverText . "\n" . $this->page2Text,
+            'front' => implode("\n", array_slice($this->pageTexts, 0, self::FRONT_PAGES)),
+            'last'  => $this->pageTexts ? end($this->pageTexts) : '',
+            'all'   => implode("\n", $this->pageTexts),
             default => $this->coverText,
         };
     }
@@ -532,5 +703,10 @@ class PdfCheckerService
         $this->coverText  = '';
         $this->coverWords = [];
         $this->page2Text  = '';
+        $this->pageTexts  = [];
+        $this->ocrPages   = [];
+        $this->imagePages = [];
+        $this->pageW      = 595.0;
+        $this->pageH      = 842.0;
     }
 }
