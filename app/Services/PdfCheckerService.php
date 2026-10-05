@@ -526,9 +526,82 @@ class PdfCheckerService
             'not_contains' => $this->evalContains($param, $text, true,  $gagal, $msgOk, $msgErr),
             'posisi_area'  => $this->evalPosisi($param, $gagal, $msgOk, $msgErr),
             'min_pages'    => $this->evalPages($param, $gagal, $msgOk, $msgErr),
+            'urutan_teks'  => $this->evalUrutan($param, $text, $gagal, $msgOk, $msgErr),
+            'syarat_min'   => $this->evalSyaratMin($param, $text, $gagal, $msgOk, $msgErr),
             'manual'       => ['PERLU DICEK', $msgErr],
             default        => ['TIDAK DIPERIKSA', 'Tipe cek tidak dikenal: ' . $rule->tipe_cek],
         };
+    }
+
+    /**
+     * Cek urutan: kemunculan pertama pola 'before' harus ada sebelum kemunculan pertama pola
+     * 'after' di target text. Dipakai untuk kriteria "Posisi X diletakkan setelah Y".
+     */
+    private function evalUrutan(array $p, string $text, string $gagal, string $ok, string $err): array
+    {
+        $before = $p['before'] ?? null;
+        $after  = $p['after']  ?? null;
+        if (!$before || !$after) return ['TIDAK DIPERIKSA', 'Parameter before/after kosong'];
+
+        $flags = $p['flags'] ?? 'iu';
+        try {
+            $foundBefore = preg_match($this->buildRegex(['pattern' => $before, 'flags' => $flags]), $text, $mb, PREG_OFFSET_CAPTURE);
+            $foundAfter  = preg_match($this->buildRegex(['pattern' => $after,  'flags' => $flags]), $text, $ma, PREG_OFFSET_CAPTURE);
+        } catch (\Throwable) {
+            return ['TIDAK DIPERIKSA', 'Regex before/after tidak valid'];
+        }
+        if ($foundBefore === false || $foundAfter === false) {
+            return ['TIDAK DIPERIKSA', 'Regex before/after tidak valid'];
+        }
+        if (!$foundBefore || !$foundAfter) {
+            return ['TIDAK DIPERIKSA', 'Salah satu komponen tidak ditemukan, urutan tidak bisa diperiksa'];
+        }
+
+        [$hitBefore, $offBefore] = $mb[0];
+        [$hitAfter,  $offAfter]  = $ma[0];
+        $this->addLokasi($offBefore, $hitBefore);
+        $this->addLokasi($offAfter,  $hitAfter);
+
+        return $offBefore < $offAfter ? ['OK', $ok] : [$gagal, $err];
+    }
+
+    /**
+     * Syarat bersyarat: hitung kemunculan 'item_pattern' di SELURUH dokumen; kalau jumlahnya
+     * sudah mencapai 'min', baru 'require_pattern' wajib ditemukan di target text rule ini.
+     * Dipakai untuk "Daftar X dibuat jika minimal N buah" (daftar tabel/gambar/lampiran).
+     */
+    private function evalSyaratMin(array $p, string $text, string $gagal, string $ok, string $err): array
+    {
+        $itemPattern    = $p['item_pattern']    ?? null;
+        $requirePattern = $p['require_pattern'] ?? null;
+        $min            = (int) ($p['min'] ?? 3);
+        if (!$itemPattern || !$requirePattern) return ['TIDAK DIPERIKSA', 'Parameter item_pattern/require_pattern kosong'];
+
+        $flags = $p['flags'] ?? 'iu';
+        try {
+            $count = preg_match_all($this->buildRegex(['pattern' => $itemPattern, 'flags' => $flags]), $this->targetText('all'));
+        } catch (\Throwable) {
+            $count = false;
+        }
+        if ($count === false) return ['TIDAK DIPERIKSA', 'Regex item_pattern tidak valid'];
+
+        if ($count < $min) {
+            return ['OK', "Hanya ditemukan {$count} (< {$min}), daftar tidak wajib dibuat"];
+        }
+
+        try {
+            $found = preg_match($this->buildRegex(['pattern' => $requirePattern, 'flags' => $flags]), $text, $m, PREG_OFFSET_CAPTURE);
+        } catch (\Throwable) {
+            return ['TIDAK DIPERIKSA', 'Regex require_pattern tidak valid'];
+        }
+        if ($found === false) return ['TIDAK DIPERIKSA', 'Regex require_pattern tidak valid'];
+
+        if ($found) {
+            [$hit, $offset] = $m[0];
+            $this->addLokasi($offset, $hit);
+            return ['OK', "{$ok} (ditemukan {$count} item)"];
+        }
+        return [$gagal, "{$err} (ditemukan {$count} item, tapi daftar tidak ditemukan)"];
     }
 
     private function evalRegex(array $p, string $text, string $gagal, string $ok, string $err): array

@@ -36,6 +36,8 @@ class KriteriaPemeriksaan extends Model
             'not_contains' => 'Not Contains — teks TIDAK boleh ada',
             'posisi_area'  => 'Posisi Area — cek letak kata di halaman',
             'min_pages'    => 'Jumlah Halaman — cek min. halaman PDF',
+            'urutan_teks'  => 'Urutan Teks — komponen X harus muncul sebelum komponen Y',
+            'syarat_min'   => 'Syarat Minimal — daftar wajib ada jika item ≥ N buah',
             'manual'       => 'Manual — selalu PERLU DICEK (cek manusia)',
         ];
     }

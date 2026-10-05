@@ -25,11 +25,13 @@ const CheckerReview = (() => {
         'TIDAK DIPERIKSA': 'bg-secondary',
     };
 
+    // Hasil keputusan petugas cukup 3: OK, Tidak Sesuai (gabungan "perlu dicek"/"tidak ada" otomatis
+    // jadi satu keputusan pasti manusia), atau Skip. "Perlu Dicek" tetap ada sebagai status hasil
+    // cek otomatis (lihat STATUS_CLASS/badge), hanya tidak ditawarkan sebagai tombol keputusan.
     const STATUS_BUTTONS = [
-        ['OK',              'OK',          'success'],
-        ['PERLU DICEK',     'Perlu Dicek', 'warning'],
-        ['TIDAK ADA',       'Tidak Ada',   'danger'],
-        ['TIDAK DIPERIKSA', 'Skip',        'secondary'],
+        ['OK',              'OK',           'success'],
+        ['TIDAK ADA',       'Tidak Sesuai', 'danger'],
+        ['TIDAK DIPERIKSA', 'Skip',         'secondary'],
     ];
 
     const PAGE_LABEL = {
@@ -210,6 +212,10 @@ const CheckerReview = (() => {
             try {
                 const win = frame.contentWindow;
                 const app = win.PDFViewerApplication;
+                // PDF bisa punya /PageLayout sendiri yang menimpa hash #spread=even (dan app.open()
+                // dua-fase untuk OCR tidak lewat hash sama sekali) — paksa lewat opsi viewer supaya
+                // default even-spread konsisten di semua kasus, upload maupun API.
+                win.PDFViewerApplicationOptions?.set('spreadModeOnLoad', 2);
                 if (!app?.initializedPromise) { setTimeout(goToPage, 800); return; }
                 app.initializedPromise.then(async () => {
                     if (hasOcr) {

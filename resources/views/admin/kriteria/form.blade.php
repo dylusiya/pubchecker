@@ -209,6 +209,67 @@
                             </div>
                         </div>
 
+                        {{-- URUTAN_TEKS --}}
+                        <div id="panel_urutan_teks" class="param-panel border rounded p-3 bg-light" style="display:none;">
+                            <p class="small fw-semibold mb-2"><i class="mdi mdi-sort-ascending me-1 text-success"></i>Parameter Urutan Teks</p>
+                            <p class="small text-muted mb-2">Kemunculan pertama pola "Sebelum" harus ada di posisi lebih awal daripada pola "Sesudah".</p>
+                            <div class="row g-2">
+                                <div class="col-md-5">
+                                    <label class="form-label small mb-1">Pola "Sebelum" (harus muncul duluan)</label>
+                                    <input type="text" name="param_before" class="form-control form-control-sm font-monospace"
+                                           value="{{ old('param_before', ($kriteria->parameter['before'] ?? '')) }}"
+                                           placeholder="Penyusun\s+Naskah">
+                                </div>
+                                <div class="col-md-5">
+                                    <label class="form-label small mb-1">Pola "Sesudah" (harus muncul belakangan)</label>
+                                    <input type="text" name="param_after" class="form-control form-control-sm font-monospace"
+                                           value="{{ old('param_after', ($kriteria->parameter['after'] ?? '')) }}"
+                                           placeholder="Penyunting">
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="form-label small mb-1">Flags</label>
+                                    <input type="text" name="param_flags" class="form-control form-control-sm font-monospace"
+                                           value="{{ old('param_flags', ($kriteria->parameter['flags'] ?? 'iu')) }}"
+                                           placeholder="iu" maxlength="10">
+                                </div>
+                            </div>
+                        </div>
+
+                        {{-- SYARAT_MIN --}}
+                        <div id="panel_syarat_min" class="param-panel border rounded p-3 bg-light" style="display:none;">
+                            <p class="small fw-semibold mb-2"><i class="mdi mdi-counter me-1 text-secondary"></i>Parameter Syarat Minimal</p>
+                            <p class="small text-muted mb-2">
+                                Hitung kemunculan "Pola Item" di seluruh dokumen. Kalau jumlahnya &ge; Minimum, baru
+                                "Pola Wajib Ada" diperiksa di Target Halaman di atas.
+                            </p>
+                            <div class="row g-2">
+                                <div class="col-md-5">
+                                    <label class="form-label small mb-1">Pola item yang dihitung</label>
+                                    <input type="text" name="param_item_pattern" class="form-control form-control-sm font-monospace"
+                                           value="{{ old('param_item_pattern', ($kriteria->parameter['item_pattern'] ?? '')) }}"
+                                           placeholder="\b(?:Tabel|Table)\s+\d">
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="form-label small mb-1">Minimum</label>
+                                    <input type="number" name="param_min" class="form-control form-control-sm"
+                                           value="{{ old('param_min', ($kriteria->parameter['min'] ?? 3)) }}"
+                                           min="1">
+                                </div>
+                                <div class="col-md-5">
+                                    <label class="form-label small mb-1">Pola yang wajib ada jika syarat terpenuhi</label>
+                                    <input type="text" name="param_require_pattern" class="form-control form-control-sm font-monospace"
+                                           value="{{ old('param_require_pattern', ($kriteria->parameter['require_pattern'] ?? '')) }}"
+                                           placeholder="Daftar\s+Tabel">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label small mb-1">Flags</label>
+                                    <input type="text" name="param_flags" class="form-control form-control-sm font-monospace"
+                                           value="{{ old('param_flags', ($kriteria->parameter['flags'] ?? 'iu')) }}"
+                                           placeholder="iu" maxlength="10">
+                                </div>
+                            </div>
+                        </div>
+
                         {{-- MANUAL --}}
                         <div id="panel_manual" class="param-panel border rounded p-3 bg-light" style="display:none;">
                             <p class="small text-muted mb-0">
@@ -282,7 +343,13 @@ const currentTipe = '{{ old('tipe_cek', $kriteria->tipe_cek ?? 'manual') }}';
 
 function showParamPanel() {
     const tipe = document.getElementById('tipe_cek').value;
-    document.querySelectorAll('.param-panel').forEach(p => p.style.display = 'none');
+
+    // Beberapa panel memakai name field yang sama (mis. param_flags di regex/urutan_teks/syarat_min) —
+    // nonaktifkan input di panel yang disembunyikan supaya tidak ikut terkirim dan menimpa nilai aktif.
+    document.querySelectorAll('.param-panel').forEach(p => {
+        p.style.display = 'none';
+        p.querySelectorAll('input, select, textarea').forEach(el => el.disabled = true);
+    });
 
     const map = {
         regex:        'panel_regex',
@@ -291,10 +358,16 @@ function showParamPanel() {
         not_contains: 'panel_contains',
         posisi_area:  'panel_posisi_area',
         min_pages:    'panel_min_pages',
+        urutan_teks:  'panel_urutan_teks',
+        syarat_min:   'panel_syarat_min',
         manual:       'panel_manual',
     };
     const target = map[tipe];
-    if (target) document.getElementById(target).style.display = 'block';
+    if (target) {
+        const panel = document.getElementById(target);
+        panel.style.display = 'block';
+        panel.querySelectorAll('input, select, textarea').forEach(el => el.disabled = false);
+    }
 }
 
 // Jalankan saat load

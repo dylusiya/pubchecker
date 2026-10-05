@@ -293,6 +293,17 @@ class KriteriaController extends Controller
                 'min'             => is_numeric($get($row, 'param_min')) ? (int) $get($row, 'param_min') : null,
                 'max_chars_page2' => is_numeric($get($row, 'param_max_chars_page2')) ? (int) $get($row, 'param_max_chars_page2') : null,
             ]),
+            'urutan_teks' => array_filter([
+                'before' => $get($row, 'param_before') ?: null,
+                'after'  => $get($row, 'param_after') ?: null,
+                'flags'  => $get($row, 'param_flags') ?: null,
+            ]),
+            'syarat_min' => array_filter([
+                'item_pattern'    => $get($row, 'param_item_pattern') ?: null,
+                'require_pattern' => $get($row, 'param_require_pattern') ?: null,
+                'min'             => is_numeric($get($row, 'param_min')) ? (int) $get($row, 'param_min') : null,
+                'flags'           => $get($row, 'param_flags') ?: null,
+            ]),
             default => null,
         };
 
@@ -321,6 +332,10 @@ class KriteriaController extends Controller
             'param_area'         => 'nullable|string|max:50',
             'param_min'          => 'nullable|integer|min:1',
             'param_max_chars_p2' => 'nullable|integer|min:0',
+            'param_before'          => 'nullable|string',
+            'param_after'           => 'nullable|string',
+            'param_item_pattern'    => 'nullable|string',
+            'param_require_pattern' => 'nullable|string',
         ]);
 
         $tipe  = $data['tipe_cek'];
@@ -340,6 +355,17 @@ class KriteriaController extends Controller
             'min_pages' => array_filter([
                 'min'             => $request->input('param_min') ? (int)$request->input('param_min') : null,
                 'max_chars_page2' => $request->input('param_max_chars_p2') ? (int)$request->input('param_max_chars_p2') : null,
+            ]),
+            'urutan_teks' => array_filter([
+                'before' => $request->input('param_before'),
+                'after'  => $request->input('param_after'),
+                'flags'  => $request->input('param_flags') ?: null,
+            ]),
+            'syarat_min' => array_filter([
+                'item_pattern'    => $request->input('param_item_pattern'),
+                'require_pattern' => $request->input('param_require_pattern'),
+                'min'             => $request->input('param_min') ? (int)$request->input('param_min') : null,
+                'flags'           => $request->input('param_flags') ?: null,
             ]),
             default => null,
         };
