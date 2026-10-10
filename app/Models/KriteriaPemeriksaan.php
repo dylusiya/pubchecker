@@ -46,6 +46,7 @@ class KriteriaPemeriksaan extends Model
             'cover' => 'Halaman 1 (Kover)',
             'page2' => 'Halaman 2',
             'front' => 'Bagian awal (20 halaman pertama)',
+            'tim_penyusun' => 'Halaman Tim Penyusun (dikenali otomatis)',
             'last'  => 'Halaman terakhir (Kover Belakang)',
             'all'   => 'Semua halaman',
         ];

@@ -31,6 +31,10 @@ class PdfCheckerService
 
     private string $coverText  = '';
     private array  $coverWords = [];
+    /** Posisi kata "ISSN" di halaman awal: [{hal, text, x, y, pw, ph}] — untuk cek posisi selain kover. */
+    private array  $frontWords = [];
+    /** Indeks halaman Tim Penyusun (cache): false = belum dicari, null = tidak ditemukan. */
+    private int|null|false $timPenyusunIdx = false;
     private float  $pageW      = 595.0;
     private float  $pageH      = 842.0;
     private string $page2Text  = '';
@@ -118,6 +122,15 @@ class PdfCheckerService
         foreach (array_slice($x['cover_words'] ?? [], 0, 5000) as $w) {
             if (isset($w['text'], $w['x'], $w['y']) && is_string($w['text']) && is_numeric($w['x']) && is_numeric($w['y'])) {
                 $this->coverWords[] = ['text' => $w['text'], 'x' => (float) $w['x'], 'y' => (float) $w['y']];
+            }
+        }
+        foreach (array_slice($x['front_words'] ?? [], 0, 500) as $w) {
+            if (isset($w['hal'], $w['text'], $w['x'], $w['y']) && is_string($w['text']) && is_numeric($w['x']) && is_numeric($w['y'])) {
+                $this->frontWords[] = [
+                    'hal' => (int) $w['hal'], 'text' => $w['text'], 'x' => (float) $w['x'], 'y' => (float) $w['y'],
+                    'pw'  => is_numeric($w['pw'] ?? null) ? (float) $w['pw'] : 0.0,
+                    'ph'  => is_numeric($w['ph'] ?? null) ? (float) $w['ph'] : 0.0,
+                ];
             }
         }
 
@@ -338,6 +351,15 @@ class PdfCheckerService
 
         if ($i === 0) {
             $this->coverWords = $this->extractWords($page);
+        } elseif ($i < self::FRONT_PAGES && stripos($text, 'ISSN') !== false) {
+            // posisi kata ISSN di halaman awal (cek posisi di halaman Tim Penyusun)
+            foreach ($this->extractWords($page) as $w) {
+                // hanya potongan yang diawali ISSN: Smalot kadang mengembalikan satu blok panjang
+                // yang posisinya adalah awal blok, bukan posisi kata ISSN
+                if (preg_match('/^ISSN\b/i', $w['text'])) {
+                    $this->frontWords[] = $w + ['hal' => $i + 1, 'pw' => $this->pageW, 'ph' => $this->pageH];
+                }
+            }
         }
     }
 
@@ -514,6 +536,9 @@ class PdfCheckerService
         $this->currentTarget = $rule->target;
 
         $param = $rule->parameter ?? [];
+        if ($rule->target === 'tim_penyusun' && $this->timPenyusunIndex() === null && $rule->tipe_cek !== 'manual') {
+            return ['TIDAK DIPERIKSA', 'Halaman Tim Penyusun tidak dikenali otomatis (tidak ada "Tim Penyusun"/"Pengarah"/"Penanggung Jawab") — cek manual'];
+        }
         $text  = $this->targetText($rule->target);
         $gagal = $rule->status_gagal;
         $msgOk = $rule->pesan_ok    ?? 'OK';
@@ -569,7 +594,14 @@ class PdfCheckerService
         if ($count === false) {
             return ['TIDAK DIPERIKSA', 'Regex tidak valid: ' . $regex];
         }
-        if ($count === 0) return ['OK', $ok];
+        if ($count === 0) {
+            // parameter opsional "syarat": pola yang harus ada dulu agar hasil OK bermakna
+            // (mis. format ISSN hanya dinilai bila halaman memang memuat ISSN)
+            if (!empty($p['syarat']) && !@preg_match($this->buildRegex(['pattern' => $p['syarat'], 'flags' => $p['flags'] ?? '']), $text)) {
+                return ['TIDAK DIPERIKSA', $p['pesan_syarat'] ?? 'Tidak ada yang perlu diperiksa di halaman ini'];
+            }
+            return ['OK', $ok];
+        }
 
         foreach ($m[0] as [$hit, $offset]) $this->addLokasi($offset, $hit);
         $sample = preg_replace('/\s+/u', ' ', trim($m[0][0][0])) ?? '';
@@ -606,6 +638,11 @@ class PdfCheckerService
         $word = $p['word'] ?? null;
         $area = $p['area'] ?? null;
         if (!$word || !$area) return ['TIDAK DIPERIKSA', 'Parameter word/area kosong'];
+
+        if ($this->currentTarget === 'tim_penyusun') {
+            return $this->evalPosisiTimPenyusun($word, $area, $gagal, $ok, $err);
+        }
+
         $w = $this->findWord($word);
         if (!$w) return ['TIDAK DIPERIKSA', "Kata '$word' tidak ditemukan di kover"];
         $this->lokasi[] = ['hal' => 1, 'teks' => mb_substr($w['text'], 0, 80)];
@@ -618,6 +655,39 @@ class PdfCheckerService
             default         => false,
         };
         $detail = sprintf(' (x=%.0f, y=%.0f)', $w['x'], $w['y']);
+        return $pass ? ['OK', $ok . $detail] : [$gagal, $err . $detail];
+    }
+
+    /**
+     * Posisi kata di halaman Tim Penyusun (mis. ISSN di pojok kanan atas). Ukuran halaman diambil dari
+     * kata itu sendiri — halaman awal tidak selalu seukuran kover.
+     */
+    private function evalPosisiTimPenyusun(string $word, string $area, string $gagal, string $ok, string $err): array
+    {
+        $idx = $this->timPenyusunIndex();
+        $w   = $this->findWord($word, $idx);
+        if (!$w && preg_match('/\b' . preg_quote($word, '/') . '\b/iu', $this->pageTexts[$idx] ?? '')) {
+            return [$gagal, "Kata '$word' ada di halaman Tim Penyusun (hal. " . ($idx + 1) . "), tapi posisinya tidak terbaca — cek manual"];
+        }
+        if (!$w) {
+            // ISSN di halaman ini hanya "jika ada": wajar kosong bila publikasi memang tanpa ISSN
+            $adaDiTempatLain = preg_match('/\b' . preg_quote($word, '/') . '\b/iu', $this->coverText . "\n" . $this->targetText('front'));
+            return $adaDiTempatLain
+                ? [$gagal, "Kata '$word' tidak ditemukan di halaman Tim Penyusun (hal. " . ($idx + 1) . "), padahal publikasi punya $word — cek apakah perlu dicantumkan"]
+                : ['TIDAK DIPERIKSA', "Publikasi tanpa $word"];
+        }
+        $this->lokasi[] = ['hal' => $idx + 1, 'teks' => mb_substr($w['text'], 0, 80)];
+
+        $pw = $w['pw'] ?: $this->pageW;
+        $ph = $w['ph'] ?: $this->pageH;
+        $pass = match ($area) {
+            'top'         => $w['y'] < $ph * 0.30,
+            'top_right'   => $w['x'] > $pw * 0.5 && $w['y'] < $ph * 0.30,
+            'bottom'      => $w['y'] > $ph * 0.60,
+            'bottom_left' => $w['x'] < $pw * 0.35 && $w['y'] > $ph * 0.60,
+            default       => false,
+        };
+        $detail = sprintf(' (hal. %d, x=%.0f, y=%.0f)', $idx + 1, $w['x'], $w['y']);
         return $pass ? ['OK', $ok . $detail] : [$gagal, $err . $detail];
     }
 
@@ -649,6 +719,7 @@ class PdfCheckerService
         $n = count($this->pageTexts);
         return match($target) {
             'page2' => [1, 1],
+            'tim_penyusun' => ($i = $this->timPenyusunIndex()) === null ? [0, 0] : [$i, 1],
             'front' => [0, self::FRONT_PAGES],
             'last'  => [max(0, $n - 1), 1],
             'all'   => [0, $n],
@@ -689,11 +760,40 @@ class PdfCheckerService
         $this->lokasi[] = ['hal' => $hal, 'teks' => mb_substr($line, 0, 80)];
     }
 
-    private function findWord(string $needle): ?array
+    /**
+     * Indeks (0-based) halaman Tim Penyusun di bagian awal: berisi "Tim Penyusun"/"Pengarah"/
+     * "Penanggung Jawab" dan bukan halaman Katalog (yang juga memuat "Penyusun Naskah"/"Penyunting").
+     * Halaman ini sering tidak berjudul, jadi dikenali dari isinya.
+     */
+    private function timPenyusunIndex(): ?int
+    {
+        if ($this->timPenyusunIdx !== false) return $this->timPenyusunIdx;
+
+        $found = null;
+        foreach (array_slice($this->pageTexts, 1, self::FRONT_PAGES - 1, true) as $i => $text) {
+            $isKatalog = preg_match('/Nomor\s+Publikasi|Ukuran\s+Buku|Jumlah\s+Halaman|Publication\s+Number|Book\s+Size/iu', $text);
+            if (!$isKatalog && preg_match('/\bTim\s+Penyusun\b|\bPengarah\b|\bPenanggung\s*Jawab\b|\bEditorial\s+Team\b/iu', $text)) {
+                $found = $i;
+                break;
+            }
+        }
+        return $this->timPenyusunIdx = $found;
+    }
+
+    /**
+     * Kata yang dicari posisinya: di kover, atau di halaman target lain (posisi kata ISSN halaman awal
+     * dikirim terpisah sebagai front_words). Mengembalikan kata + ukuran halamannya.
+     */
+    private function findWord(string $needle, ?int $pageIdx = null): ?array
     {
         $nl = strtolower($needle);
-        foreach ($this->coverWords as $w) {
-            if (str_contains(strtolower($w['text']), $nl)) return $w;
+        $words = $pageIdx === null
+            ? $this->coverWords
+            : array_filter($this->frontWords, fn($w) => $w['hal'] === $pageIdx + 1);
+        foreach ($words as $w) {
+            if (str_contains(strtolower($w['text']), $nl)) {
+                return $w + ['pw' => $this->pageW, 'ph' => $this->pageH];
+            }
         }
         return null;
     }
@@ -755,6 +855,8 @@ class PdfCheckerService
         $this->errorMsg   = '';
         $this->coverText  = '';
         $this->coverWords = [];
+        $this->frontWords = [];
+        $this->timPenyusunIdx = false;
         $this->page2Text  = '';
         $this->pageTexts  = [];
         $this->ocrPages   = [];

@@ -1,20 +1,20 @@
 @extends('layouts.app')
 
 @section('title', 'Detail Publikasi BPS')
+@section('pretitle', 'Import dari API BPS')
+@section('page-title', 'Detail Publikasi')
+@section('page-actions')
+    <a href="{{ route('checker.bps.index') }}" class="btn">
+        <i class="ti ti-arrow-left"></i> Kembali ke Pencarian
+    </a>
+@endsection
 
 @section('content')
 <div class="row">
     <div class="col-sm-12">
 
-        {{-- Back Button --}}
-        <div class="mb-3">
-            <a href="{{ route('checker.bps.index') }}" class="btn btn-light btn-sm">
-                <i class="mdi mdi-arrow-left me-1"></i> Kembali ke Pencarian
-            </a>
-        </div>
-
         {{-- Loading State --}}
-        <div id="loadingSection" class="card card-rounded">
+        <div id="loadingSection" class="card">
             <div class="card-body text-center py-5">
                 <div class="spinner-border text-primary mb-3" role="status">
                     <span class="visually-hidden">Loading...</span>
@@ -24,15 +24,15 @@
         </div>
 
         {{-- Error State --}}
-        <div id="errorSection" style="display:none;" class="card card-rounded border-danger">
+        <div id="errorSection" style="display:none;" class="card border-danger">
             <div class="card-body">
                 <div class="d-flex align-items-start gap-3">
-                    <i class="mdi mdi-alert-circle text-danger" style="font-size:32px;"></i>
+                    <i class="ti ti-alert-circle text-danger" style="font-size:32px;"></i>
                     <div>
                         <h5 class="text-danger mb-2">Gagal Memuat Publikasi</h5>
                         <p class="text-muted mb-3" id="errorMessage"></p>
                         <button class="btn btn-danger btn-sm" onclick="loadPublication()">
-                            <i class="mdi mdi-refresh me-1"></i> Coba Lagi
+                            <i class="ti ti-refresh me-1"></i> Coba Lagi
                         </button>
                     </div>
                 </div>
@@ -43,7 +43,7 @@
         <div id="detailSection" style="display:none;">
 
             {{-- Header Card --}}
-            <div class="card card-rounded mb-3">
+            <div class="card mb-3">
                 <div class="card-body">
                     <div class="row">
                         <div class="col-md-3 text-center">
@@ -119,16 +119,16 @@
 
                             <div class="d-flex gap-2 flex-wrap">
                                 <button class="btn btn-primary" onclick="viewPDF()" id="btnViewPDF">
-                                    <i class="mdi mdi-eye me-1"></i> Lihat PDF
+                                    <i class="ti ti-eye me-1"></i> Lihat PDF
                                 </button>
                                 <a href="#" id="btnDownloadPDF" class="btn btn-success" download>
-                                    <i class="mdi mdi-download me-1"></i> Download PDF
+                                    <i class="ti ti-download me-1"></i> Download PDF
                                 </a>
                                 <a href="#" id="btnOpenNewTab" class="btn btn-outline-primary" target="_blank">
-                                    <i class="mdi mdi-open-in-new me-1"></i> Buka di Tab Baru
+                                    <i class="ti ti-external-link me-1"></i> Buka di Tab Baru
                                 </a>
                                 <button class="btn btn-outline-danger" onclick="checkQuality()" id="btnCheckQuality">
-                                    <i class="mdi mdi-check-decagram me-1"></i> Periksa Kualitas PDF
+                                    <i class="ti ti-rosette-discount-check me-1"></i> Periksa Kualitas PDF
                                 </button>
                             </div>
                         </div>
@@ -137,20 +137,20 @@
             </div>
 
             {{-- PDF Viewer Card --}}
-            <div class="card card-rounded mb-3" id="pdfViewerCard" style="display:none;">
+            <div class="card mb-3" id="pdfViewerCard" style="display:none;">
                 <div class="card-header bg-white d-flex justify-content-between align-items-center">
                     <h5 class="card-title mb-0">
-                        <i class="mdi mdi-file-pdf-box text-danger me-2"></i>
+                        <i class="ti ti-file-type-pdf text-danger me-2"></i>
                         PDF Viewer
                         <small class="text-muted ms-2" id="pdfPageInfo" style="font-size:.8rem;"></small>
                     </h5>
                     <div class="d-flex gap-2 align-items-center">
                         
                         <button class="btn btn-sm btn-outline-secondary" onclick="toggleFullscreen()">
-                            <i class="mdi mdi-fullscreen" id="fullscreenIcon"></i>
+                            <i class="ti ti-maximize" id="fullscreenIcon"></i>
                         </button>
                         <button class="btn btn-sm btn-outline-secondary" onclick="closePdfViewer()">
-                            <i class="mdi mdi-close"></i>
+                            <i class="ti ti-x"></i>
                         </button>
                     </div>
                 </div>
@@ -173,14 +173,14 @@
                 {{-- Fallback --}}
                 <div id="pdfFallbackMsg" style="display:none; padding:60px 0;">
                     <div class="text-center p-4">
-                        <i class="mdi mdi-alert-circle-outline text-warning mb-3" style="font-size:48px;"></i>
+                        <i class="ti ti-alert-circle text-warning mb-3" style="font-size:48px;"></i>
                         <h5 class="mb-2">PDF Tidak Dapat Ditampilkan</h5>
                         <p class="text-muted mb-3">Gunakan tombol di bawah untuk membuka atau mengunduh PDF.</p>
                         <a href="#" id="fallbackDownload" class="btn btn-success me-2" download>
-                            <i class="mdi mdi-download me-1"></i> Download PDF
+                            <i class="ti ti-download me-1"></i> Download PDF
                         </a>
                         <a href="#" id="fallbackNewTab" class="btn btn-primary" target="_blank">
-                            <i class="mdi mdi-open-in-new me-1"></i> Buka di Tab Baru
+                            <i class="ti ti-external-link me-1"></i> Buka di Tab Baru
                         </a>
                     </div>
                 </div>
@@ -198,38 +198,18 @@
 
             {{-- Quality Check Result --}}
             <div id="qualitySection" style="display:none;">
-                <div class="card card-rounded mb-3">
+                <div class="card mb-3">
                     <div class="card-body">
                         <h5 class="card-title mb-3">
-                            <i class="mdi mdi-check-decagram text-success me-2"></i>
+                            <i class="ti ti-rosette-discount-check text-success me-2"></i>
                             Hasil Pemeriksaan Kualitas
                         </h5>
 
-                        <div class="row mb-3">
-                            <div class="col-md-3">
-                                <div class="stat-card-small bg-success-card">
-                                    <small class="d-block mb-1">OK</small>
-                                    <h4 id="statOk">0</h4>
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="stat-card-small bg-warning-card">
-                                    <small class="d-block mb-1">Perlu Dicek</small>
-                                    <h4 id="statWarn">0</h4>
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="stat-card-small bg-danger-card">
-                                    <small class="d-block mb-1">Masalah</small>
-                                    <h4 id="statErr">0</h4>
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="stat-card-small bg-secondary-card">
-                                    <small class="d-block mb-1">Tidak Diperiksa</small>
-                                    <h4 id="statSkip">0</h4>
-                                </div>
-                            </div>
+                        <div class="row row-cards mb-3">
+                            <div class="col-sm-6 col-lg-3"><x-stat label="OK"              value-id="statOk"   icon="circle-check"   color="green" /></div>
+                            <div class="col-sm-6 col-lg-3"><x-stat label="Perlu Dicek"     value-id="statWarn" icon="alert-triangle" color="yellow" /></div>
+                            <div class="col-sm-6 col-lg-3"><x-stat label="Masalah"         value-id="statErr"  icon="circle-x"       color="red" /></div>
+                            <div class="col-sm-6 col-lg-3"><x-stat label="Tidak Diperiksa" value-id="statSkip" icon="circle-minus"   color="secondary" /></div>
                         </div>
 
                         <div class="table-responsive">
@@ -251,7 +231,7 @@
             </div>
 
             {{-- Additional Info --}}
-            <div class="card card-rounded">
+            <div class="card">
                 <div class="card-body">
                     <h5 class="card-title mb-3">Informasi Tambahan</h5>
                     <div class="row">
@@ -272,41 +252,14 @@
 </div>
 @endsection
 
-@push('styles')
-<style>
-    .stat-card-small { border-radius:8px; padding:15px; color:white; text-align:center; }
-    .stat-card-small h4 { font-size:2rem; font-weight:bold; margin:0; }
-    .stat-card-small small { opacity:.9; font-size:.85rem; }
-    .bg-success-card  { background:#28a745; }
-    .bg-warning-card  { background:#ffc107; color:#212529 !important; }
-    .bg-warning-card small, .bg-warning-card h4 { color:#212529 !important; }
-    .bg-danger-card   { background:#dc3545; }
-    .bg-secondary-card{ background:#6c757d; }
-
-    #pdfViewerCard.fullscreen-viewer {
-        position: fixed !important;
-        top: 0; left: 0;
-        width: 100vw !important;
-        height: 100vh !important;
-        z-index: 9999;
-        margin: 0 !important;
-        border-radius: 0 !important;
-        overflow: auto;
-    }
-    #pdfViewerCard.fullscreen-viewer #pdfFrame {
-        height: calc(100vh - 60px) !important;
-    }
-</style>
-@endpush
-
 @push('scripts')
 <script src="{{ asset('pdfjs/build/pdf.mjs') }}" type="module"></script>
-<script src="{{ asset('js/checker-review.js') }}?v={{ filemtime(base_path('js/checker-review.js')) }}"></script>
-<script src="{{ asset('js/pdf-extract.js') }}?v={{ filemtime(base_path('js/pdf-extract.js')) }}"></script>
+<script src="{{ asset('js/checker-review.js') }}?v={{ filemtime(public_path('js/checker-review.js')) }}"></script>
+<script src="{{ asset('js/pdf-extract.js') }}?v={{ filemtime(public_path('js/pdf-extract.js')) }}"></script>
 <script>
 const CSRF = document.querySelector('meta[name=csrf-token]')?.content ?? '';
 const PDFJS_VIEWER = '{{ asset("pdfjs/web/viewer.html") }}';
-CheckerReview.init({ viewerUrl: PDFJS_VIEWER, csrf: CSRF, saveUrl: '{{ route("checker.hasil.review_kategori", "__ID__") }}' });
+CheckerReview.init({ viewerUrl: PDFJS_VIEWER, csrf: CSRF, saveUrl: '{{ route("checker.hasil.review_kategori", "__ID__") }}', contohUrl: '{{ route("checker.contoh.json") }}' });
 PdfExtract.init({ pdfjsBuild: '{{ asset("pdfjs/build") }}/' });
 
 let publicationData = null;
@@ -337,11 +290,11 @@ async function loadPublication() {
     try {
         const res  = await fetch('{{ route("checker.bps.detail") }}', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': CSRF },
             body: JSON.stringify({ pub_id, domain })
         });
         const data = await res.json();
-        if (data.error) { showError(data.error); return; }
+        if (data.error || !res.ok) { showError(data.error || data.message || ('Server membalas ' + res.status)); return; }
         publicationData = data.publication;
         renderPublication(publicationData);
     } catch(e) {
@@ -436,7 +389,7 @@ function viewPDF() {
     card.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
     const proxiedUrl = getProxiedPdfUrl();
-    const viewerUrl = `{{ asset('pdfjs/web/viewer.html') }}?file=${encodeURIComponent(proxiedUrl)}#pagemode=none&spread=even`;
+    const viewerUrl = `{{ asset('pdfjs/web/viewer.html') }}?file=${encodeURIComponent(proxiedUrl)}#pagemode=none`;
 
     const timeout = setTimeout(() => {
         overlay.style.display  = 'none';
@@ -567,11 +520,11 @@ function toggleFullscreen() {
     const icon = document.getElementById('fullscreenIcon');
     if (!isFullscreen) {
         card.classList.add('fullscreen-viewer');
-        icon.className = 'mdi mdi-fullscreen-exit';
+        icon.className = 'ti ti-minimize';
         isFullscreen = true;
     } else {
         card.classList.remove('fullscreen-viewer');
-        icon.className = 'mdi mdi-fullscreen';
+        icon.className = 'ti ti-maximize';
         isFullscreen = false;
     }
 }
@@ -583,7 +536,7 @@ async function checkQuality() {
     const btn = document.getElementById('btnCheckQuality');
     const ori = btn.innerHTML;
     btn.disabled  = true;
-    btn.innerHTML = '<i class="mdi mdi-loading mdi-spin me-1"></i> Memeriksa...';
+    btn.innerHTML = '<i class="ti ti-loader-2 icon-spin me-1"></i> Memeriksa...';
     document.getElementById('qualitySection').style.display = 'none';
 
     // Baca teks PDF di browser (pdf.js + OCR halaman gambar) — server hosting tidak bisa
@@ -591,29 +544,32 @@ async function checkQuality() {
     let extracted = null;
     try {
         extracted = await PdfExtract.extract(getProxiedPdfUrl(), {
-            onProgress: msg => { btn.innerHTML = `<i class="mdi mdi-loading mdi-spin me-1"></i> ${msg}`; },
+            onProgress: msg => { btn.innerHTML = `<i class="ti ti-loader-2 icon-spin me-1"></i> ${msg}`; },
         });
     } catch (e) {
         console.warn('Ekstraksi teks di browser gagal, dibaca di server', e);
     }
-    btn.innerHTML = '<i class="mdi mdi-loading mdi-spin me-1"></i> Memeriksa kriteria...';
+    btn.innerHTML = '<i class="ti ti-loader-2 icon-spin me-1"></i> Memeriksa kriteria...';
 
     try {
         const res  = await fetch('{{ route("checker.bps.run") }}', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF },
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': CSRF },
             body: JSON.stringify({
                 publications: [{
-                    pub_id: publicationData.pub_id,
-                    title:  publicationData.title,
-                    pdf:    pdfUrl
+                    pub_id:  publicationData.pub_id,
+                    title:   publicationData.title,
+                    pdf:     pdfUrl,
+                    domain:  publicationData.domain ? String(publicationData.domain) : null,
+                    issn:    publicationData.issn || null,
+                    rl_date: publicationData.rl_date || null,
                 }],
                 domain: publicationData.domain,
                 extracted: extracted ? JSON.stringify(extracted) : null,
             })
         });
         const data = await res.json();
-        if (data.error) { showAlert('danger', data.error); return; }
+        if (data.error || !res.ok) { showAlert('danger', data.error || data.message || ('Server membalas ' + res.status)); return; }
         const result = data.results?.[0];
         if (result) {
             if (result.checks?.length) {
@@ -646,7 +602,7 @@ function renderQualityResults(result) {
     const checks = result.checks || [];
     document.getElementById('statOk').textContent   = checks.filter(c => c.status === 'OK').length;
     document.getElementById('statWarn').textContent = checks.filter(c => c.status === 'PERLU DICEK').length;
-    document.getElementById('statErr').textContent  = checks.filter(c => c.status === 'TIDAK ADA').length;
+    document.getElementById('statErr').textContent  = checks.filter(c => c.status === 'TIDAK ADA' || c.status === 'TIDAK SESUAI').length;
     document.getElementById('statSkip').textContent = checks.filter(c => c.status === 'TIDAK DIPERIKSA').length;
 
     document.getElementById('qualityChecks').innerHTML = checks.map(ch => `

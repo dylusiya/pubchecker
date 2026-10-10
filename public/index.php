@@ -7,6 +7,23 @@ define('LARAVEL_START', microtime(true));
 
 /*
 |--------------------------------------------------------------------------
+| Alamat aplikasi tetap /pubchecker (bukan /pubchecker/public)
+|--------------------------------------------------------------------------
+|
+| .htaccess di folder utama meneruskan semua permintaan ke folder public/,
+| sehingga SCRIPT_NAME berisi ".../public/index.php". Samakan dengan alamat
+| yang dibuka pengguna supaya Laravel menghitung base URL "/pubchecker" dan
+| route seperti /pubchecker/dashboard tetap cocok.
+|
+*/
+
+if (isset($_SERVER['SCRIPT_NAME']) && basename(dirname($_SERVER['SCRIPT_NAME'])) === 'public') {
+    $_SERVER['SCRIPT_NAME'] = rtrim(dirname($_SERVER['SCRIPT_NAME'], 2), '/\\') . '/index.php';
+    $_SERVER['PHP_SELF']    = $_SERVER['SCRIPT_NAME'];
+}
+
+/*
+|--------------------------------------------------------------------------
 | Check If The Application Is Under Maintenance
 |--------------------------------------------------------------------------
 |
@@ -16,7 +33,7 @@ define('LARAVEL_START', microtime(true));
 |
 */
 
-if (file_exists($maintenance = __DIR__.'/storage/framework/maintenance.php')) {
+if (file_exists($maintenance = __DIR__.'/../storage/framework/maintenance.php')) {
     require $maintenance;
 }
 
@@ -31,7 +48,7 @@ if (file_exists($maintenance = __DIR__.'/storage/framework/maintenance.php')) {
 |
 */
 
-require __DIR__.'/vendor/autoload.php';
+require __DIR__.'/../vendor/autoload.php';
 
 /*
 |--------------------------------------------------------------------------
@@ -44,7 +61,7 @@ require __DIR__.'/vendor/autoload.php';
 |
 */
 
-$app = require_once __DIR__.'/bootstrap/app.php';
+$app = require_once __DIR__.'/../bootstrap/app.php';
 
 $kernel = $app->make(Kernel::class);
 

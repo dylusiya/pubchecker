@@ -855,7 +855,9 @@ const defaultOptions = {
     kind: OptionKind.VIEWER + OptionKind.PREFERENCE
   },
   spreadModeOnLoad: {
-    value: -1,
+    // Pub Checker: tampilan awal selalu dua halaman berdampingan (Even Spread = SpreadMode.EVEN).
+    // Hash "#spread=even" tidak didukung pdf.js — ubah di sini bila pdf.js diperbarui.
+    value: 2,
     kind: OptionKind.VIEWER + OptionKind.PREFERENCE
   },
   textLayerMode: {

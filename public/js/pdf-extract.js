@@ -21,6 +21,7 @@ const PdfExtract = (() => {
     const OCR_SCALE     = 2;    // resolusi render halaman untuk OCR
     const COVER_SCALE   = 3;    // kover depan/belakang dirender lebih tajam: katalog, nama BPS, alamat biasanya kecil
     const MIN_TEXT      = 20;   // < 20 karakter → dianggap halaman gambar (jika memang ada gambar)
+    const FRONT_PAGES   = 20;   // halaman awal — sama dengan PdfCheckerService::FRONT_PAGES
     const MAX_OCR_PAGES = 30;
     const MIN_CONFIDENCE = 60;  // kata OCR di bawah tingkat keyakinan ini dibuang
     const WHITE_MIN     = 220;  // ambang piksel "putih" untuk masker teks putih di kover
@@ -105,9 +106,17 @@ const PdfExtract = (() => {
      * Peringatan sebelum unduhan pertama mesin OCR. Resolve true = lanjut OCR, false = lewati.
      * Dibuat tanpa bergantung pada Bootstrap JS supaya selalu tampil.
      */
+    // Beberapa publikasi bisa meminta OCR bersamaan: tampilkan peringatan sekali saja, dan
+    // pakai jawaban yang sama untuk semua publikasi selama halaman ini terbuka.
+    let ocrChoice = null;   // Promise<boolean>
+
     function confirmFirstDownload(pageNumbers) {
         if (ocrDownloadedBefore()) return Promise.resolve(true);
+        ocrChoice ??= askFirstDownload(pageNumbers);
+        return ocrChoice;
+    }
 
+    function askFirstDownload(pageNumbers) {
         return new Promise(resolve => {
             const list = pageNumbers.length > 8
                 ? pageNumbers.slice(0, 8).join(', ') + ', …'
@@ -118,14 +127,14 @@ const PdfExtract = (() => {
                 <div style="background:#fff;border-radius:10px;max-width:480px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.25);">
                     <div style="padding:18px 20px 8px;">
                         <h5 style="margin:0 0 8px;font-weight:600;">
-                            <i class="mdi mdi-image-text text-primary me-1"></i> Diperlukan OCR untuk membaca gambar
+                            <i class="ti ti-photo-scan text-primary me-1"></i> Diperlukan OCR untuk membaca gambar
                         </h5>
                         <p class="small mb-2">
                             Halaman <strong>${list}</strong> perlu dibaca dengan OCR — judul kover sering berupa
                             gambar JPG / outline, dan halaman hasil scan tidak memiliki teks.
                         </p>
                         <div class="alert alert-warning py-2 px-3 small mb-2">
-                            <i class="mdi mdi-download me-1"></i>
+                            <i class="ti ti-download me-1"></i>
                             Browser Anda akan <strong>mengunduh mesin OCR ± ${OCR_SIZE_MB} MB</strong>
                             (Tesseract, bahasa Indonesia &amp; Inggris) dari internet.
                             Ini hanya terjadi <strong>sekali</strong> — setelahnya tersimpan di cache browser.
@@ -138,7 +147,7 @@ const PdfExtract = (() => {
                     <div style="padding:12px 20px 18px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
                         <button type="button" class="btn btn-light border btn-sm" data-act="skip">Lewati OCR</button>
                         <button type="button" class="btn btn-primary btn-sm" data-act="ok">
-                            <i class="mdi mdi-download me-1"></i> Unduh &amp; Lanjutkan
+                            <i class="ti ti-download me-1"></i> Unduh &amp; Lanjutkan
                         </button>
                     </div>
                 </div>`;
@@ -200,6 +209,16 @@ const PdfExtract = (() => {
         ctx.putImageData(img, 0, 0);
     }
 
+    // Antrean OCR: mesin Tesseract berat (±100–200 MB per proses), jadi saat beberapa publikasi
+    // diperiksa paralel, OCR dijalankan bergiliran — satu per satu.
+    let ocrQueue = Promise.resolve();
+
+    function withOcrLock(fn) {
+        const run = ocrQueue.then(fn);
+        ocrQueue = run.catch(() => {});
+        return run;
+    }
+
     /** @param {Set<number>} coverIdx indeks halaman kover (depan & belakang) — dibaca lebih teliti */
     async function runOcr(pdf, pageIdx, coverIdx, onProgress) {
         await loadScript(TESSERACT_URL);
@@ -210,7 +229,7 @@ const PdfExtract = (() => {
                 const label = OCR_STATUS[m.status];
                 if (!label) return;
                 const pct = Math.round((m.progress || 0) * 100);
-                onProgress(`${label}${current}… ${pct}%`, m.progress || 0);
+                onProgress(`${label}${current}… ${pct}%`, m.progress || 0, 'ocr');
             },
         });
         markOcrDownloaded();
@@ -286,19 +305,25 @@ const PdfExtract = (() => {
     // ── API utama ───────────────────────────────────────────────────
     /**
      * @param {ArrayBuffer|string} source  isi file (upload) atau URL PDF (same-origin/proxy)
-     * @param {{onProgress?: (msg:string, fraction:number) => void}} opts
+     * @param {{onProgress?: (msg:string, fraction:number, phase:'download'|'text'|'ocr-wait'|'ocr') => void}} opts
      */
     async function extract(source, { onProgress = () => {} } = {}) {
         const lib  = await loadPdfjs();
         const task = lib.getDocument(typeof source === 'string'
             ? { url: source, disableRange: true, disableStream: true }
             : { data: source });
+        const mb = b => (b / 1048576).toFixed(1);
+        task.onProgress = ({ loaded, total }) => {
+            onProgress(total ? `Mengunduh PDF ${mb(loaded)}/${mb(total)} MB` : `Mengunduh PDF ${mb(loaded)} MB`,
+                total ? loaded / total : 0, 'download');
+        };
         const pdf  = await task.promise;
         const n    = pdf.numPages;
 
         const pages = [];
         const imageCandidates = [];
         let coverWords = [], pageW = 595, pageH = 842, coverHasImage = false;
+        const frontWords = []; // posisi kata "ISSN" di halaman awal (mis. pojok kanan atas halaman Tim Penyusun)
 
         for (let i = 1; i <= n; i++) {
             const page    = await pdf.getPage(i);
@@ -312,13 +337,18 @@ const PdfExtract = (() => {
                 pageH = Math.round(vp.height);
                 coverWords = coverWordsFrom(content.items, vp);
                 coverHasImage = await hasImage(page, lib);
+            } else if (i <= FRONT_PAGES && /ISSN/i.test(text)) {
+                const vp = page.getViewport({ scale: 1 });
+                coverWordsFrom(content.items, vp)
+                    .filter(w => /ISSN/i.test(w.text))
+                    .forEach(w => frontWords.push({ hal: i, ...w, pw: Math.round(vp.width), ph: Math.round(vp.height) }));
             }
             const textPoor = text.replace(/\s+/g, '').length < MIN_TEXT;
             if (textPoor && (i === 1 ? coverHasImage : await hasImage(page, lib))) {
                 imageCandidates.push(i - 1);
             }
             page.cleanup();
-            onProgress(`Membaca teks halaman ${i}/${n}`, i / n);
+            onProgress(`Membaca teks halaman ${i}/${n}`, i / n, 'text');
         }
 
         // Kover depan & kover belakang (halaman terakhir) selalu di-OCR walau sudah ada teks: judul,
@@ -333,7 +363,9 @@ const PdfExtract = (() => {
         if (ocrIdx.length) {
             const ok = await confirmFirstDownload(ocrIdx.map(i => i + 1));
             if (ok) {
-                const { texts, coverWords: ocrWords, ocrLines } = await runOcr(pdf, ocrIdx, coverIdx, onProgress);
+                onProgress('Menunggu giliran OCR…', 0, 'ocr-wait');
+                const { texts, coverWords: ocrWords, ocrLines } =
+                    await withOcrLock(() => runOcr(pdf, ocrIdx, coverIdx, onProgress));
                 ocrLinesAll = ocrLines;
                 Object.entries(texts).forEach(([idx, t]) => {
                     pages[idx] = supplement.has(Number(idx)) ? pages[idx] + '\n' + t : t;
@@ -352,6 +384,7 @@ const PdfExtract = (() => {
             file_size: fileSize || 0,
             pages,
             cover_words: coverWords,
+            front_words: frontWords,
             page_w: pageW,
             page_h: pageH,
             method: ocrPages.length ? 'pdfjs+ocr' : 'pdfjs',

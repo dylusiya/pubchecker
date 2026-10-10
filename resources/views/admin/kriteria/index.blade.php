@@ -1,74 +1,44 @@
 @extends('layouts.app')
 
 @section('title', 'Kelola Kriteria Pemeriksaan')
+@section('pretitle', 'Administrator')
+@section('page-title', 'Kelola Kriteria Pemeriksaan')
+@section('page-subtitle', $items->total() . ' kriteria terdaftar — urutan menentukan tampilan di hasil pemeriksaan')
+@section('page-actions')
+    <a href="{{ route('admin.kriteria.contoh.index') }}" class="btn">
+        <i class="ti ti-photo"></i> Contoh per Kategori
+    </a>
+    <button type="button" class="btn" data-bs-toggle="modal" data-bs-target="#importModal">
+        <i class="ti ti-file-import"></i> Import
+    </button>
+    <a href="{{ route('admin.kriteria.create') }}" class="btn btn-primary">
+        <i class="ti ti-plus"></i> Tambah Kriteria
+    </a>
+@endsection
 
 @section('content')
 <div class="row">
     <div class="col-sm-12">
 
-        {{-- Header --}}
-        <div class="card card-rounded mb-3">
-            <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                    <div>
-                        <h4 class="card-title mb-1">
-                            <i class="mdi mdi-format-list-checks text-primary me-2"></i>
-                            Kelola Kriteria Pemeriksaan
-                        </h4>
-                        <p class="text-muted mb-0 small">
-                            {{ $items->total() }} kriteria terdaftar —
-                            urutan menentukan tampilan di hasil pemeriksaan
-                        </p>
-                    </div>
-                    <div class="d-flex gap-2">
-                        <a href="{{ route('dashboard') }}" class="btn btn-light btn-sm border">
-                            <i class="mdi mdi-home"></i>
-                        </a>
-                        <button type="button" class="btn btn-outline-success btn-sm" data-bs-toggle="modal" data-bs-target="#importModal">
-                            <i class="mdi mdi-file-import-outline me-1"></i> Import
-                        </button>
-                        <a href="{{ route('admin.kriteria.create') }}" class="btn btn-primary btn-sm">
-                            <i class="mdi mdi-plus me-1"></i> Tambah Kriteria
-                        </a>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        {{-- Alert --}}
-        @if(session('success'))
-        <div class="alert alert-success alert-dismissible fade show py-2 small" role="alert">
-            <i class="mdi mdi-check-circle me-1"></i>{{ session('success') }}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        </div>
-        @endif
-
-        @if(session('error'))
-        <div class="alert alert-danger alert-dismissible fade show py-2 small" role="alert">
-            <i class="mdi mdi-alert-circle me-1"></i>{{ session('error') }}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        </div>
-        @endif
-
         {{-- Filter & Search --}}
-        <div class="card card-rounded mb-3">
+        <div class="card mb-3">
             <div class="card-body py-3">
                 <form method="GET" action="{{ route('admin.kriteria.index') }}"
                       class="d-flex gap-2 align-items-center flex-wrap">
                     <div class="input-group input-group-sm" style="width:260px;">
                         <span class="input-group-text bg-white border-end-0">
-                            <i class="mdi mdi-magnify text-muted"></i>
+                            <i class="ti ti-search text-muted"></i>
                         </span>
                         <input type="text" name="q" value="{{ $q }}"
                                class="form-control border-start-0 ps-0"
                                placeholder="Cari kode, kategori, deskripsi...">
                     </div>
                     <button class="btn btn-primary btn-sm" type="submit">
-                        <i class="mdi mdi-filter me-1"></i> Cari
+                        <i class="ti ti-filter me-1"></i> Cari
                     </button>
                     @if($q)
                     <a href="{{ route('admin.kriteria.index') }}" class="btn btn-light btn-sm border">
-                        <i class="mdi mdi-close me-1"></i> Reset
+                        <i class="ti ti-x me-1"></i> Reset
                     </a>
                     @endif
                 </form>
@@ -76,7 +46,7 @@
         </div>
 
         {{-- Tabel --}}
-        <div class="card card-rounded">
+        <div class="card">
             <div class="card-body p-0">
                 <div class="table-responsive">
                     <table class="table table-hover mb-0" style="font-size:13px;">
@@ -135,14 +105,14 @@
                                         <button type="submit"
                                                 class="btn btn-sm {{ $item->aktif ? 'btn-success' : 'btn-outline-secondary' }} py-0 px-2"
                                                 title="{{ $item->aktif ? 'Aktif — klik untuk nonaktifkan' : 'Nonaktif — klik untuk aktifkan' }}">
-                                            <i class="mdi {{ $item->aktif ? 'mdi-check' : 'mdi-close' }}"></i>
+                                            <i class="ti {{ $item->aktif ? 'ti-check' : 'ti-x' }}"></i>
                                         </button>
                                     </form>
                                 </td>
                                 <td class="text-center">
                                     <a href="{{ route('admin.kriteria.edit', $item) }}"
                                        class="btn btn-sm btn-outline-primary py-0 px-2" title="Edit">
-                                        <i class="mdi mdi-pencil"></i>
+                                        <i class="ti ti-pencil"></i>
                                     </a>
                                     <form action="{{ route('admin.kriteria.destroy', $item) }}"
                                           method="POST" class="d-inline"
@@ -150,7 +120,7 @@
                                         @csrf @method('DELETE')
                                         <button type="submit"
                                                 class="btn btn-sm btn-outline-danger py-0 px-2" title="Hapus">
-                                            <i class="mdi mdi-trash-can-outline"></i>
+                                            <i class="ti ti-trash"></i>
                                         </button>
                                     </form>
                                 </td>
@@ -158,7 +128,7 @@
                             @empty
                             <tr>
                                 <td colspan="9" class="text-center py-5 text-muted">
-                                    <i class="mdi mdi-format-list-checks d-block mb-2"
+                                    <i class="ti ti-list-check d-block mb-2"
                                        style="font-size:36px; opacity:.3;"></i>
                                     Belum ada kriteria
                                 </td>
@@ -187,7 +157,7 @@
                 @csrf
                 <div class="modal-header">
                     <h5 class="modal-title">
-                        <i class="mdi mdi-file-import-outline me-1"></i> Import Kriteria dari Excel/CSV
+                        <i class="ti ti-file-import me-1"></i> Import Kriteria dari Excel/CSV
                     </h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
@@ -202,7 +172,7 @@
                         Kriteria dengan <code>kode</code> yang sudah ada akan diperbarui (upsert), kode baru akan ditambahkan.
                     </p>
                     <a href="{{ route('admin.kriteria.import.template') }}" class="small d-inline-flex align-items-center gap-1 mb-3">
-                        <i class="mdi mdi-download"></i> Download template contoh
+                        <i class="ti ti-download"></i> Download template contoh
                     </a>
                     <input type="file" name="file" class="form-control form-control-sm"
                            accept=".xlsx,.xls,.csv" required>
@@ -210,7 +180,7 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-light btn-sm border" data-bs-dismiss="modal">Batal</button>
                     <button type="submit" class="btn btn-success btn-sm">
-                        <i class="mdi mdi-upload me-1"></i> Import
+                        <i class="ti ti-upload me-1"></i> Import
                     </button>
                 </div>
             </form>

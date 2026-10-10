@@ -1,85 +1,61 @@
-<nav class="sidebar sidebar-offcanvas" id="sidebar">
-    <ul class="nav">
+@php
+    $isAdmin       = auth()->check() && auth()->user()->role === 'admin';
+    $totalSesi     = \App\Models\SesiPemeriksaan::count();
+    $totalKriteria = $isAdmin ? \App\Models\KriteriaPemeriksaan::where('aktif', true)->count() : 0;
 
-        {{-- Dashboard --}}
-        <li class="nav-item {{ request()->routeIs('dashboard') ? 'active' : '' }}">
-            <a class="nav-link" href="{{ route('dashboard') }}">
-                <i class="mdi mdi-grid-large menu-icon"></i>
-                <span class="menu-title">Dashboard</span>
-            </a>
-        </li>
+    $menu = [
+        ['route' => 'dashboard',         'active' => 'dashboard',        'icon' => 'home',           'label' => 'Dashboard'],
+        ['route' => 'checker.index',     'active' => 'checker.index',    'icon' => 'file-search',    'label' => 'Pemeriksaan'],
+        ['route' => 'checker.bps.index', 'active' => 'checker.bps.*',    'icon' => 'cloud-download', 'label' => 'Import API BPS'],
+        ['route' => 'checker.riwayat',   'active' => 'checker.riwayat*', 'icon' => 'history',        'label' => 'Riwayat Sesi', 'badge' => $totalSesi],
+    ];
+    $adminMenu = [
+        ['route' => 'admin.kriteria.index',        'active' => ['admin.kriteria.index', 'admin.kriteria.create', 'admin.kriteria.edit'], 'icon' => 'list-check', 'label' => 'Kelola Kriteria', 'badge' => $totalKriteria],
+        ['route' => 'admin.kriteria.contoh.index', 'active' => 'admin.kriteria.contoh.*', 'icon' => 'photo',      'label' => 'Contoh per Kategori'],
+        ['route' => 'admin.users.index',           'active' => 'admin.users.*',           'icon' => 'users',      'label' => 'Manajemen User'],
+    ];
+    $adminActive = $isAdmin && request()->routeIs('admin.*');
+@endphp
 
-        {{-- Publication Checker --}}
-        <li class="nav-item nav-category">Publication Checker</li>
+{{-- Menu horizontal di bawah header (nama file tetap "sidebar" agar include lama tidak berubah) --}}
+<header class="navbar-expand-md">
+    <div class="collapse navbar-collapse" id="navbar-menu">
+        <div class="navbar">
+            <div class="container-xl">
+                <ul class="navbar-nav">
+                    @foreach($menu as $m)
+                        <li class="nav-item {{ request()->routeIs($m['active']) ? 'active' : '' }}">
+                            <a class="nav-link" href="{{ route($m['route']) }}">
+                                <span class="nav-link-icon d-md-none d-lg-inline-block"><i class="ti ti-{{ $m['icon'] }}"></i></span>
+                                <span class="nav-link-title">{{ $m['label'] }}</span>
+                                @if(!empty($m['badge']))
+                                    <span class="badge badge-sm bg-primary-lt ms-2">{{ $m['badge'] }}</span>
+                                @endif
+                            </a>
+                        </li>
+                    @endforeach
 
-        <li class="nav-item {{ request()->routeIs('checker.index') ? 'active' : '' }}">
-            <a class="nav-link" href="{{ route('checker.index') }}">
-                <i class="menu-icon mdi mdi-file-search-outline"></i>
-                <span class="menu-title">Pemeriksaan</span>
-            </a>
-        </li>
-
-        <li class="nav-item {{ request()->routeIs('checker.riwayat*') ? 'active' : '' }}">
-            <a class="nav-link" href="{{ route('checker.riwayat') }}">
-                <i class="menu-icon mdi mdi-history"></i>
-                <span class="menu-title">Riwayat Sesi</span>
-                @php $totalSesi = \App\Models\SesiPemeriksaan::count(); @endphp
-                @if($totalSesi > 0)
-                    <span class="badge badge-success ms-2">{{ $totalSesi }}</span>
-                @endif
-            </a>
-        </li>
-
-        <li class="nav-item {{ request()->routeIs('checker.bps.*') ? 'active' : '' }}">
-            <a class="nav-link" href="{{ route('checker.bps.index') }}">
-                <i class="menu-icon mdi mdi-cloud-download-outline"></i>
-                <span class="menu-title">Import dari API BPS</span>
-            </a>
-        </li>
-
-        {{-- Administrator — hanya tampil untuk admin --}}
-        @if(auth()->check() && auth()->user()->role === 'admin')
-        <li class="nav-item nav-category">Administrator</li>
-
-        <li class="nav-item {{ request()->routeIs('admin.users.*') ? 'active' : '' }}">
-            <a class="nav-link" href="{{ route('admin.users.index') }}">
-                <i class="menu-icon mdi mdi-account-multiple"></i>
-                <span class="menu-title">Manajemen User</span>
-            </a>
-        </li>
-
-        <li class="nav-item {{ request()->routeIs('admin.kriteria.*') ? 'active' : '' }}">
-            <a class="nav-link" href="{{ route('admin.kriteria.index') }}">
-                <i class="menu-icon mdi mdi-format-list-checks"></i>
-                <span class="menu-title">Kelola Kriteria</span>
-                @php $totalKriteria = \App\Models\KriteriaPemeriksaan::where('aktif', true)->count(); @endphp
-                @if($totalKriteria > 0)
-                    <span class="badge badge-primary ms-2">{{ $totalKriteria }}</span>
-                @endif
-            </a>
-        </li>
-        @endif
-
-        {{-- Akun --}}
-        <li class="nav-item nav-category">Akun</li>
-
-        <li class="nav-item {{ request()->routeIs('profile.*') ? 'active' : '' }}">
-            <a class="nav-link" href="{{ route('profile.index') }}">
-                <i class="menu-icon mdi mdi-account"></i>
-                <span class="menu-title">Profil Saya</span>
-            </a>
-        </li>
-
-        <li class="nav-item">
-            <form method="POST" action="{{ route('logout') }}" id="logout-form-sidebar">
-                @csrf
-                <a class="nav-link" href="#"
-                   onclick="event.preventDefault(); document.getElementById('logout-form-sidebar').submit();">
-                    <i class="menu-icon mdi mdi-logout text-danger"></i>
-                    <span class="menu-title text-danger">Logout</span>
-                </a>
-            </form>
-        </li>
-
-    </ul>
-</nav>
+                    @if($isAdmin)
+                        <li class="nav-item dropdown {{ $adminActive ? 'active' : '' }}">
+                            <a class="nav-link dropdown-toggle" href="#navbar-admin" data-bs-toggle="dropdown"
+                               data-bs-auto-close="outside" role="button" aria-expanded="false">
+                                <span class="nav-link-icon d-md-none d-lg-inline-block"><i class="ti ti-settings"></i></span>
+                                <span class="nav-link-title">Administrator</span>
+                            </a>
+                            <div class="dropdown-menu">
+                                @foreach($adminMenu as $m)
+                                    <a class="dropdown-item {{ request()->routeIs(...(array) $m['active']) ? 'active' : '' }}" href="{{ route($m['route']) }}">
+                                        <i class="ti ti-{{ $m['icon'] }} dropdown-item-icon"></i> {{ $m['label'] }}
+                                        @if(!empty($m['badge']))
+                                            <span class="badge badge-sm bg-primary-lt ms-auto">{{ $m['badge'] }}</span>
+                                        @endif
+                                    </a>
+                                @endforeach
+                            </div>
+                        </li>
+                    @endif
+                </ul>
+            </div>
+        </div>
+    </div>
+</header>

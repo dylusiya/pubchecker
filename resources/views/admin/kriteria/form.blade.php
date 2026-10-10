@@ -1,34 +1,22 @@
 @extends('layouts.app')
 
 @section('title', isset($kriteria) ? 'Edit Kriteria ' . $kriteria->kode : 'Tambah Kriteria')
+@section('pretitle', 'Kelola Kriteria')
+@section('page-title', isset($kriteria) ? 'Edit Kriteria ' . $kriteria->kode : 'Tambah Kriteria Baru')
+@section('page-subtitle', 'Konfigurasi kriteria pemeriksaan publikasi BPS')
+@section('page-actions')
+    <a href="{{ route('admin.kriteria.index') }}" class="btn">
+        <i class="ti ti-arrow-left"></i> Kembali
+    </a>
+@endsection
 
 @section('content')
 <div class="row justify-content-center">
     <div class="col-lg-8">
 
-        {{-- Header --}}
-        <div class="card card-rounded mb-3">
-            <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <h4 class="card-title mb-1">
-                            <i class="mdi mdi-{{ isset($kriteria) ? 'pencil' : 'plus-circle' }} text-primary me-2"></i>
-                            {{ isset($kriteria) ? 'Edit Kriteria ' . $kriteria->kode : 'Tambah Kriteria Baru' }}
-                        </h4>
-                        <p class="text-muted mb-0 small">
-                            Konfigurasi kriteria pemeriksaan kover publikasi BPS
-                        </p>
-                    </div>
-                    <a href="{{ route('admin.kriteria.index') }}" class="btn btn-light btn-sm border">
-                        <i class="mdi mdi-arrow-left me-1"></i> Kembali
-                    </a>
-                </div>
-            </div>
-        </div>
-
         @if($errors->any())
         <div class="alert alert-danger py-2 small mb-3">
-            <i class="mdi mdi-alert me-1"></i>
+            <i class="ti ti-alert-triangle me-1"></i>
             <strong>Ada kesalahan:</strong>
             <ul class="mb-0 mt-1">
                 @foreach($errors->all() as $e)
@@ -45,7 +33,7 @@
             @if(isset($kriteria)) @method('PUT') @endif
 
             {{-- Identitas --}}
-            <div class="card card-rounded mb-3">
+            <div class="card mb-3">
                 <div class="card-body">
                     <h5 class="card-title mb-3">Identitas Kriteria</h5>
                     <div class="row g-3">
@@ -83,7 +71,7 @@
             </div>
 
             {{-- Konfigurasi --}}
-            <div class="card card-rounded mb-3">
+            <div class="card mb-3">
                 <div class="card-body">
                     <h5 class="card-title mb-3">Konfigurasi Pengecekan</h5>
                     <div class="row g-3">
@@ -124,7 +112,7 @@
 
                         {{-- REGEX --}}
                         <div id="panel_regex" class="param-panel border rounded p-3 bg-light" style="display:none;">
-                            <p class="small fw-semibold mb-2"><i class="mdi mdi-code-braces me-1 text-info"></i>Parameter Regex</p>
+                            <p class="small fw-semibold mb-2"><i class="ti ti-code me-1 text-info"></i>Parameter Regex</p>
                             <div class="row g-2">
                                 <div class="col-md-9">
                                     <label class="form-label small mb-1">Pattern (tanpa delimiter)</label>
@@ -140,12 +128,25 @@
                                            placeholder="i" maxlength="10">
                                     <small class="text-muted"><code>i</code> = case-insensitive</small>
                                 </div>
+                                <div class="col-md-6">
+                                    <label class="form-label small mb-1">Syarat (opsional, khusus not_regex)</label>
+                                    <input type="text" name="param_syarat" class="form-control form-control-sm font-monospace"
+                                           value="{{ old('param_syarat', ($kriteria->parameter['syarat'] ?? '')) }}"
+                                           placeholder="\bISSN\b">
+                                    <small class="text-muted">Bila pola ini tidak ada di target, hasilnya Skip (bukan OK)</small>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label small mb-1">Pesan bila syarat tidak terpenuhi</label>
+                                    <input type="text" name="param_pesan_syarat" class="form-control form-control-sm"
+                                           value="{{ old('param_pesan_syarat', ($kriteria->parameter['pesan_syarat'] ?? '')) }}"
+                                           placeholder="Tidak ada ISSN di halaman ini" maxlength="200">
+                                </div>
                             </div>
                         </div>
 
                         {{-- CONTAINS / NOT_CONTAINS --}}
                         <div id="panel_contains" class="param-panel border rounded p-3 bg-light" style="display:none;">
-                            <p class="small fw-semibold mb-2"><i class="mdi mdi-text-search me-1 text-primary"></i>Parameter Contains</p>
+                            <p class="small fw-semibold mb-2"><i class="ti ti-text-scan-2 me-1 text-primary"></i>Parameter Contains</p>
                             <div class="row g-2 align-items-end">
                                 <div class="col-md-9">
                                     <label class="form-label small mb-1">Teks yang dicari</label>
@@ -166,7 +167,7 @@
 
                         {{-- POSISI_AREA --}}
                         <div id="panel_posisi_area" class="param-panel border rounded p-3 bg-light" style="display:none;">
-                            <p class="small fw-semibold mb-2"><i class="mdi mdi-crosshairs-gps me-1 text-warning"></i>Parameter Posisi Area</p>
+                            <p class="small fw-semibold mb-2"><i class="ti ti-current-location me-1 text-warning"></i>Parameter Posisi Area</p>
                             <div class="row g-2">
                                 <div class="col-md-5">
                                     <label class="form-label small mb-1">Kata yang dicari posisinya</label>
@@ -191,7 +192,7 @@
 
                         {{-- MIN_PAGES --}}
                         <div id="panel_min_pages" class="param-panel border rounded p-3 bg-light" style="display:none;">
-                            <p class="small fw-semibold mb-2"><i class="mdi mdi-file-multiple-outline me-1 text-dark"></i>Parameter Halaman</p>
+                            <p class="small fw-semibold mb-2"><i class="ti ti-files me-1 text-dark"></i>Parameter Halaman</p>
                             <div class="row g-2">
                                 <div class="col-md-4">
                                     <label class="form-label small mb-1">Minimum halaman</label>
@@ -212,7 +213,7 @@
                         {{-- MANUAL --}}
                         <div id="panel_manual" class="param-panel border rounded p-3 bg-light" style="display:none;">
                             <p class="small text-muted mb-0">
-                                <i class="mdi mdi-information-outline me-1"></i>
+                                <i class="ti ti-info-circle me-1"></i>
                                 Tipe <strong>manual</strong> tidak butuh parameter — kriteria ini selalu menghasilkan
                                 <span class="badge bg-warning text-dark">PERLU DICEK</span> dan harus diperiksa manusia.
                             </p>
@@ -223,7 +224,7 @@
             </div>
 
             {{-- Pesan --}}
-            <div class="card card-rounded mb-3">
+            <div class="card mb-3">
                 <div class="card-body">
                     <h5 class="card-title mb-3">Pesan Hasil</h5>
                     <div class="row g-3">
@@ -248,7 +249,7 @@
             </div>
 
             {{-- Aktif + submit --}}
-            <div class="card card-rounded mb-4">
+            <div class="card mb-4">
                 <div class="card-body d-flex justify-content-between align-items-center">
                     <div class="form-check form-switch mb-0">
                         <input class="form-check-input" type="checkbox" role="switch"
@@ -264,7 +265,7 @@
                             Batal
                         </a>
                         <button type="submit" class="btn btn-primary">
-                            <i class="mdi mdi-content-save me-1"></i>
+                            <i class="ti ti-device-floppy me-1"></i>
                             {{ isset($kriteria) ? 'Simpan Perubahan' : 'Tambah Kriteria' }}
                         </button>
                     </div>

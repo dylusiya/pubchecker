@@ -1,0 +1,141 @@
+/*
+ * Gaya tambahan Pub Checker di atas Tabler (satu-satunya CSS kustom aplikasi —
+ * halaman tidak memakai blok <style> sendiri). Warna memakai variabel Tabler
+ * supaya ikut mode gelap.
+ */
+
+/* ── Tombol & ikon ───────────────────────────────────────── */
+/* Jarak ikon-teks di tombol: `gap` pada .btn (inline-flex) juga berlaku untuk teks di dalamnya,
+   dan tidak berpengaruh pada tombol yang hanya berisi ikon. */
+.btn { column-gap: 0.3rem; }
+.btn > .ti.me-1, .btn > .ti.me-2 { margin-inline-end: 0 !important; }
+.btn > .ti { font-size: 1.05em; }
+
+/* Ikon berputar untuk status memuat (mis. "ti ti-loader-2 icon-spin") */
+.icon-spin {
+    display: inline-block;
+    animation: pc-spin 1s linear infinite;
+}
+@keyframes pc-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Badge berlatar warna solid: Tabler tidak otomatis memakai teks putih */
+.badge.bg-primary,
+.badge.bg-success,
+.badge.bg-danger,
+.badge.bg-info,
+.badge.bg-secondary,
+.badge.bg-dark { color: #fff; }
+.badge.bg-warning { color: #1d273b; }
+.badge.bg-light   { color: var(--tblr-body-color); }
+
+/* ── Mode gelap: kelas warna terang yang ditulis langsung di halaman ── */
+[data-bs-theme=dark] .bg-white { background-color: var(--tblr-bg-surface) !important; }
+[data-bs-theme=dark] .bg-light { background-color: var(--tblr-bg-surface-secondary) !important; }
+
+/* ── Pemeriksaan: file yang dipilih (checker) ────────────── */
+.file-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: var(--tblr-bg-surface-secondary);
+    border: 1px solid var(--tblr-border-color);
+    font-size: 12px;
+}
+
+/* ── Baris hasil yang bisa dibuka-tutup (checker, riwayat-detail) ── */
+.result-row-header {
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.result-row-header:hover { background: var(--tblr-bg-surface-secondary) !important; }
+
+/* ── Kartu hasil pencarian publikasi (bps-import) ───────── */
+.pub-card {
+    border: 1px solid var(--tblr-border-color);
+    border-radius: var(--tblr-border-radius-lg);
+    padding: 12px;
+    background: var(--tblr-bg-surface);
+    transition: border-color 0.15s;
+}
+.pub-card:hover { border-color: var(--tblr-primary); }
+.pub-card .pub-cover {
+    width: 50px;
+    height: 70px;
+    object-fit: cover;
+    border-radius: 4px;
+    background: var(--tblr-bg-surface-secondary);
+    flex-shrink: 0;
+}
+@media (max-width: 768px) {
+    .pub-card .pub-cover { width: 100%; height: 120px; max-width: 150px; margin: 0 auto; }
+    .pub-card .flex-grow-1 { min-width: 100% !important; }
+    .pub-card .flex-shrink-0 { width: 100%; justify-content: center !important; flex-wrap: wrap; }
+}
+
+/* ── Kartu pemeriksaan beberapa publikasi (batch-check.js) ── */
+.batch-cover {
+    height: 140px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: var(--tblr-bg-surface-secondary);
+    border-bottom: 1px solid var(--tblr-border-color);
+    border-radius: var(--tblr-card-border-radius) var(--tblr-card-border-radius) 0 0;
+}
+.batch-cover img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.batch-cover > .ti { font-size: 3rem; color: var(--tblr-red); }
+.batch-title {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    min-height: 2.6em;
+    line-height: 1.3;
+}
+.batch-steps li { display: flex; align-items: center; gap: 0.4rem; padding: 1px 0; }
+
+/* Daftar hasil "Cari kriteria" di panel tinjauan: melayang di atas isi panel, jadi perlu latar sendiri */
+#revCariHasil { background: var(--tblr-bg-surface); border-radius: var(--tblr-border-radius); }
+#revCariHasil .list-group-item { background: var(--tblr-bg-surface); }
+#revCariHasil .list-group-item-action:hover { background: var(--tblr-bg-surface-secondary); }
+
+/* Tab publikasi di panel tinjauan (bila memeriksa beberapa publikasi) */
+.review-file-tabs { flex-wrap: nowrap; overflow-x: auto; }
+.review-file-tabs .nav-link { white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── Contoh yang benar per kategori (admin & panel tinjauan) ── */
+.contoh-thumb {
+    display: block;
+    width: 100%;
+    height: 140px;
+    object-fit: contain;
+    border-radius: var(--tblr-border-radius);
+    background: var(--tblr-bg-surface-secondary);
+}
+.contoh-thumb-pdf {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    color: var(--tblr-red);
+}
+.contoh-thumb-pdf .ti { font-size: 2.5rem; }
+
+/* ── Viewer PDF layar penuh (bps-detail) ─────────────────── */
+#pdfViewerCard.fullscreen-viewer {
+    position: fixed !important;
+    inset: 0;
+    width: 100vw !important;
+    height: 100vh !important;
+    z-index: 9999;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    overflow: auto;
+}
+#pdfViewerCard.fullscreen-viewer #pdfFrame { height: calc(100vh - 60px) !important; }

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use App\Services\BpsApiService;
@@ -16,6 +17,9 @@ use App\Models\DetailPemeriksaan;
 
 class BpsImportController extends Controller
 {
+    private const DOMAIN_CACHE_KEY   = 'bps_import.domains.6300';
+    private const API_DOWN_CACHE_KEY = 'bps_import.api_down';
+
     public function __construct(
         private BpsApiService      $bps,
         private PdfCheckerService  $checker,
@@ -28,21 +32,39 @@ class BpsImportController extends Controller
         $configured = !empty(config('services.bps_api.key', ''));
         $domain     = config('services.bps_api.domain', '0000');
         $domains    = [];
+        $apiError   = false;
 
         if ($configured) {
-            try {
-                $resProv    = $this->bps->getDomains('prov');
-                $resKab     = $this->bps->getDomains('kabbyprov', '63');
-                $domainProv = collect($resProv['data'][1] ?? [])->where('domain_id', '6300')->values()->all();
-                $domainKab  = $resKab['data'][1] ?? [];
-                $domains    = array_merge($domainProv, $domainKab);
+            // Daftar domain jarang berubah: simpan sehari supaya halaman tidak menunggu API BPS setiap dibuka.
+            $domains = Cache::get(self::DOMAIN_CACHE_KEY, []);
 
-            } catch (\Throwable $e) {
-                $domains = [];
+            // Baru saja gagal → jangan menunggu timeout lagi setiap halaman dibuka (coba ulang setelah 5 menit)
+            if (!$domains && !Cache::has(self::API_DOWN_CACHE_KEY)) {
+                try {
+                    $resProv    = $this->bps->getDomains('prov');
+                    $resKab     = $this->bps->getDomains('kabbyprov', '63');
+                    $domainProv = collect($resProv['data'][1] ?? [])->where('domain_id', '6300')->values()->all();
+                    $domainKab  = $resKab['data'][1] ?? [];
+                    $domains    = array_merge($domainProv, $domainKab);
+                } catch (\Throwable $e) {
+                    $domains = [];
+                }
+
+                if ($domains) {
+                    Cache::put(self::DOMAIN_CACHE_KEY, $domains, now()->addDay());
+                } else {
+                    Cache::put(self::API_DOWN_CACHE_KEY, true, now()->addMinutes(5));
+                }
+            }
+
+            // API BPS tidak bisa dihubungi: tetap sediakan domain bawaan agar pencarian bisa dicoba lagi
+            if (!$domains) {
+                $apiError = true;
+                $domains  = [['domain_id' => $domain, 'domain_name' => 'Provinsi Kalimantan Selatan']];
             }
         }
 
-        return view('checker.bps-import', compact('configured', 'domain', 'domains'));
+        return view('checker.bps-import', compact('configured', 'domain', 'domains', 'apiError'));
     }
 
     // ── POST /checker/bps-import/search ──────────────────────
@@ -71,7 +93,9 @@ class BpsImportController extends Controller
         );
 
         if (empty($result['items']) && ($result['status'] ?? '') !== 'OK') {
-            return response()->json(['error' => 'Gagal mengambil data dari API BPS.'], 500);
+            return response()->json([
+                'error' => 'Gagal mengambil data dari API BPS (webapi.bps.go.id tidak merespons atau sedang gangguan). Coba lagi beberapa saat lagi.',
+            ], 502);
         }
 
         $items = array_map(fn($pub) => array_merge($pub, [
@@ -95,8 +119,14 @@ class BpsImportController extends Controller
             'publications.*.pdf'    => 'required|url',
             'publications.*.title'  => 'required|string',
             'publications.*.pub_id' => 'nullable|string',
+            'publications.*.domain' => 'nullable|string|max:10',
+            'publications.*.issn'   => 'nullable|string|max:30',
+            'publications.*.rl_date'=> 'nullable|string|max:30',
+            'domain'                => 'nullable|string|max:10', // domain bersama (halaman detail)
             // teks hasil ekstraksi di browser (js/pdf-extract.js), JSON — hanya untuk satu publikasi
             'extracted'             => 'nullable|string',
+            // beberapa publikasi diperiksa paralel ke satu sesi yang dibuat lebih dulu (POST /checker/sesi)
+            'sesi_id'               => 'nullable|integer|exists:sesi_pemeriksaan,id',
         ]);
         $extracted = json_decode((string) $request->input('extracted'), true);
 
@@ -104,9 +134,9 @@ class BpsImportController extends Controller
             return response()->json(['error' => 'API Key BPS belum dikonfigurasi.'], 422);
         }
 
-        $sesi = SesiPemeriksaan::create([
-            'dibuat_oleh' => auth()->user()?->name ?? 'guest',
-        ]);
+        $sesi = $request->filled('sesi_id')
+            ? SesiPemeriksaan::findOrFail($request->input('sesi_id'))
+            : SesiPemeriksaan::create(['dibuat_oleh' => auth()->user()?->name ?? 'guest']);
 
         $results = [];
 
@@ -155,6 +185,11 @@ class BpsImportController extends Controller
                     'error_msg'           => $result['error'] ?: null,
                     'pdf_url'             => $pdfUrl,
                     'ocr_lines'           => is_array($extracted) ? PdfCheckerService::ocrLinesFrom($extracted) : null,
+                    // identitas publikasi BPS — untuk dikirim ke SIPOTRET (pasca_rilis.pub_id_api)
+                    'pub_id_api'          => $pubId ?: null,
+                    'pub_domain'          => ($pub['domain'] ?? null) ?: $request->input('domain'),
+                    'pub_issn'            => ($pub['issn'] ?? null) ?: null,
+                    'pub_tanggal_rilis'   => $this->tanggal($pub['rl_date'] ?? null),
                 ]);
 
                 if (!empty($result['checks'])) {
@@ -298,6 +333,13 @@ class BpsImportController extends Controller
         $clean = preg_replace('/[^\w\s\-]/u', '', $title);
         $clean = preg_replace('/\s+/', '_', trim($clean));
         return mb_substr($clean, 0, 100);
+    }
+
+    /** Tanggal rilis dari API (mis. "2026-02-28") → Y-m-d, atau null bila tidak terbaca. */
+    private function tanggal(?string $value): ?string
+    {
+        $ts = $value ? strtotime($value) : false;
+        return $ts ? date('Y-m-d', $ts) : null;
     }
 
     private function buildErrorResult(string $filename, string $error): array

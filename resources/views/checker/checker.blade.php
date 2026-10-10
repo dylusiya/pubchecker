@@ -1,39 +1,24 @@
 @extends('layouts.app')
 
 @section('title', 'Pemeriksaan Publikasi')
+@section('pretitle', 'Publication Checker')
+@section('page-title', 'Pemeriksaan Kover Publikasi')
+@section('page-subtitle', 'Upload hingga 5 PDF publikasi BPS, lalu tinjau per kategori berdampingan dengan contoh yang benar')
+@section('page-actions')
+    <a href="{{ route('checker.riwayat') }}" class="btn btn-primary">
+        <i class="ti ti-history"></i> Riwayat
+    </a>
+@endsection
 
 @section('content')
 <div class="row">
     <div class="col-sm-12">
 
-        {{-- Header --}}
-        <div class="card card-rounded mb-3">
-            <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <h4 class="card-title mb-1">
-                            <i class="mdi mdi-file-search-outline text-primary me-2"></i>
-                            Pemeriksaan Kover Publikasi
-                        </h4>
-                        <p class="text-muted mb-0 small">Upload satu atau banyak PDF publikasi BPS, lalu tinjau step-by-step: kiri halaman yang diperiksa, kanan kriteria yang harus dicek</p>
-                    </div>
-                    <div class="d-flex gap-2">
-                        <a href="{{ route('dashboard') }}" class="btn btn-light btn-sm border">
-                            <i class="mdi mdi-home"></i> Dashboard
-                        </a>
-                        <a href="{{ route('checker.riwayat') }}" class="btn btn-primary btn-sm">
-                            <i class="mdi mdi-history"></i> Riwayat
-                        </a>
-                    </div>
-                </div>
-            </div>
-        </div>
-
         {{-- Upload Card --}}
-        <div class="card card-rounded mb-3">
+        <div class="card mb-3">
             <div class="card-body">
                 <h5 class="card-title mb-1">Upload File PDF</h5>
-                <p class="text-muted small mb-3">Drag &amp; drop atau pilih satu PDF publikasi untuk diperiksa</p>
+                <p class="text-muted small mb-3">Drag &amp; drop atau pilih hingga 5 PDF publikasi untuk diperiksa sekaligus</p>
 
                 <div id="dropzone"
                      class="border border-2 rounded-3 p-5 text-center"
@@ -42,14 +27,14 @@
                      ondragover="event.preventDefault(); this.style.background='#f4f5fa'; this.style.borderColor='#667eea !important';"
                      ondragleave="this.style.background=''; this.style.borderColor='';"
                      ondrop="handleDrop(event)">
-                    <i class="mdi mdi-file-upload-outline text-primary" style="font-size: 48px; opacity: .7;"></i>
+                    <i class="ti ti-file-upload text-primary" style="font-size: 48px; opacity: .7;"></i>
                     <h6 class="mt-2 mb-1 fw-semibold">Drag &amp; drop file PDF di sini</h6>
-                    <p class="text-muted small mb-3">Satu file PDF per pemeriksaan, maksimal 50MB</p>
+                    <p class="text-muted small mb-3">Maksimal 5 PDF per pemeriksaan, 50MB per file</p>
                     <button class="btn btn-primary btn-sm px-4"
                             onclick="event.stopPropagation(); document.getElementById('fileInput').click()">
-                        <i class="mdi mdi-paperclip me-1"></i> Pilih File PDF
+                        <i class="ti ti-paperclip me-1"></i> Pilih File PDF
                     </button>
-                    <input type="file" id="fileInput" accept=".pdf"
+                    <input type="file" id="fileInput" accept=".pdf" multiple
                            style="display:none" onchange="addFiles(this.files)">
                 </div>
             </div>
@@ -57,12 +42,12 @@
 
         {{-- File Queue --}}
         <div id="fileSection" style="display:none;">
-            <div class="card card-rounded mb-3">
+            <div class="card mb-3">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center mb-3">
                         <div>
                             <h5 class="card-title mb-0">
-                                File Dipilih<span id="fileCount" class="d-none">0</span>
+                                <span id="fileCount">0</span> File Dipilih
                             </h5>
                             <small class="text-muted" id="actionNote"></small>
                         </div>
@@ -72,33 +57,28 @@
 
                     <div class="d-flex gap-2 align-items-center">
                         <button class="btn btn-primary" id="btnCheck" onclick="startCheck()">
-                            <i class="mdi mdi-play me-1"></i> Periksa PDF
+                            <i class="ti ti-player-play me-1"></i> Periksa Semua PDF
                         </button>
                         <button class="btn btn-light border" onclick="clearAll()">
-                            <i class="mdi mdi-refresh me-1"></i> Reset
+                            <i class="ti ti-refresh me-1"></i> Reset
                         </button>
                     </div>
                 </div>
             </div>
         </div>
 
-        {{-- Progress --}}
-        <div id="progressSection" style="display:none;">
-            <div class="card card-rounded mb-3">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center mb-2">
-                        <h5 class="card-title mb-0">
-                            <i class="mdi mdi-loading mdi-spin text-primary me-1"></i>
-                            <span id="progressText">Memproses...</span>
-                        </h5>
-                        <span class="badge bg-primary" id="progressPct">0%</span>
+        {{-- Pemeriksaan berjalan: kartu per publikasi berjejer (js/batch-check.js) --}}
+        <div id="batchSection" style="display:none;">
+            <div class="card mb-3">
+                <div class="card-header">
+                    <h3 class="card-title" id="batchTitle">Memeriksa…</h3>
+                    <div class="card-actions">
+                        <button type="button" class="btn btn-primary btn-sm" id="btnReviewAll" disabled onclick="beginReview()">
+                            <i class="ti ti-player-play"></i> <span>Mulai Tinjauan</span>
+                        </button>
                     </div>
-                    <div class="progress mb-2" style="height: 8px;">
-                        <div class="progress-bar bg-primary progress-bar-striped progress-bar-animated"
-                             id="progressBar" style="width: 0%; transition: width .3s;"></div>
-                    </div>
-                    <small class="text-muted" id="progressDetail"></small>
                 </div>
+                <div class="card-body" id="batchGrid"></div>
             </div>
         </div>
 
@@ -107,52 +87,24 @@
 
         {{-- Stat Cards --}}
         <div id="statsSection" style="display:none;">
-            <div class="row mb-3">
-                <div class="col-xl-3 col-md-6 mb-3">
-                    <div class="stat-card bg-primary-card">
-                        <p>Total Publikasi</p>
-                        <h3 id="statTotal">0</h3>
-                        <p>File diperiksa</p>
-                        <i class="mdi mdi-file-multiple-outline icon"></i>
-                    </div>
-                </div>
-                <div class="col-xl-3 col-md-6 mb-3">
-                    <div class="stat-card bg-success-card">
-                        <p>Semua Kriteria OK</p>
-                        <h3 id="statOk">0</h3>
-                        <p>Tidak ada masalah</p>
-                        <i class="mdi mdi-check-circle-outline icon"></i>
-                    </div>
-                </div>
-                <div class="col-xl-3 col-md-6 mb-3">
-                    <div class="stat-card bg-warning-card">
-                        <p>Perlu Dicek</p>
-                        <h3 id="statWarn">0</h3>
-                        <p>Ada catatan</p>
-                        <i class="mdi mdi-alert-outline icon"></i>
-                    </div>
-                </div>
-                <div class="col-xl-3 col-md-6 mb-3">
-                    <div class="stat-card bg-danger-card">
-                        <p>Ada Masalah</p>
-                        <h3 id="statErr">0</h3>
-                        <p>Kriteria tidak terpenuhi</p>
-                        <i class="mdi mdi-close-circle-outline icon"></i>
-                    </div>
-                </div>
+            <div class="row row-cards mb-3">
+                <div class="col-sm-6 col-lg-3"><x-stat label="Total Publikasi"   value-id="statTotal" icon="files"          color="blue"   sub="File diperiksa" /></div>
+                <div class="col-sm-6 col-lg-3"><x-stat label="Semua Kriteria OK" value-id="statOk"    icon="circle-check"   color="green"  sub="Tidak ada masalah" /></div>
+                <div class="col-sm-6 col-lg-3"><x-stat label="Perlu Dicek"       value-id="statWarn"  icon="alert-triangle" color="yellow" sub="Ada catatan" /></div>
+                <div class="col-sm-6 col-lg-3"><x-stat label="Ada Masalah"       value-id="statErr"   icon="circle-x"       color="red"    sub="Kriteria tidak terpenuhi" /></div>
             </div>
         </div>
 
         {{-- Results --}}
         <div id="resultsSection" style="display:none;">
-            <div class="card card-rounded mb-3">
+            <div class="card mb-3">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
                         <h5 class="card-title mb-0">Hasil Pemeriksaan (setelah ditinjau manual)</h5>
                         <div class="d-flex gap-2 flex-wrap align-items-center">
                             <div class="input-group input-group-sm" style="width: 220px;">
                                 <span class="input-group-text bg-white border-end-0">
-                                    <i class="mdi mdi-magnify text-muted"></i>
+                                    <i class="ti ti-search text-muted"></i>
                                 </span>
                                 <input type="text" class="form-control border-start-0 ps-0"
                                        id="searchInput" placeholder="Cari nama file..."
@@ -176,9 +128,9 @@
             </div>
 
             {{-- Export --}}
-            <div class="card card-rounded mb-4">
+            <div class="card mb-4">
                 <div class="card-body d-flex align-items-center gap-3 py-3">
-                    <i class="mdi mdi-microsoft-excel text-success" style="font-size: 32px;"></i>
+                    <i class="ti ti-file-spreadsheet text-success" style="font-size: 32px;"></i>
                     <div class="flex-grow-1">
                         <strong class="d-block">Export Rekap ke Excel</strong>
                         <span class="text-muted small">
@@ -186,7 +138,7 @@
                         </span>
                     </div>
                     <button class="btn btn-success btn-sm" onclick="exportExcel()">
-                        <i class="mdi mdi-download me-1"></i> Download Excel
+                        <i class="ti ti-download me-1"></i> Download Excel
                     </button>
                 </div>
             </div>
@@ -196,81 +148,35 @@
 </div>
 @endsection
 
-@push('styles')
-<style>
-    .stat-card {
-        border-radius: 10px;
-        padding: 20px;
-        color: white;
-        margin-bottom: 0;
-        position: relative;
-        overflow: hidden;
-    }
-    .stat-card h3 {
-        font-size: 2.5rem;
-        font-weight: bold;
-        margin-bottom: 5px;
-    }
-    .stat-card p {
-        margin-bottom: 0;
-        opacity: 0.9;
-        font-size: 0.9rem;
-    }
-    .stat-card .icon {
-        font-size: 3rem;
-        opacity: 0.25;
-        position: absolute;
-        right: 20px;
-        bottom: 15px;
-    }
-    .bg-primary-card  { background: #667eea; }
-    .bg-success-card  { background: #28a745; }
-    .bg-warning-card  { background: #ffc107; color: #212529 !important; }
-    .bg-warning-card p, .bg-warning-card h3 { color: #212529 !important; }
-    .bg-danger-card   { background: #dc3545; }
-
-    /* File chips */
-    .file-chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 4px 10px;
-        border-radius: 20px;
-        background: #f4f5fa;
-        border: 1px solid #e8e9f0;
-        font-size: 12px;
-    }
-
-    /* Result rows */
-    .result-row-header {
-        cursor: pointer;
-        transition: background .15s;
-    }
-    .result-row-header:hover { background: #f8f9fa !important; }
-</style>
-@endpush
-
 @push('scripts')
-<script src="{{ asset('js/checker-review.js') }}?v={{ filemtime(base_path('js/checker-review.js')) }}"></script>
-<script src="{{ asset('js/pdf-extract.js') }}?v={{ filemtime(base_path('js/pdf-extract.js')) }}"></script>
+<script src="{{ asset('js/checker-review.js') }}?v={{ filemtime(public_path('js/checker-review.js')) }}"></script>
+<script src="{{ asset('js/pdf-extract.js') }}?v={{ filemtime(public_path('js/pdf-extract.js')) }}"></script>
+<script src="{{ asset('js/batch-check.js') }}?v={{ filemtime(public_path('js/batch-check.js')) }}"></script>
 <script>
 const CSRF = document.querySelector('meta[name=csrf-token]')?.content ?? '';
-CheckerReview.init({ viewerUrl: '{{ asset("pdfjs/web/viewer.html") }}', csrf: CSRF, saveUrl: '{{ route("checker.hasil.review_kategori", "__ID__") }}' });
+CheckerReview.init({ viewerUrl: '{{ asset("pdfjs/web/viewer.html") }}', csrf: CSRF, saveUrl: '{{ route("checker.hasil.review_kategori", "__ID__") }}', contohUrl: '{{ route("checker.contoh.json") }}' });
 PdfExtract.init({ pdfjsBuild: '{{ asset("pdfjs/build") }}/' });
 
 let selectedFiles = [];
 let allResults    = [];
+let batchOutcomes = []; // hasil per kartu (urutan sama dengan file), { result } atau { error }
 let sesiId        = null;
 let currentFilter = 'all';
 
-// Satu pemeriksaan = satu publikasi, supaya tinjauan manual fokus per publikasi
+// Maksimal PDF per pemeriksaan: teks & OCR dibaca di browser (±30–40 detik per PDF) dan
+// tinjauan per kategori dilakukan berurutan per file — 5 masih nyaman untuk sekali duduk.
+const MAX_FILES = 5;
+
 function addFiles(files) {
-    const pdfs = [...files].filter(f => f.name.toLowerCase().endsWith('.pdf'));
+    const pdfs = [...files].filter(f => f.name.toLowerCase().endsWith('.pdf'))
+        .filter(f => !selectedFiles.some(s => s.name === f.name && s.size === f.size));
     if (!pdfs.length) return;
-    if (pdfs.length > 1) {
-        showAlert('warning', 'Hanya satu PDF per pemeriksaan — yang dipakai: ' + pdfs[0].name);
+
+    const sisa = MAX_FILES - selectedFiles.length;
+    if (pdfs.length > sisa) {
+        showAlert('warning', `Maksimal ${MAX_FILES} PDF per pemeriksaan — ${pdfs.length - sisa} file tidak ditambahkan.`);
     }
-    selectedFiles = [pdfs[0]];
+    selectedFiles = selectedFiles.concat(pdfs.slice(0, Math.max(0, sisa)));
     document.getElementById('fileInput').value = '';
     renderQueue();
 }
@@ -287,13 +193,15 @@ function renderQueue() {
     if (!selectedFiles.length) { sec.style.display = 'none'; return; }
     sec.style.display = 'block';
     document.getElementById('fileCount').textContent = selectedFiles.length;
-    document.getElementById('actionNote').textContent = 'PDF siap diperiksa — pilih file lain untuk mengganti';
+    document.getElementById('actionNote').textContent = selectedFiles.length >= MAX_FILES
+        ? `${selectedFiles.length} PDF siap diperiksa (maksimal ${MAX_FILES})`
+        : `${selectedFiles.length} PDF siap diperiksa — bisa tambah ${MAX_FILES - selectedFiles.length} lagi`;
     chips.innerHTML = selectedFiles.map((f, i) => `
         <span class="file-chip">
-            <i class="mdi mdi-file-pdf-box text-danger"></i>
+            <i class="ti ti-file-type-pdf text-danger"></i>
             <span class="text-truncate" style="max-width:160px;" title="${f.name}">${f.name}</span>
             <small class="text-muted">${(f.size/1024).toFixed(0)} KB</small>
-            <i class="mdi mdi-close text-muted" style="cursor:pointer;" onclick="removeFile(${i})"></i>
+            <i class="ti ti-x text-muted" style="cursor:pointer;" onclick="removeFile(${i})"></i>
         </span>`).join('');
 }
 
@@ -304,64 +212,62 @@ async function startCheck() {
     if (!selectedFiles.length) return;
     const btn = document.getElementById('btnCheck');
     btn.disabled = true;
-    btn.innerHTML = '<i class="mdi mdi-loading mdi-spin me-1"></i> Memproses...';
-    document.getElementById('progressSection').style.display = 'block';
+    btn.innerHTML = '<i class="ti ti-loader-2 icon-spin me-1"></i> Memproses...';
+    const total = selectedFiles.length;
+    document.getElementById('batchSection').style.display    = 'block';
     document.getElementById('statsSection').style.display    = 'none';
     document.getElementById('resultsSection').style.display  = 'none';
+    document.getElementById('batchTitle').textContent        = `Memeriksa ${total} publikasi…`;
+    document.getElementById('btnReviewAll').disabled         = true;
     allResults = []; sesiId = null;
 
-    const batchSize = 5, total = selectedFiles.length;
-    let done = 0;
-    for (let i = 0; i < total; i += batchSize) {
-        const batch = selectedFiles.slice(i, i + batchSize);
-        const fd = new FormData();
-        batch.forEach(f => fd.append('files[]', f));
-        if (sesiId) fd.append('sesi_id', sesiId);
-        fd.append('_token', CSRF);
+    // Sesi dibuat dulu supaya semua file (diproses paralel) masuk ke sesi yang sama
+    try {
+        const res = await fetch('{{ route("checker.sesi.create") }}', {
+            method: 'POST', headers: { 'Accept': 'application/json', 'X-CSRF-TOKEN': CSRF },
+        });
+        sesiId = (await res.json()).sesi_id ?? null;
+    } catch (e) { sesiId = null; }
 
-        // Baca teks PDF di browser (pdf.js + OCR halaman gambar) — server hosting tidak bisa
-        // menjalankan Ghostscript/Tesseract. Jika gagal, server mencoba membaca sendiri.
-        let extracted = null;
-        try {
-            extracted = await PdfExtract.extract(await batch[0].arrayBuffer(), {
-                onProgress: msg => setProgress(done, total, msg),
-            });
-            fd.append('extracted', JSON.stringify(extracted));
-        } catch (err) {
-            console.warn('Ekstraksi teks di browser gagal, dibaca di server', err);
-        }
-        setProgress(done, total, 'Memeriksa kriteria: ' + batch[0].name);
-        try {
-            const res  = await fetch('{{ route("checker.check") }}', { method:'POST', body:fd });
-            const text = await res.text();
-            console.log('Status:', res.status);
-            console.log('Response:', text);
-            
-            // Coba parse
-            const data = JSON.parse(text);
-            if (data.error) { showAlert('danger', data.error); break; }
-            sesiId = data.sesi_id ?? sesiId;
-            // baris OCR untuk pencarian (Ctrl+F) di viewer panel tinjauan
-            (data.results ?? []).forEach(r => { r.ocr_lines = extracted?.ocr_lines; });
-            allResults.push(...(data.results ?? []));
-        } catch (err) { showAlert('danger', 'Request gagal: ' + err.message); }
-        done += batch.length;
-    }
+    // Satu file per request (batas upload server per request). Teks PDF dibaca di browser
+    // (pdf.js + OCR) — server hosting tidak bisa menjalankan Ghostscript/Tesseract.
+    const jobs = selectedFiles.map(file => ({
+        title:  file.name,
+        cover:  null,
+        source: file,
+        send:   async extracted => {
+            const fd = new FormData();
+            fd.append('files[]', file);
+            if (sesiId) fd.append('sesi_id', sesiId);
+            if (extracted) fd.append('extracted', JSON.stringify(extracted));
+            fd.append('_token', CSRF);
+            const res  = await fetch('{{ route("checker.check") }}', { method: 'POST', body: fd, headers: { 'Accept': 'application/json' } });
+            const data = await res.json();
+            if (data.error || !res.ok) throw new Error(data.error || data.message || ('Server membalas ' + res.status));
+            const r = data.results?.[0];
+            if (!r || r.error) throw new Error(r?.error || 'Tidak ada hasil pemeriksaan');
+            sesiId ??= data.sesi_id;
+            r._file = file; // PDF asli untuk viewer — jangan mengandalkan urutan
+            return r;
+        },
+    }));
 
-    setProgress(total, total, 'Selesai! Memulai tinjauan manual...');
-    document.getElementById('progressSection').style.display = 'none';
+    batchOutcomes = await BatchCheck.run(document.getElementById('batchGrid'), jobs, {
+        onReview: i => beginReview(i),
+    });
+    allResults = batchOutcomes.filter(o => o.result).map(o => o.result);
+
+    const gagal = total - allResults.length;
+    document.getElementById('batchTitle').textContent =
+        `${allResults.length} dari ${total} publikasi selesai diperiksa` + (gagal ? ` · ${gagal} gagal` : '');
+    document.getElementById('btnReviewAll').disabled = !allResults.length;
     btn.disabled = false;
-    btn.innerHTML = '<i class="mdi mdi-play me-1"></i> Periksa Ulang';
-    beginReview();
+    btn.innerHTML = '<i class="ti ti-player-play me-1"></i> Periksa Ulang';
+
+    // Satu publikasi: langsung masuk tinjauan seperti sebelumnya
+    if (total === 1 && allResults.length === 1) beginReview();
 }
 
-function setProgress(done, total, text) {
-    const pct = total ? Math.round(done / total * 100) : 0;
-    document.getElementById('progressBar').style.width    = pct + '%';
-    document.getElementById('progressText').textContent   = text;
-    document.getElementById('progressPct').textContent    = pct + '%';
-    document.getElementById('progressDetail').textContent = done + ' / ' + total + ' file';
-}
 
 function renderStats() {
     const ok   = allResults.filter(r => !r.summary.tidak_ada && !r.summary.perlu_dicek).length;
@@ -387,7 +293,7 @@ function renderList() {
     if (!filtered.length) {
         list.innerHTML = `
             <div class="text-center py-5 text-muted">
-                <i class="mdi mdi-file-search-outline d-block mb-2" style="font-size:40px;opacity:.3;"></i>
+                <i class="ti ti-file-search d-block mb-2" style="font-size:40px;opacity:.3;"></i>
                 Tidak ada hasil yang cocok
             </div>`;
         return;
@@ -396,14 +302,14 @@ function renderList() {
     list.innerHTML = filtered.map((r, i) => {
         const hasErr  = r.summary.tidak_ada > 0;
         const hasWarn = r.summary.perlu_dicek > 0;
-        const iconCls = hasErr  ? 'mdi-close-circle-outline text-danger'
-                      : hasWarn ? 'mdi-alert-outline text-warning'
-                      :           'mdi-check-circle-outline text-success';
+        const iconCls = hasErr  ? 'ti-circle-x text-danger'
+                      : hasWarn ? 'ti-alert-triangle text-warning'
+                      :           'ti-circle-check text-success';
         return `
         <div class="border rounded mb-2" id="pub-${i}">
             <div class="d-flex align-items-center p-3 gap-2 bg-white rounded result-row-header"
                  onclick="togglePub(${i})">
-                <i class="mdi ${iconCls}" style="font-size:18px;flex-shrink:0;"></i>
+                <i class="ti ${iconCls}" style="font-size:18px;flex-shrink:0;"></i>
                 <span class="flex-grow-1 fw-semibold small text-truncate" title="${r.filename}">${r.filename}</span>
                 <div class="d-flex gap-1 flex-shrink-0">
                     ${r.summary.ok          ? `<span class="badge bg-success">${r.summary.ok} OK</span>` : ''}
@@ -412,7 +318,7 @@ function renderList() {
                     ${r.summary.tidak_diperiksa ? `<span class="badge bg-secondary">${r.summary.tidak_diperiksa} Skip</span>` : ''}
                 </div>
                 <small class="text-muted flex-shrink-0 ms-1">${r.total_pages ?? '?'} hal.</small>
-                <i class="mdi mdi-chevron-down text-muted ms-1" id="chev-${i}" style="transition:transform .2s;flex-shrink:0;"></i>
+                <i class="ti ti-chevron-down text-muted ms-1" id="chev-${i}" style="transition:transform .2s;flex-shrink:0;"></i>
             </div>
             <div id="detail-${i}" style="display:none;" class="p-3 border-top bg-light rounded-bottom">
                 ${r.error ? `<div class="alert alert-danger py-2 small mb-3">${r.error}</div>` : ''}
@@ -447,10 +353,12 @@ function renderList() {
 const statusBadge = CheckerReview.statusBadge;
 
 // ── STEP-BY-STEP REVIEW (lihat js/checker-review.js) ─────────────
-function beginReview() {
+/** @param {number} [jobIndex] kartu yang diklik "Tinjau" — publikasi itu dibuka pertama */
+function beginReview(jobIndex) {
+    const target = Number.isInteger(jobIndex) ? batchOutcomes[jobIndex]?.result : null;
     const entries = allResults
-        .map((r, i) => {
-            const file = selectedFiles[i];
+        .map(r => {
+            const file = r._file;
             if (!file || !r.checks?.length) return null;
             const url = URL.createObjectURL(file);
             return {
@@ -465,7 +373,8 @@ function beginReview() {
         })
         .filter(Boolean);
 
-    CheckerReview.start(entries, { onFinish: finishReview });
+    const startIndex = target ? entries.findIndex(e => e.hasilId === target.hasil_id) : undefined;
+    CheckerReview.start(entries, { onFinish: finishReview, startIndex: startIndex >= 0 ? startIndex : undefined });
 }
 
 function finishReview() {

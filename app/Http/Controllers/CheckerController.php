@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use App\Services\PdfCheckerService;
 use App\Services\ExcelExportService;
@@ -25,6 +26,17 @@ class CheckerController extends Controller
     public function index()
     {
         return view('checker.checker');
+    }
+
+    // ── POST /checker/sesi ────────────────────────────────────
+    // Buat sesi lebih dulu supaya beberapa publikasi yang diperiksa paralel masuk ke sesi yang sama.
+    public function buatSesi(): JsonResponse
+    {
+        $sesi = SesiPemeriksaan::create([
+            'dibuat_oleh' => auth()->user()?->name ?? session('user_name', 'guest'),
+        ]);
+
+        return response()->json(['sesi_id' => $sesi->id]);
     }
 
     // ── POST /checker/check ───────────────────────────────────
@@ -67,7 +79,7 @@ class CheckerController extends Controller
                         : $this->checker->check($file); // fallback: ekstraksi di server (butuh exec untuk PDF terenkripsi)
                     // Simpan PDF supaya tinjauan manual bisa dilanjutkan dari riwayat
                     $hasil  = $this->saveResult($sesi->id, $result, [
-                        'pdf_path'  => $file->store('pdf-hasil') ?: null,
+                        'pdf_path'  => $file->store('pdf-hasil', HasilPemeriksaan::DISK) ?: null,
                         'ocr_lines' => is_array($extracted) ? PdfCheckerService::ocrLinesFrom($extracted) : null,
                     ]);
                     $result['hasil_id'] = $hasil->id;
@@ -236,20 +248,16 @@ class CheckerController extends Controller
     {
         $data = $request->validate([
             'kriteria_id' => 'required|string',
-            'status'      => 'required|in:OK,PERLU DICEK,TIDAK ADA,TIDAK DIPERIKSA',
-            'catatan'     => 'nullable|string',
-        ]);
+            'status'      => ['required', Rule::in(DetailPemeriksaan::STATUS_VERIFIKASI)],
+            'keterangan'  => 'nullable|string|max:2000|required_if:status,' . DetailPemeriksaan::STATUS_TIDAK_SESUAI,
+        ], $this->pesanVerifikasi());
 
         $detail = $hasil->detail()->where('kriteria_id', $data['kriteria_id'])->first();
         if (!$detail) {
             return response()->json(['error' => 'Detail kriteria tidak ditemukan.'], 404);
         }
 
-        $detail->update([
-            'status'      => $data['status'],
-            'catatan'     => $data['catatan'] ?: null,
-            'ditinjau_at' => now(),
-        ]);
+        $detail->update($this->dataVerifikasi($data));
 
         $hasil->recalcFromDetail();
         $hasil->sesi->recalcSummary();
@@ -264,17 +272,13 @@ class CheckerController extends Controller
         $data = $request->validate([
             'items'               => 'required|array|min:1',
             'items.*.kriteria_id' => 'required|string',
-            'items.*.status'      => 'required|in:OK,PERLU DICEK,TIDAK ADA,TIDAK DIPERIKSA',
-            'items.*.catatan'     => 'nullable|string',
-        ]);
+            'items.*.status'      => ['required', Rule::in(DetailPemeriksaan::STATUS_VERIFIKASI)],
+            'items.*.keterangan'  => 'nullable|string|max:2000|required_if:items.*.status,' . DetailPemeriksaan::STATUS_TIDAK_SESUAI,
+        ], $this->pesanVerifikasi('items.*.'));
 
         DB::transaction(function () use ($hasil, $data) {
             foreach ($data['items'] as $item) {
-                $hasil->detail()->where('kriteria_id', $item['kriteria_id'])->update([
-                    'status'      => $item['status'],
-                    'catatan'     => ($item['catatan'] ?? '') ?: null,
-                    'ditinjau_at' => now(),
-                ]);
+                $hasil->detail()->where('kriteria_id', $item['kriteria_id'])->update($this->dataVerifikasi($item));
             }
             $hasil->recalcFromDetail();
             $hasil->sesi->recalcSummary();
@@ -292,44 +296,100 @@ class CheckerController extends Controller
                 ->with('error', 'File PDF untuk hasil ini tidak tersimpan, tinjauan tidak bisa dilanjutkan.');
         }
 
+        // Semua publikasi dalam sesi dibuka sekaligus (tab per publikasi), mulai dari publikasi ini
+        return $this->tampilTinjauan($hasil->sesi, $hasil->id);
+    }
+
+    // ── GET /checker/riwayat/{sesi}/tinjau ────────────────────
+    public function tinjauSesi(SesiPemeriksaan $sesi)
+    {
+        return $this->tampilTinjauan($sesi, null);
+    }
+
+    /** Tinjauan semua publikasi ber-PDF dalam satu sesi, seperti saat pemeriksaan. */
+    private function tampilTinjauan(SesiPemeriksaan $sesi, ?int $mulaiId)
+    {
+        $semua = $sesi->hasilPemeriksaan()->with('detail')->orderBy('id')->get();
+        $daftar = $semua->filter(fn($h) => $h->hasPdf() && $h->detail->isNotEmpty())->values();
+
+        if ($daftar->isEmpty()) {
+            return redirect()->route('checker.riwayat.detail', $sesi)
+                ->with('error', 'Tidak ada PDF tersimpan di sesi ini, tinjauan tidak bisa dilanjutkan.');
+        }
+
         // target/area tidak disimpan di detail — ambil dari master kriteria untuk petunjuk halaman
-        $kriteria = KriteriaPemeriksaan::whereIn('kode', $hasil->detail()->pluck('kriteria_id'))
+        $kriteria = KriteriaPemeriksaan::whereIn('kode', $daftar->flatMap(fn($h) => $h->detail->pluck('kriteria_id'))->unique())
             ->get()->keyBy('kode');
 
-        $checks = $hasil->detail()->orderBy('id')->get()->map(function ($d) use ($kriteria) {
-            $k = $kriteria->get($d->kriteria_id);
-            return [
-                'id'        => $d->kriteria_id,
-                'kategori'  => $d->kategori,
-                'deskripsi' => $d->deskripsi,
-                'status'    => $d->status,
-                'catatan'   => $d->catatan,
-                'target'    => $k->target ?? 'all',
-                'area'      => $k && $k->tipe_cek === 'posisi_area'
-                    ? (KriteriaPemeriksaan::areaOptions()[$k->parameter['area'] ?? ''] ?? null)
-                    : null,
-                'reviewed'  => $d->ditinjau_at !== null,
-                'lokasi'    => $d->lokasi ?? [],
-            ];
-        })->values();
+        $entries = $daftar->map(fn($hasil) => [
+            'filename' => $hasil->judul,
+            'hasilId'  => $hasil->id,
+            'summary'  => null,
+            'url'      => route('checker.hasil.pdf', $hasil),
+            'ocrLines' => $hasil->ocr_lines ?: (object) [],
+            'checks'   => $hasil->detail->sortBy('id')->map(function ($d) use ($kriteria) {
+                $k = $kriteria->get($d->kriteria_id);
+                return [
+                    'id'        => $d->kriteria_id,
+                    'kategori'  => $d->kategori,
+                    'deskripsi' => $d->deskripsi,
+                    'status'    => $d->status,
+                    'catatan'   => $d->catatan,
+                    'keterangan'=> $d->keterangan,
+                    'target'    => $k->target ?? 'all',
+                    'area'      => $k && $k->tipe_cek === 'posisi_area'
+                        ? (KriteriaPemeriksaan::areaOptions()[$k->parameter['area'] ?? ''] ?? null)
+                        : null,
+                    'reviewed'  => $d->ditinjau_at !== null,
+                    'lokasi'    => $d->lokasi ?? [],
+                ];
+            })->values(),
+        ])->values();
+
+        $startIndex = $mulaiId ? $daftar->search(fn($h) => $h->id === $mulaiId) : false;
 
         return view('checker.tinjau', [
-            'hasil'  => $hasil,
-            'checks' => $checks,
-            'pdfUrl' => route('checker.hasil.pdf', $hasil),
+            'sesi'       => $sesi,
+            'daftar'     => $daftar,
+            'tanpaPdf'   => $semua->count() - $daftar->count(),
+            'entries'    => $entries,
+            'startIndex' => $startIndex === false ? null : $startIndex,
         ]);
     }
 
     // ── GET /checker/hasil/{hasil}/pdf ────────────────────────
     public function pdf(HasilPemeriksaan $hasil)
     {
-        if ($hasil->pdf_path && Storage::exists($hasil->pdf_path)) {
-            return response()->file(Storage::path($hasil->pdf_path), ['Content-Type' => 'application/pdf']);
+        if ($hasil->pdf_path && Storage::disk(HasilPemeriksaan::DISK)->exists($hasil->pdf_path)) {
+            return response()->file(Storage::disk(HasilPemeriksaan::DISK)->path($hasil->pdf_path), ['Content-Type' => 'application/pdf']);
         }
         if ($hasil->pdf_url) {
             return redirect()->route('checker.bps.pdf_proxy', ['url' => $hasil->pdf_url]);
         }
         abort(404, 'File PDF tidak tersimpan.');
+    }
+
+    /**
+     * Kolom yang disimpan dari verifikasi petugas. Catatan hasil cek otomatis (`catatan`) tidak ditimpa;
+     * keterangan hanya disimpan untuk status TIDAK SESUAI.
+     */
+    private function dataVerifikasi(array $item): array
+    {
+        $keterangan = trim((string) ($item['keterangan'] ?? ''));
+
+        return [
+            'status'      => $item['status'],
+            'keterangan'  => $item['status'] === DetailPemeriksaan::STATUS_TIDAK_SESUAI && $keterangan !== '' ? $keterangan : null,
+            'ditinjau_at' => now(),
+        ];
+    }
+
+    private function pesanVerifikasi(string $prefix = ''): array
+    {
+        return [
+            "{$prefix}status.in"           => 'Status verifikasi harus Sesuai, Tidak Sesuai, atau Skip.',
+            "{$prefix}keterangan.required_if" => 'Keterangan wajib diisi untuk kriteria yang Tidak Sesuai.',
+        ];
     }
 
     private function summaryOf(HasilPemeriksaan $hasil): array
@@ -358,7 +418,7 @@ class CheckerController extends Controller
     // ── GET /checker/riwayat/{sesi} ───────────────────────────
     public function riwayatDetail(SesiPemeriksaan $sesi)
     {
-        $sesi->load('hasilPemeriksaan.detail');
+        $sesi->load('hasilPemeriksaan.detail', 'hasilPemeriksaan.catatanTambahan');
         return view('checker.riwayat-detail', compact('sesi'));
     }
 
@@ -374,11 +434,36 @@ class CheckerController extends Controller
     // ── DELETE /checker/riwayat/{sesi} ───────────────────────
     public function deleteSesi(SesiPemeriksaan $sesi)
     {
-        $paths = $sesi->hasilPemeriksaan()->whereNotNull('pdf_path')->pluck('pdf_path')->all();
-        $sesi->delete();
-        Storage::delete($paths);
+        $this->hapusSesi($sesi);
         return redirect()->route('checker.riwayat')
                          ->with('success', 'Sesi pemeriksaan berhasil dihapus.');
+    }
+
+    // ── DELETE /checker/riwayat (hapus beberapa sesi sekaligus) ─
+    public function deleteSesiBulk(Request $request)
+    {
+        $data = $request->validate([
+            'ids'   => 'required|array|min:1',
+            'ids.*' => 'integer',
+        ], [
+            'ids.required' => 'Pilih minimal satu sesi untuk dihapus.',
+        ]);
+
+        $sesiList = SesiPemeriksaan::whereIn('id', $data['ids'])->get();
+        foreach ($sesiList as $sesi) {
+            $this->hapusSesi($sesi);
+        }
+
+        return redirect()->route('checker.riwayat', $request->only('page'))
+                         ->with('success', $sesiList->count() . ' sesi pemeriksaan berhasil dihapus.');
+    }
+
+    /** Hapus sesi beserta hasil, detail (cascade) dan file PDF upload-nya. */
+    private function hapusSesi(SesiPemeriksaan $sesi): void
+    {
+        $paths = $sesi->hasilPemeriksaan()->whereNotNull('pdf_path')->pluck('pdf_path')->all();
+        $sesi->delete();
+        Storage::disk(HasilPemeriksaan::DISK)->delete($paths);
     }
 
     // ═══════════════════════════════════════════════════════
@@ -480,7 +565,7 @@ class CheckerController extends Controller
     {
         if (empty(trim($status ?? ''))) return 'TIDAK DIPERIKSA';
         $status  = strtoupper(trim($status));
-        $allowed = ['OK', 'PERLU DICEK', 'TIDAK ADA', 'TIDAK DIPERIKSA'];
+        $allowed = ['OK', 'PERLU DICEK', 'TIDAK ADA', 'TIDAK SESUAI', 'TIDAK DIPERIKSA'];
         return in_array($status, $allowed) ? $status : 'TIDAK DIPERIKSA';
     }
 }

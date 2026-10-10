@@ -63,6 +63,22 @@ return [
             ]) : [],
         ],
 
+        // Database aplikasi SIPOTRET — tujuan kiriman hasil "Tidak Sesuai" (lihat App\Services\SipotretService).
+        // Charset mengikuti konfigurasi SIPOTRET sendiri (utf8) agar teks tersimpan sama seperti input di sana.
+        'sipotret' => [
+            'driver' => 'mysql',
+            'host' => env('SIPOTRET_DB_HOST', env('DB_HOST', '127.0.0.1')),
+            'port' => env('SIPOTRET_DB_PORT', env('DB_PORT', '3306')),
+            'database' => env('SIPOTRET_DB_DATABASE'),
+            'username' => env('SIPOTRET_DB_USERNAME'),
+            'password' => env('SIPOTRET_DB_PASSWORD', ''),
+            'charset' => 'utf8',
+            'collation' => 'utf8_general_ci',
+            'prefix' => '',
+            'strict' => false,
+            'engine' => null,
+        ],
+
         'pgsql' => [
             'driver' => 'pgsql',
             'url' => env('DATABASE_URL'),

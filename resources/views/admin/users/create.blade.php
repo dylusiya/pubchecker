@@ -1,26 +1,25 @@
 @extends('layouts.app')
 
 @section('title', 'Tambah User')
+@section('pretitle', 'Manajemen User')
+@section('page-title', 'Tambah User Baru')
+@section('page-subtitle', 'Isi form untuk menambahkan user baru')
+@section('page-actions')
+    <a href="{{ route('admin.users.index') }}" class="btn">
+        <i class="ti ti-arrow-left"></i> Kembali
+    </a>
+@endsection
 
 @section('content')
 <div class="row">
-    <div class="col-12 grid-margin stretch-card">
-        <div class="card card-rounded">
+    <div class="col-12">
+        <div class="card">
             <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center mb-4">
-                    <div>
-                        <h4 class="card-title mb-1">Tambah User Baru</h4>
-                        <p class="card-description mb-0">Isi form untuk menambahkan user baru</p>
-                    </div>
-                    <a href="{{ route('admin.users.index') }}" class="btn btn-outline-secondary btn-sm">
-                        <i class="mdi mdi-arrow-left"></i> Kembali
-                    </a>
-                </div>
-                
-                <form action="{{ route('admin.users.store') }}" method="POST" class="forms-sample">
+
+                <form action="{{ route('admin.users.store') }}" method="POST" class="">
                     @csrf
                     
-                    <div class="form-group">
+                    <div class="mb-3">
                         <label for="username" class="fw-bold">Username SSO <span class="text-danger">*</span></label>
                         <input type="text" class="form-control @error('username') is-invalid @enderror" 
                                id="username" name="username" 
@@ -34,7 +33,7 @@
                     
                     <div class="row">
                         <div class="col-md-6">
-                            <div class="form-group">
+                            <div class="mb-3">
                                 <label for="password" class="fw-bold">Password <span class="text-danger">*</span></label>
                                 <input type="password" class="form-control @error('password') is-invalid @enderror" 
                                        id="password" name="password" 
@@ -46,7 +45,7 @@
                             </div>
                         </div>
                         <div class="col-md-6">
-                            <div class="form-group">
+                            <div class="mb-3">
                                 <label for="password_confirmation" class="fw-bold">Konfirmasi Password <span class="text-danger">*</span></label>
                                 <input type="password" class="form-control" 
                                        id="password_confirmation" 
@@ -56,7 +55,7 @@
                         </div>
                     </div>
                     
-                    <div class="form-group">
+                    <div class="mb-3">
                         <label for="name" class="fw-bold">Nama Lengkap <span class="text-danger">*</span></label>
                         <input type="text" class="form-control @error('name') is-invalid @enderror" 
                                id="name" name="name" 
@@ -67,7 +66,7 @@
                         @enderror
                     </div>
                     
-                    <div class="form-group">
+                    <div class="mb-3">
                         <label for="email" class="fw-bold">Email</label>
                         <input type="email" class="form-control @error('email') is-invalid @enderror" 
                                id="email" name="email" 
@@ -78,7 +77,7 @@
                         @enderror
                     </div>
                     
-                    <div class="form-group">
+                    <div class="mb-3">
                         <label for="role" class="fw-bold">Role <span class="text-danger">*</span></label>
                         <select class="form-control @error('role') is-invalid @enderror" id="role" name="role" required>
                             <option value="">-- Pilih Role --</option>
@@ -92,13 +91,13 @@
                     </div>
 
                     <div class="alert alert-info mt-4">
-                        <i class="mdi mdi-information me-2"></i>
+                        <i class="ti ti-info-circle me-2"></i>
                         <strong>Catatan:</strong> User yang dibuat akan dapat login menggunakan username dan password ini. 
                         Untuk sinkronisasi dengan SSO BPS, pastikan username sesuai dengan SSO.
                     </div>
                     
                     <button type="submit" class="btn btn-primary me-2">
-                        <i class="mdi mdi-content-save"></i> Simpan
+                        <i class="ti ti-device-floppy"></i> Simpan
                     </button>
                     <a href="{{ route('admin.users.index') }}" class="btn btn-light">Batal</a>
                 </form>

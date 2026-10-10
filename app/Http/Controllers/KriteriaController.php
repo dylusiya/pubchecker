@@ -315,6 +315,8 @@ class KriteriaController extends Controller
             'urutan'       => 'integer|min:0',
             'param_pattern'      => 'nullable|string',
             'param_flags'        => 'nullable|string|max:10',
+            'param_syarat'       => 'nullable|string|max:500',
+            'param_pesan_syarat' => 'nullable|string|max:200',
             'param_text'         => 'nullable|string',
             'param_case'         => 'nullable|boolean',
             'param_word'         => 'nullable|string|max:100',
@@ -326,8 +328,10 @@ class KriteriaController extends Controller
         $tipe  = $data['tipe_cek'];
         $param = match($tipe) {
             'regex', 'not_regex' => array_filter([
-                'pattern' => $request->input('param_pattern'),
-                'flags'   => $request->input('param_flags') ?: null,
+                'pattern'      => $request->input('param_pattern'),
+                'flags'        => $request->input('param_flags') ?: null,
+                'syarat'       => $tipe === 'not_regex' ? ($request->input('param_syarat') ?: null) : null,
+                'pesan_syarat' => $tipe === 'not_regex' ? ($request->input('param_pesan_syarat') ?: null) : null,
             ]),
             'contains', 'not_contains' => array_filter([
                 'text' => $request->input('param_text'),

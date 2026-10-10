@@ -1,33 +1,41 @@
 @extends('layouts.app')
 
 @section('title', 'Riwayat Pemeriksaan')
-@section('topbar-title', 'Riwayat Pemeriksaan')
+@section('pretitle', 'Publication Checker')
+@section('page-title', 'Riwayat Pemeriksaan')
+@section('page-subtitle', 'Daftar semua sesi pemeriksaan yang pernah dilakukan')
+@section('page-actions')
+  <a href="{{ route('checker.index') }}" class="btn btn-primary">
+    <i class="ti ti-plus"></i> Pemeriksaan Baru
+  </a>
+@endsection
 
 @section('content')
 <div class="row">
   <div class="col-12">
 
-    <div class="card mb-3">
-      <div class="card-body py-3">
-        <div class="d-flex justify-content-between align-items-center">
-          <div>
-            <h4 class="card-title mb-1">
-              <i class="mdi mdi-history text-primary me-2"></i>Riwayat Pemeriksaan
-            </h4>
-            <p class="text-muted mb-0 small">Daftar semua sesi pemeriksaan yang pernah dilakukan</p>
-          </div>
-          <a href="{{ route('checker.index') }}" class="btn btn-primary btn-sm">
-            <i class="mdi mdi-plus me-1"></i> Pemeriksaan Baru
-          </a>
-        </div>
-      </div>
-    </div>
+    {{-- Form hapus massal: checkbox di tabel terhubung lewat atribut form="bulkDeleteForm"
+         (tiap baris sudah punya form hapus sendiri, form tidak boleh bersarang) --}}
+    <form id="bulkDeleteForm" action="{{ route('checker.riwayat.delete-bulk') }}" method="POST" class="d-none">
+      @csrf @method('DELETE')
+      <input type="hidden" name="page" value="{{ $sesiList->currentPage() }}">
+    </form>
 
     <div class="card">
+      @if($sesiList->isNotEmpty())
+      <div class="card-header" id="bulkBar">
+        <div class="text-secondary small" id="bulkInfo">Centang sesi untuk menghapus beberapa sekaligus</div>
+        <div class="card-actions">
+          <button type="button" class="btn btn-danger btn-sm" id="btnBulkDelete" disabled onclick="konfirmasiHapus()">
+            <i class="ti ti-trash"></i> <span>Hapus Terpilih (<span id="bulkCount">0</span>)</span>
+          </button>
+        </div>
+      </div>
+      @endif
       <div class="card-body p-0">
         @if($sesiList->isEmpty())
           <div class="py-5 text-center text-muted">
-            <i class="mdi mdi-history" style="font-size:48px; opacity:.3;"></i>
+            <i class="ti ti-history" style="font-size:48px; opacity:.3;"></i>
             <p class="mt-2">Belum ada riwayat pemeriksaan</p>
             <a href="{{ route('checker.index') }}" class="btn btn-primary btn-sm">Mulai Pemeriksaan</a>
           </div>
@@ -36,7 +44,11 @@
             <table class="table table-hover mb-0" style="font-size:13px;">
               <thead style="background:#f8f8ff;">
                 <tr>
-                  <th class="ps-3" style="width:50px;">#</th>
+                  <th class="ps-3 w-1">
+                    <input type="checkbox" class="form-check-input m-0 align-middle" id="checkAll"
+                           title="Pilih semua di halaman ini" aria-label="Pilih semua">
+                  </th>
+                  <th style="width:50px;">#</th>
                   <th>Tanggal</th>
                   <th style="min-width:280px;">Publikasi</th>
                   <th class="text-center">Total File</th>
@@ -49,7 +61,11 @@
               <tbody>
                 @foreach($sesiList as $i => $sesi)
                 <tr>
-                  <td class="ps-3 text-muted">{{ $sesiList->firstItem() + $i }}</td>
+                  <td class="ps-3">
+                    <input type="checkbox" class="form-check-input m-0 align-middle check-sesi" form="bulkDeleteForm"
+                           name="ids[]" value="{{ $sesi->id }}" aria-label="Pilih sesi #{{ $sesi->id }}">
+                  </td>
+                  <td class="text-muted">{{ $sesiList->firstItem() + $i }}</td>
                   <td>
                     <div style="font-size:13px; color:#566a7f; font-weight:500;">
                       {{ $sesi->created_at->format('d M Y') }}
@@ -73,12 +89,12 @@
                           @endif
                           @if($hasil->detail_count > 0)
                             <small class="text-muted" title="Kriteria yang sudah ditinjau manual">
-                              <i class="mdi mdi-clipboard-check-outline"></i> {{ $hasil->ditinjau_count }}/{{ $hasil->detail_count }}
+                              <i class="ti ti-clipboard-check"></i> {{ $hasil->ditinjau_count }}/{{ $hasil->detail_count }}
                             </small>
                             @if($hasil->hasPdf())
                               <a href="{{ route('checker.hasil.tinjau', $hasil) }}"
                                  class="btn btn-sm {{ $selesai ? 'btn-outline-success' : 'btn-primary' }} py-0 px-2 text-nowrap">
-                                <i class="mdi mdi-{{ $selesai ? 'check' : 'play' }}"></i>
+                                <i class="ti ti-{{ $selesai ? 'check' : 'player-play' }}"></i>
                                 {{ $selesai ? 'Selesai' : ($hasil->ditinjau_count ? 'Lanjutkan' : 'Mulai Tinjauan') }}
                               </a>
                             @else
@@ -92,25 +108,25 @@
                     @endforelse
                   </td>
                   <td class="text-center">
-                    <span class="badge bg-label-primary">{{ $sesi->total_file }}</span>
+                    <span class="badge bg-blue-lt">{{ $sesi->total_file }}</span>
                   </td>
                   <td class="text-center">
                     @if($sesi->total_ok > 0)
-                      <span class="badge" style="background:rgba(113,221,55,.12); color:#429d20;">{{ $sesi->total_ok }}</span>
+                      <span class="badge bg-green-lt">{{ $sesi->total_ok }}</span>
                     @else
                       <span class="text-muted">—</span>
                     @endif
                   </td>
                   <td class="text-center">
                     @if($sesi->total_warn > 0)
-                      <span class="badge" style="background:rgba(255,171,0,.12); color:#b37800;">{{ $sesi->total_warn }}</span>
+                      <span class="badge bg-yellow-lt">{{ $sesi->total_warn }}</span>
                     @else
                       <span class="text-muted">—</span>
                     @endif
                   </td>
                   <td class="text-center">
                     @if($sesi->total_err > 0)
-                      <span class="badge" style="background:rgba(255,62,29,.12); color:#c73016;">{{ $sesi->total_err }}</span>
+                      <span class="badge bg-red-lt">{{ $sesi->total_err }}</span>
                     @else
                       <span class="text-muted">—</span>
                     @endif
@@ -119,17 +135,17 @@
                     <div class="d-flex gap-1 justify-content-center">
                       <a href="{{ route('checker.riwayat.detail', $sesi) }}"
                          class="btn btn-sm btn-outline-primary" title="Lihat Detail">
-                        <i class="mdi mdi-eye"></i>
+                        <i class="ti ti-eye"></i>
                       </a>
                       <a href="{{ route('checker.riwayat.export', $sesi) }}"
                          class="btn btn-sm btn-outline-success" title="Export Excel">
-                        <i class="mdi mdi-microsoft-excel"></i>
+                        <i class="ti ti-file-spreadsheet"></i>
                       </a>
                       <form action="{{ route('checker.riwayat.delete', $sesi) }}" method="POST"
                             onsubmit="return confirm('Hapus sesi ini beserta semua hasilnya?')">
                         @csrf @method('DELETE')
                         <button type="submit" class="btn btn-sm btn-outline-danger" title="Hapus">
-                          <i class="mdi mdi-delete-outline"></i>
+                          <i class="ti ti-trash"></i>
                         </button>
                       </form>
                     </div>
@@ -148,4 +164,62 @@
 
   </div>
 </div>
+
+{{-- Konfirmasi hapus massal --}}
+<div class="modal modal-blur fade" id="modalHapus" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-sm modal-dialog-centered" role="document">
+    <div class="modal-content">
+      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Tutup"></button>
+      <div class="modal-status bg-danger"></div>
+      <div class="modal-body text-center py-4">
+        <i class="ti ti-alert-triangle text-danger mb-2" style="font-size:2.5rem;"></i>
+        <h3>Hapus <span id="modalHapusCount">0</span> sesi?</h3>
+        <div class="text-secondary">
+          Semua hasil pemeriksaan, catatan tinjauan, dan file PDF upload dalam sesi tersebut ikut terhapus
+          dan tidak bisa dikembalikan.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <div class="w-100">
+          <div class="row">
+            <div class="col"><button type="button" class="btn w-100" data-bs-dismiss="modal">Batal</button></div>
+            <div class="col">
+              <button type="submit" form="bulkDeleteForm" class="btn btn-danger w-100">Hapus</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 @endsection
+
+@push('scripts')
+<script>
+(() => {
+  const all    = document.getElementById('checkAll');
+  const boxes  = () => [...document.querySelectorAll('.check-sesi')];
+  const update = () => {
+    const n = boxes().filter(b => b.checked).length;
+    document.getElementById('bulkCount').textContent = n;
+    document.getElementById('btnBulkDelete').disabled = n === 0;
+    document.getElementById('bulkInfo').textContent = n
+      ? `${n} sesi dipilih`
+      : 'Centang sesi untuk menghapus beberapa sekaligus';
+    if (all) {
+      all.checked       = n > 0 && n === boxes().length;
+      all.indeterminate = n > 0 && n < boxes().length;
+    }
+    boxes().forEach(b => b.closest('tr').classList.toggle('table-active', b.checked));
+  };
+
+  all?.addEventListener('change', () => { boxes().forEach(b => { b.checked = all.checked; }); update(); });
+  boxes().forEach(b => b.addEventListener('change', update));
+
+  window.konfirmasiHapus = () => {
+    document.getElementById('modalHapusCount').textContent = boxes().filter(b => b.checked).length;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('modalHapus')).show();
+  };
+})();
+</script>
+@endpush

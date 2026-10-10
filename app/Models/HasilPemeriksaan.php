@@ -10,6 +10,12 @@ class HasilPemeriksaan extends Model
     protected $table      = 'hasil_pemeriksaan';
     public    $timestamps = false; // hanya punya created_at, diisi manual
 
+    /**
+     * Disk privat (storage/app) untuk PDF hasil upload — bukan disk "public", supaya file tidak ikut
+     * terbuka bila `php artisan storage:link` dijalankan. Disajikan hanya lewat route yang wajib login.
+     */
+    public const DISK = 'local';
+
     protected $fillable = [
         'sesi_id',
         'nama_file',
@@ -25,11 +31,20 @@ class HasilPemeriksaan extends Model
         'pdf_path',
         'pdf_url',
         'ocr_lines',
+        // identitas publikasi BPS (Import API) — kunci pencocokan ke SIPOTRET
+        'pub_id_api',
+        'pub_domain',
+        'pub_issn',
+        'pub_tanggal_rilis',
+        'sipotret_terkirim_at',
+        'sipotret_history_id',
     ];
 
     protected $casts = [
-        'created_at' => 'datetime',
-        'ocr_lines'  => 'array',
+        'created_at'           => 'datetime',
+        'ocr_lines'            => 'array',
+        'pub_tanggal_rilis'    => 'date',
+        'sipotret_terkirim_at' => 'datetime',
     ];
 
     public function sesi()
@@ -40,6 +55,12 @@ class HasilPemeriksaan extends Model
     public function detail()
     {
         return $this->hasMany(DetailPemeriksaan::class, 'hasil_id');
+    }
+
+    /** Temuan petugas di luar daftar kriteria. */
+    public function catatanTambahan()
+    {
+        return $this->hasMany(CatatanTambahan::class, 'hasil_id')->orderBy('id');
     }
 
     /**
@@ -65,7 +86,13 @@ class HasilPemeriksaan extends Model
      */
     public function hasPdf(): bool
     {
-        return ($this->pdf_path && Storage::exists($this->pdf_path)) || (bool) $this->pdf_url;
+        return ($this->pdf_path && Storage::disk(self::DISK)->exists($this->pdf_path)) || (bool) $this->pdf_url;
+    }
+
+    /** Hasil dari Import API BPS yang identitasnya lengkap, bisa dikirim ke SIPOTRET. */
+    public function bisaKirimSipotret(): bool
+    {
+        return $this->pub_id_api && $this->pub_domain;
     }
 
     /**
@@ -85,10 +112,11 @@ class HasilPemeriksaan extends Model
     {
         $detail = $this->detail()->get();
 
-        $ok   = $detail->where('status', 'OK')->count();
-        $warn = $detail->where('status', 'PERLU DICEK')->count();
-        $err  = $detail->where('status', 'TIDAK ADA')->count();
-        $skip = $detail->where('status', 'TIDAK DIPERIKSA')->count();
+        $ok   = $detail->where('status', DetailPemeriksaan::STATUS_OK)->count();
+        $warn = $detail->where('status', DetailPemeriksaan::STATUS_PERLU_DICEK)->count();
+        // "Tidak Ada" (otomatis) & "Tidak Sesuai" (verifikasi petugas) sama-sama dihitung masalah
+        $err  = $detail->whereIn('status', DetailPemeriksaan::STATUS_MASALAH)->count();
+        $skip = $detail->where('status', DetailPemeriksaan::STATUS_TIDAK_DIPERIKSA)->count();
 
         $this->total_ok            = $ok;
         $this->total_perlu_dicek   = $warn;

@@ -1,23 +1,14 @@
+# Semua permintaan diteruskan ke folder public/ (alamat tetap /pubchecker).
+# File di folder utama — .env, vendor/, storage/, app/, dll. — tidak bisa dibuka lewat browser:
+# mis. /pubchecker/.env dicari sebagai public/.env (tidak ada) → 404 dari aplikasi.
 <IfModule mod_rewrite.c>
-    <IfModule mod_negotiation.c>
-        Options -MultiViews -Indexes
-    </IfModule>
-
     RewriteEngine On
-    
-    RewriteBase /pubchecker/
+    RewriteRule ^(.*)$ public/$1 [L]
+</IfModule>
 
-    RewriteCond %{HTTP:Authorization} .
-    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
-
-    RewriteCond %{REQUEST_FILENAME} !-d
-    RewriteCond %{REQUEST_URI} (.+)/$
-    RewriteRule ^ %1 [L,R=301]
-
-    RewriteCond %{REQUEST_FILENAME} !-d
-    RewriteCond %{REQUEST_FILENAME} !-f
-    RewriteRule ^ index.php [L]
-    
+# Cadangan bila mod_rewrite tidak aktif: tolak semua akses langsung ke folder utama
+<IfModule !mod_rewrite.c>
+    Require all denied
 </IfModule>
 
 php_value max_execution_time 300
