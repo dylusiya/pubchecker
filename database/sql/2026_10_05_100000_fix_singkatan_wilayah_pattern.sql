@@ -1,0 +1,4 @@
+-- Migration: 2026_10_05_100000_fix_singkatan_wilayah_pattern
+-- Jalankan HANYA bila baris 2026_10_05_100000_fix_singkatan_wilayah_pattern belum ada di tabel `migrations`.
+update `kriteria_pemeriksaan` set `parameter` = '{\"pattern\":\"\\\\b(?:Kab|Prov|Kec|Kel|Kep)\\\\.|(?<![\\\\w./])(?:Kalsel|Kalteng|Kaltim|Kalbar|Kaltara|Jatim|Jateng|Jabar|Sumut|Sumbar|Sumsel|Sulsel|Sulteng|Sultra|Sulut|Sulbar|Kepri|Babel|HSS|HST|HSU|Batola)\\\\b(?!\\\\.[\\\\w-]+\\\\.go\\\\.id|\\\\.go\\\\.id)\",\"flags\":\"iu\"}', `updated_at` = '2026-10-12 01:00:15' where `kode` = 'P-017' and `tipe_cek` = 'not_regex';
+INSERT INTO `migrations` (`migration`, `batch`) SELECT m.migration, m.batch FROM (SELECT '2026_10_05_100000_fix_singkatan_wilayah_pattern' AS migration, IFNULL(MAX(`batch`), 0) + 1 AS batch FROM `migrations`) AS m WHERE NOT EXISTS (SELECT 1 FROM `migrations` WHERE `migration` = '2026_10_05_100000_fix_singkatan_wilayah_pattern');

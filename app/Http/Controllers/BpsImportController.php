@@ -150,6 +150,8 @@ class BpsImportController extends Controller
                 $tmpPath  = null;
 
                 try {
+                    // tanggal rilis dari API BPS: cek bulan penandatanganan kata pengantar/sambutan
+                    $this->checker->setTanggalRilis($pub['rl_date'] ?? null);
                     if (is_array($extracted) && count($request->input('publications')) === 1) {
                         // Teks sudah dibaca di browser — tidak perlu unduh & parse PDF di server
                         $result = $this->checker->checkFromText($extracted, $filename, (int) ($extracted['file_size'] ?? 0));

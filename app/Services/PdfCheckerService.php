@@ -33,8 +33,43 @@ class PdfCheckerService
     private array  $coverWords = [];
     /** Posisi kata "ISSN" di halaman awal: [{hal, text, x, y, pw, ph}] — untuk cek posisi selain kover. */
     private array  $frontWords = [];
-    /** Indeks halaman Tim Penyusun (cache): false = belum dicari, null = tidak ditemukan. */
-    private int|null|false $timPenyusunIdx = false;
+    /** Halaman khusus yang dikenali dari isinya (cache): nama → [indeks awal, jumlah] atau null. */
+    private array $halamanCache = [];
+
+    /** Target halaman khusus → label untuk pesan. */
+    private const HALAMAN_KHUSUS = [
+        'katalog'         => 'Katalog',
+        'tim_penyusun'    => 'Tim Penyusun',
+        'kata_sambutan'   => 'Kata Sambutan',
+        'kata_pengantar'  => 'Kata Pengantar',
+        'abstraksi'       => 'Abstraksi',
+        'daftar_isi'      => 'Daftar Isi',
+        'daftar_tabel'    => 'Daftar Tabel',
+        'daftar_gambar'   => 'Daftar Gambar',
+        'daftar_lampiran' => 'Daftar Lampiran',
+        'daftar_pustaka'  => 'Daftar Pustaka',
+        'glosarium'       => 'Glosarium',
+        'indeks'          => 'Indeks',
+        'lampiran'        => 'Lampiran',
+    ];
+
+    /** Bagian belakang: judul di baris atas halaman (setelah duplikat teks dibersihkan). */
+    private const JUDUL_BELAKANG = [
+        'daftar_pustaka' => '/^(?:DAFTAR\s+PUSTAKA|DAFTAR\s+REFERENSI|REFERENSI|REFERENCES|BIBLIOGRAPHY)\b/iu',
+        'glosarium'      => '/^(?:GLOSARIUM|DAFTAR\s+ISTILAH|GLOSSARY)\b/iu',
+        'indeks'         => '/^(?:INDEKS|INDEX)\s*$/iu',
+        'lampiran'       => '/^(?:LAMPIRAN|APPENDI(?:X|CES))(?:\s*\/\s*APPENDI(?:X|CES))?\s*$/iu',
+    ];
+
+    /** Daftar Tabel/Gambar/Lampiran: kata awal entrinya (dipakai untuk mengenali halamannya). */
+    private const ENTRI_DAFTAR = [
+        'daftar_tabel'    => 'Tabel|Table',
+        'daftar_gambar'   => 'Gambar|Figure',
+        'daftar_lampiran' => 'Lampiran|Appendix',
+    ];
+
+    /** Tanggal rilis publikasi (Y-m-d), bila diketahui — untuk cek bulan penandatanganan. */
+    private ?string $tanggalRilis = null;
     private float  $pageW      = 595.0;
     private float  $pageH      = 842.0;
     private string $page2Text  = '';
@@ -536,8 +571,9 @@ class PdfCheckerService
         $this->currentTarget = $rule->target;
 
         $param = $rule->parameter ?? [];
-        if ($rule->target === 'tim_penyusun' && $this->timPenyusunIndex() === null && $rule->tipe_cek !== 'manual') {
-            return ['TIDAK DIPERIKSA', 'Halaman Tim Penyusun tidak dikenali otomatis (tidak ada "Tim Penyusun"/"Pengarah"/"Penanggung Jawab") — cek manual'];
+        // target halaman khusus (Katalog, Tim Penyusun, Daftar Isi, Kata Pengantar) dikenali dari isinya
+        if (isset(self::HALAMAN_KHUSUS[$rule->target]) && $this->halamanKhusus($rule->target) === null && $rule->tipe_cek !== 'manual') {
+            return ['TIDAK DIPERIKSA', 'Halaman ' . self::HALAMAN_KHUSUS[$rule->target] . ' tidak dikenali otomatis (mungkin berupa gambar) — cek manual'];
         }
         $text  = $this->targetText($rule->target);
         $gagal = $rule->status_gagal;
@@ -551,6 +587,16 @@ class PdfCheckerService
             'not_contains' => $this->evalContains($param, $text, true,  $gagal, $msgOk, $msgErr),
             'posisi_area'  => $this->evalPosisi($param, $gagal, $msgOk, $msgErr),
             'min_pages'    => $this->evalPages($param, $gagal, $msgOk, $msgErr),
+            'urutan'       => $this->evalUrutan($param, $text, $gagal, $msgOk, $msgErr),
+            'sama_kover'   => $this->evalSamaKover($param, $text, $gagal, $msgOk, $msgErr),
+            'paritas'      => $this->evalParitas($param, $gagal, $msgOk, $msgErr),
+            'romawi_genap' => $this->evalRomawiGenap($text, $gagal, $msgOk, $msgErr),
+            'jumlah_min'   => $this->evalJumlahMin($param, $text, $gagal, $msgOk, $msgErr),
+            'nomor_urut'   => $this->evalNomorUrut($param, $text, $gagal, $msgOk, $msgErr),
+            'bab'          => $this->evalBab($param, $gagal, $msgOk, $msgErr),
+            'bulan_rilis'  => $this->evalBulanRilis($text, $gagal, $msgOk, $msgErr),
+            'abjad'        => $this->evalAbjad($param, $text, $gagal, $msgOk, $msgErr),
+            'judul_kover'  => $this->evalJudulKover($text, $gagal, $msgOk, $msgErr),
             'manual'       => ['PERLU DICEK', $msgErr],
             default        => ['TIDAK DIPERIKSA', 'Tipe cek tidak dikenal: ' . $rule->tipe_cek],
         };
@@ -560,6 +606,7 @@ class PdfCheckerService
     {
         $pattern = $p['pattern'] ?? null;
         if (!$pattern) return ['TIDAK DIPERIKSA', 'Parameter pattern kosong'];
+        $text  = $this->samarkan($p, $text);
         $regex = $this->buildRegex($p);
         try {
             $found = preg_match($regex, $text, $m, PREG_OFFSET_CAPTURE);
@@ -585,6 +632,7 @@ class PdfCheckerService
     private function evalNotRegex(array $p, string $text, string $gagal, string $ok, string $err): array
     {
         if (empty($p['pattern'])) return ['TIDAK DIPERIKSA', 'Parameter pattern kosong'];
+        $text  = $this->samarkan($p, $text);
         $regex = $this->buildRegex($p);
         try {
             $count = preg_match_all($regex, $text, $m, PREG_OFFSET_CAPTURE);
@@ -618,6 +666,327 @@ class PdfCheckerService
         return '~' . $pattern . '~' . ($p['flags'] ?? '');
     }
 
+    /**
+     * Parameter opsional "abaikan": bagian teks yang cocok dengan pola ini diganti spasi (panjang sama,
+     * jadi posisi temuan tetap benar) sebelum dicek — mis. tahun pada edisi "Volume 15, 2026" tidak
+     * dihitung sebagai tahun judul.
+     */
+    private function samarkan(array $p, string $text): string
+    {
+        if (empty($p['abaikan'])) return $text;
+        $regex = $this->buildRegex(['pattern' => $p['abaikan'], 'flags' => $p['flags'] ?? '']);
+        return @preg_replace_callback($regex, fn($m) => str_repeat(' ', strlen($m[0])), $text) ?? $text;
+    }
+
+    /** Pola regex → label yang mudah dibaca untuk pesan (mis. "Nomor\s+Publikasi" → "Nomor Publikasi"). */
+    private function labelPola(string $pola): string
+    {
+        $alt = explode('|', $pola)[0];
+        $alt = preg_replace(['/\\\\s[+*]?\??/', '/\[(.)[^\]]*\]/', '/\\\\b|\(\?:|[()?^$]/'], [' ', '$1', ''], $alt);
+        return trim(preg_replace('/\s+/', ' ', $alt));
+    }
+
+    /**
+     * Urutan komponen: setiap label (regex) harus muncul berurutan di halaman target, mis. komponen
+     * halaman Katalog "Nomor Publikasi" → "Jumlah Halaman". Label yang tidak ada → tidak diperiksa
+     * (komponen opsional seperti "Dicetak oleh").
+     */
+    private function evalUrutan(array $p, string $text, string $gagal, string $ok, string $err): array
+    {
+        $labels = array_values(array_filter((array) ($p['label'] ?? []), fn($l) => trim((string) $l) !== ''));
+        if (count($labels) < 2) return ['TIDAK DIPERIKSA', 'Parameter urutan butuh minimal 2 komponen'];
+
+        $posisi = [];
+        $hilang = [];
+        foreach ($labels as $pola) {
+            $regex = $this->buildRegex(['pattern' => $pola, 'flags' => $p['flags'] ?? 'iu']);
+            if (@preg_match($regex, $text, $m, PREG_OFFSET_CAPTURE)) {
+                $posisi[] = ['offset' => $m[0][1], 'nama' => $this->labelPola($pola), 'teks' => $m[0][0]];
+            } else {
+                $hilang[] = $this->labelPola($pola);
+            }
+        }
+        if ($hilang) {
+            return ['TIDAK DIPERIKSA', 'Komponen tidak ditemukan di halaman: ' . implode(', ', $hilang)];
+        }
+
+        $last = end($posisi);
+        $this->addLokasi($last['offset'], $last['teks']);
+        $diharapkan = implode(' → ', array_column($posisi, 'nama'));
+        $sesuai = true;
+        for ($i = 1; $i < count($posisi); $i++) {
+            if ($posisi[$i]['offset'] <= $posisi[$i - 1]['offset']) { $sesuai = false; break; }
+        }
+        if ($sesuai) return ['OK', "{$ok} ({$diharapkan})"];
+
+        $nyata = $posisi;
+        usort($nyata, fn($a, $b) => $a['offset'] <=> $b['offset']);
+        return [$gagal, "{$err} — seharusnya {$diharapkan}, di halaman: " . implode(' → ', array_column($nyata, 'nama'))];
+    }
+
+    /**
+     * Isian di halaman target harus sama dengan di kover (mis. nomor ISSN). Pola memakai satu grup
+     * tangkap untuk nilai yang dibandingkan; spasi & tanda hubung diabaikan saat membandingkan.
+     */
+    private function evalSamaKover(array $p, string $text, string $gagal, string $ok, string $err): array
+    {
+        if (empty($p['pattern'])) return ['TIDAK DIPERIKSA', 'Parameter pattern kosong'];
+        $regex = $this->buildRegex($p);
+        if (!@preg_match($regex, $text, $m, PREG_OFFSET_CAPTURE)) {
+            return ['TIDAK DIPERIKSA', $p['pesan_syarat'] ?? 'Isian tidak ditemukan di halaman ini'];
+        }
+        if (!@preg_match($regex, $this->coverText, $k)) {
+            return ['TIDAK DIPERIKSA', 'Isian tidak ditemukan di kover untuk dibandingkan'];
+        }
+        $nilai = trim($m[1][0] ?? $m[0][0]);
+        $kover = trim($k[1] ?? $k[0]);
+        $norm  = fn($s) => mb_strtoupper(preg_replace('/[\s\-\x{2010}-\x{2015}]+/u', '', $s));
+        $this->addLokasi($m[0][1], $m[0][0]);
+
+        return $norm($nilai) === $norm($kover)
+            ? ['OK', "{$ok} ({$nilai})"]
+            : [$gagal, "{$err} — di halaman ini: {$nilai}, di kover: {$kover}"];
+    }
+
+    /**
+     * Halaman awal bagian harus ganjil/genap. Nomor halaman = urutan halaman di PDF (kover = 1),
+     * sehingga hasilnya bergantung pada PDF yang memuat semua halaman termasuk halaman kosong.
+     */
+    private function evalParitas(array $p, string $gagal, string $ok, string $err): array
+    {
+        [$start] = $this->targetRange($this->currentTarget);
+        $hal    = $start + 1;
+        $mau    = ($p['posisi'] ?? 'ganjil') === 'genap' ? 'genap' : 'ganjil';
+        $nyata  = $hal % 2 === 1 ? 'ganjil' : 'genap';
+        $label  = self::HALAMAN_KHUSUS[$this->currentTarget] ?? 'Bagian';
+        $baris  = trim(strtok(trim($this->pageTexts[$start] ?? ''), "\n") ?: '');
+        $this->lokasi[] = ['hal' => $hal, 'teks' => mb_substr($baris, 0, 80)];
+
+        if ($mau === $nyata) return ['OK', "{$ok} ({$label} mulai hal. {$hal} PDF)"];
+
+        $catatan = "{$err} — {$label} terdeteksi mulai hal. {$hal} PDF ({$nyata})";
+        // judul Daftar Isi/Kata Pengantar sering berupa gambar: halaman sebelumnya tanpa teks bisa jadi awalnya
+        if (in_array($this->currentTarget, ['daftar_isi', 'kata_pengantar'], true)
+            && $start > 0 && trim($this->pageTexts[$start - 1] ?? '') === '') {
+            $catatan .= "; hal. {$start} tanpa teks (gambar/kosong) — bila itu awal {$label}, posisinya bisa jadi sudah benar";
+        }
+        return [$gagal, $catatan];
+    }
+
+    /** Jumlah halaman romawi di halaman Katalog (mis. "x+52 halaman") harus genap. */
+    private function evalRomawiGenap(string $text, string $gagal, string $ok, string $err): array
+    {
+        if (!preg_match('/\b([ivxlcdm]+)\s*\+\s*(\d+)\s*(?:halaman|hlm\.?|pages?)\b/iu', $text, $m, PREG_OFFSET_CAPTURE)) {
+            return ['TIDAK DIPERIKSA', 'Format jumlah halaman (romawi + arab) tidak ditemukan'];
+        }
+        $romawi = $m[1][0];
+        $nilai  = $this->romawiKeAngka($romawi);
+        if (!$nilai) return ['TIDAK DIPERIKSA', "Angka romawi '{$romawi}' tidak terbaca"];
+        $this->addLokasi($m[0][1], $m[0][0]);
+
+        return $nilai % 2 === 0
+            ? ['OK', "{$ok} ({$romawi} = {$nilai})"]
+            : [$gagal, "{$err} ({$romawi} = {$nilai}, ganjil)"];
+    }
+
+    /** Minimal jumlah entri (mis. daftar tabel dibuat bila ada ≥ 3 tabel). */
+    private function evalJumlahMin(array $p, string $text, string $gagal, string $ok, string $err): array
+    {
+        if (empty($p['pattern'])) return ['TIDAK DIPERIKSA', 'Parameter pattern kosong'];
+        $min = max(1, (int) ($p['min'] ?? 1));
+        $n   = @preg_match_all($this->buildRegex($p), $text);
+        if ($n === false) return ['TIDAK DIPERIKSA', 'Regex tidak valid'];
+        return $n >= $min ? ['OK', "{$ok} ({$n} entri)"] : [$gagal, "{$err} ({$n} entri, minimal {$min})"];
+    }
+
+    /**
+     * Nomor berurutan & formatnya konsisten (mis. nomor tabel di Daftar Tabel). Pola memakai satu grup
+     * tangkap untuk nomornya: "1", "2.3", dst. Satu jenjang: 1, 2, 3 …; dua jenjang atau lebih: nomor
+     * terakhir naik satu dalam bab yang sama, mulai dari 1 lagi saat bab berganti.
+     */
+    private function evalNomorUrut(array $p, string $text, string $gagal, string $ok, string $err): array
+    {
+        if (empty($p['pattern'])) return ['TIDAK DIPERIKSA', 'Parameter pattern kosong'];
+        if (!@preg_match_all($this->buildRegex($p), $text, $m, PREG_OFFSET_CAPTURE)) {
+            return ['TIDAK DIPERIKSA', 'Nomor tidak ditemukan'];
+        }
+        $nomor = array_map(fn($x) => $x[0], $m[1]);
+        if (count($nomor) < 2) return ['TIDAK DIPERIKSA', 'Hanya ' . count($nomor) . ' nomor ditemukan'];
+        $this->addLokasi($m[0][0][1], $m[0][0][0]);
+
+        $jenjang = array_unique(array_map(fn($n) => substr_count($n, '.') + 1, $nomor));
+        if (count($jenjang) > 1) {
+            return [$gagal, "{$err} — format penomoran tidak konsisten (" . implode(' dan ', array_slice(array_unique($nomor), 0, 2)) . ')'];
+        }
+        for ($i = 1; $i < count($nomor); $i++) {
+            $a = array_map('intval', explode('.', $nomor[$i - 1]));
+            $b = array_map('intval', explode('.', $nomor[$i]));
+            $akhir = count($b) - 1;
+            $babSama = array_slice($a, 0, $akhir) === array_slice($b, 0, $akhir);
+            $benar = $babSama
+                ? $b[$akhir] === $a[$akhir] + 1
+                : array_slice($b, 0, $akhir) > array_slice($a, 0, $akhir) && $b[$akhir] === 1;
+            if (!$benar) {
+                $this->lokasi = [];
+                $this->addLokasi($m[0][$i][1], $m[0][$i][0]);
+                return [$gagal, "{$err} — {$nomor[$i - 1]} lalu {$nomor[$i]}"];
+            }
+        }
+        return ['OK', "{$ok} (" . count($nomor) . " nomor, {$nomor[0]} s.d. " . end($nomor) . ')'];
+    }
+
+    /**
+     * Awal setiap bab (baris "BAB n"/"CHAPTER n" di bagian atas halaman, bukan entri daftar isi).
+     * @return array<int, array{nomor:int, label:string, hal:int}> urut menurut halaman
+     */
+    private function awalBab(): array
+    {
+        $lewati = [];
+        foreach (['daftar_isi', 'daftar_tabel', 'daftar_gambar', 'daftar_lampiran'] as $d) {
+            if ($r = $this->halamanKhusus($d)) $lewati = array_merge($lewati, range($r[0], $r[0] + $r[1] - 1));
+        }
+
+        $bab = [];
+        foreach ($this->pageTexts as $i => $t) {
+            if ($i === 0 || in_array($i, $lewati, true)) continue;
+            $baris = array_slice(array_values(array_filter(array_map('trim', preg_split('/\R/u', $t)))), 0, 8);
+            foreach ($baris as $b) {
+                if (preg_match('/(?:\.\s?){5,}/u', $b)) continue; // entri daftar isi
+                if (!preg_match('/^(?:BAB|Bab|CHAPTER|Chapter)\s+(\d{1,2}|[IVXLC]{1,6})\b/u', $b, $x)) continue;
+                $n = ctype_digit($x[1]) ? (int) $x[1] : $this->romawiKeAngka($x[1]);
+                if ($n > 0 && !isset($bab[$n])) $bab[$n] = ['nomor' => $n, 'label' => $x[0], 'hal' => $i + 1];
+                break;
+            }
+        }
+        usort($bab, fn($a, $b) => $a['hal'] <=> $b['hal']);
+        return $bab;
+    }
+
+    /** Bab: dimulai di halaman ganjil (cek "ganjil") atau bernomor berurutan 1, 2, 3 … (cek "berurutan"). */
+    private function evalBab(array $p, string $gagal, string $ok, string $err): array
+    {
+        $bab = $this->awalBab();
+        if (!$bab) return ['TIDAK DIPERIKSA', 'Judul bab ("BAB n") tidak dikenali — cek manual'];
+
+        if (($p['cek'] ?? 'ganjil') === 'berurutan') {
+            foreach ($bab as $i => $b) {
+                $harap = $i === 0 ? 1 : $bab[$i - 1]['nomor'] + 1;
+                if ($b['nomor'] !== $harap) {
+                    $this->lokasi[] = ['hal' => $b['hal'], 'teks' => $b['label']];
+                    return [$gagal, "{$err} — " . ($i === 0 ? "bab pertama bernomor {$b['nomor']}" : "{$bab[$i - 1]['label']} lalu {$b['label']}")];
+                }
+            }
+            return ['OK', "{$ok} (" . count($bab) . ' bab)'];
+        }
+
+        $genap = array_filter($bab, fn($b) => $b['hal'] % 2 === 0);
+        foreach (array_slice($genap, 0, self::MAX_LOKASI) as $b) $this->lokasi[] = ['hal' => $b['hal'], 'teks' => $b['label']];
+        if (!$genap) return ['OK', "{$ok} (" . count($bab) . ' bab)'];
+        return [$gagal, "{$err} — " . implode(', ', array_map(fn($b) => "{$b['label']} (hal. {$b['hal']} PDF)", $genap))];
+    }
+
+    /**
+     * Entri tersusun menurut abjad (Daftar Pustaka, Indeks, Glosarium). Pola memakai satu grup tangkap
+     * untuk kunci pengurutan (nama penulis / istilah); kunci yang sama boleh berurutan.
+     */
+    private function evalAbjad(array $p, string $text, string $gagal, string $ok, string $err): array
+    {
+        if (empty($p['pattern'])) return ['TIDAK DIPERIKSA', 'Parameter pattern kosong'];
+        if (!@preg_match_all($this->buildRegex($p), $text, $m, PREG_OFFSET_CAPTURE) || count($m[1]) < 3) {
+            return ['TIDAK DIPERIKSA', 'Entri tidak cukup terbaca untuk dicek urutannya (' . count($m[1] ?? []) . ' entri)'];
+        }
+        $kunci = fn($s) => trim(preg_replace('/[^\p{L}\d ]+/u', '', mb_strtolower(preg_replace('/\s+/u', ' ', $s))));
+        for ($i = 1; $i < count($m[1]); $i++) {
+            $a = $kunci($m[1][$i - 1][0]);
+            $b = $kunci($m[1][$i][0]);
+            if (strcmp($a, $b) > 0) {
+                $this->addLokasi($m[0][$i][1], $m[0][$i][0]);
+                $pendek = fn($s) => mb_strimwidth(trim($s), 0, 40, '…');
+                return [$gagal, "{$err} — \"{$pendek($m[1][$i - 1][0])}\" lalu \"{$pendek($m[1][$i][0])}\""];
+            }
+        }
+        return ['OK', "{$ok} (" . count($m[1]) . ' entri)'];
+    }
+
+    /**
+     * Judul & tahun judul di halaman target sama dengan kover: kata-kata judul kover (tanpa nama penerbit,
+     * katalog, ISSN, edisi, alamat web) minimal 70% ada di halaman target, dan tahun judulnya ada.
+     */
+    private function evalJudulKover(string $text, string $gagal, string $ok, string $err): array
+    {
+        // buang bagian yang bukan judul (penerbit, edisi, katalog/ISSN, alamat web) — di kover maupun halaman target,
+        // supaya tahun pada edisi "Volume 41, 2026" tidak terhitung sebagai tahun judul
+        $buang = fn(string $s) => preg_replace([
+            '/BADAN\s+PUSAT\s+STATISTIK|BPS[-\s]+STATISTICS[^\n]*/iu',
+            '/(?:Volume|Vol\.?|Edisi|Nomor|No\.)\s*\d+[^\n]{0,15}?(?:19|20)\d{2}/iu',
+            '/(?:Katalog|Catalogue|IS[SB]N|Nomor\s+Publikasi|Publication\s+Number)[^\n]*/iu',
+            '/https?:\/\/\S+|\S+\.go\.id\S*/iu',
+        ], ' ', $this->bersihkanGanda($s));
+        $kover = preg_replace('/(\p{Ll})(\p{Lu})/u', '$1 $2', $buang($this->coverText)); // "SelatanProvinsi" → "Selatan Provinsi"
+
+        $tahun = preg_match('/(?<![\d.,\/-])((?:19|20)\d{2})/u', $kover, $y) ? $y[1] : null;
+        $henti = ['DAN', 'YANG', 'DARI', 'UNTUK', 'THE', 'AND', 'FOR'];
+        $kata  = array_values(array_unique(array_filter(
+            preg_split('/[^\p{L}]+/u', mb_strtoupper($kover)),
+            fn($w) => mb_strlen($w) >= 3 && !in_array($w, $henti, true)
+        )));
+        if (count($kata) < 2) return ['TIDAK DIPERIKSA', 'Judul di kover tidak terbaca (mungkin berupa gambar)'];
+
+        $padat  = preg_replace('/[^\p{L}\d]+/u', '', mb_strtoupper($buang($text)));
+        $hilang = array_values(array_filter($kata, fn($w) => !str_contains($padat, $w)));
+        $porsi  = 1 - count($hilang) / count($kata);
+        $adaTahun = !$tahun || str_contains($padat, $tahun);
+
+        $info = sprintf('%d dari %d kata judul kover ditemukan', count($kata) - count($hilang), count($kata))
+              . ($tahun ? ", tahun {$tahun} " . ($adaTahun ? 'ada' : 'tidak ada') : '');
+        if ($porsi >= 0.7 && $adaTahun) return ['OK', "{$ok} ({$info})"];
+        return [$gagal, "{$err} ({$info}" . ($hilang ? '; tidak ditemukan: ' . implode(', ', array_slice($hilang, 0, 6)) : '') . ')'];
+    }
+
+    /** Tanggal rilis publikasi (Y-m-d) dari API BPS — dipakai cek bulan penandatanganan. */
+    public function setTanggalRilis(?string $tanggal): void
+    {
+        $ts = $tanggal ? strtotime($tanggal) : false;
+        $this->tanggalRilis = $ts ? date('Y-m-d', $ts) : null;
+    }
+
+    /** Bulan penandatanganan (mis. "Banjarbaru, Februari 2026") paling lama satu bulan sebelum rilis. */
+    private function evalBulanRilis(string $text, string $gagal, string $ok, string $err): array
+    {
+        if (!$this->tanggalRilis) {
+            return ['TIDAK DIPERIKSA', 'Tanggal rilis tidak diketahui (hanya tersedia untuk pemeriksaan lewat Import API BPS)'];
+        }
+        $bulan = ['januari' => 1, 'februari' => 2, 'maret' => 3, 'april' => 4, 'mei' => 5, 'juni' => 6, 'juli' => 7,
+                  'agustus' => 8, 'september' => 9, 'oktober' => 10, 'november' => 11, 'desember' => 12,
+                  'january' => 1, 'february' => 2, 'march' => 3, 'may' => 5, 'june' => 6, 'july' => 7,
+                  'august' => 8, 'october' => 10, 'december' => 12];
+        $pola = '/\b\p{Lu}[\p{L}.\- ]{2,30},\s*(?:\d{1,2}\s+)?(' . implode('|', array_keys($bulan)) . ')\s+((?:19|20)\d{2})\b/iu';
+        if (!preg_match_all($pola, $text, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+            return ['TIDAK DIPERIKSA', 'Tempat & tanggal penandatanganan tidak ditemukan'];
+        }
+        $akhir = end($m); // tanda tangan biasanya di bagian akhir
+        $this->addLokasi($akhir[0][1], $akhir[0][0]);
+
+        $ttd   = (int) $akhir[2][0] * 12 + $bulan[mb_strtolower($akhir[1][0])];
+        $rilis = (int) substr($this->tanggalRilis, 0, 4) * 12 + (int) substr($this->tanggalRilis, 5, 2);
+        $beda  = $rilis - $ttd;
+        $info  = sprintf('ditandatangani %s %s, rilis %s', ucfirst(mb_strtolower($akhir[1][0])), $akhir[2][0], date('m/Y', strtotime($this->tanggalRilis)));
+        return $beda >= 0 && $beda <= 1 ? ['OK', "{$ok} ({$info})"] : [$gagal, "{$err} ({$info})"];
+    }
+
+    private function romawiKeAngka(string $r): int
+    {
+        $nilai = ['i' => 1, 'v' => 5, 'x' => 10, 'l' => 50, 'c' => 100, 'd' => 500, 'm' => 1000];
+        $r = strtolower($r);
+        $total = 0;
+        for ($i = 0, $n = strlen($r); $i < $n; $i++) {
+            $v = $nilai[$r[$i]] ?? 0;
+            $berikut = $i + 1 < $n ? ($nilai[$r[$i + 1]] ?? 0) : 0;
+            $total += $v < $berikut ? -$v : $v;
+        }
+        return $total;
+    }
+
     private function evalContains(array $p, string $text, bool $invert, string $gagal, string $ok, string $err): array
     {
         $needle = $p['text'] ?? null;
@@ -639,8 +1008,8 @@ class PdfCheckerService
         $area = $p['area'] ?? null;
         if (!$word || !$area) return ['TIDAK DIPERIKSA', 'Parameter word/area kosong'];
 
-        if ($this->currentTarget === 'tim_penyusun') {
-            return $this->evalPosisiTimPenyusun($word, $area, $gagal, $ok, $err);
+        if (isset(self::HALAMAN_KHUSUS[$this->currentTarget])) {
+            return $this->evalPosisiHalaman($word, $area, $gagal, $ok, $err);
         }
 
         $w = $this->findWord($word);
@@ -659,21 +1028,22 @@ class PdfCheckerService
     }
 
     /**
-     * Posisi kata di halaman Tim Penyusun (mis. ISSN di pojok kanan atas). Ukuran halaman diambil dari
-     * kata itu sendiri — halaman awal tidak selalu seukuran kover.
+     * Posisi kata di halaman khusus (mis. ISSN di pojok kanan atas halaman Tim Penyusun/Daftar Isi).
+     * Ukuran halaman diambil dari kata itu sendiri — halaman awal tidak selalu seukuran kover.
      */
-    private function evalPosisiTimPenyusun(string $word, string $area, string $gagal, string $ok, string $err): array
+    private function evalPosisiHalaman(string $word, string $area, string $gagal, string $ok, string $err): array
     {
-        $idx = $this->timPenyusunIndex();
-        $w   = $this->findWord($word, $idx);
+        [$idx]  = $this->halamanKhusus($this->currentTarget);
+        $label  = self::HALAMAN_KHUSUS[$this->currentTarget];
+        $w      = $this->findWord($word, $idx);
         if (!$w && preg_match('/\b' . preg_quote($word, '/') . '\b/iu', $this->pageTexts[$idx] ?? '')) {
-            return [$gagal, "Kata '$word' ada di halaman Tim Penyusun (hal. " . ($idx + 1) . "), tapi posisinya tidak terbaca — cek manual"];
+            return [$gagal, "Kata '$word' ada di halaman {$label} (hal. " . ($idx + 1) . "), tapi posisinya tidak terbaca — cek manual"];
         }
         if (!$w) {
             // ISSN di halaman ini hanya "jika ada": wajar kosong bila publikasi memang tanpa ISSN
             $adaDiTempatLain = preg_match('/\b' . preg_quote($word, '/') . '\b/iu', $this->coverText . "\n" . $this->targetText('front'));
             return $adaDiTempatLain
-                ? [$gagal, "Kata '$word' tidak ditemukan di halaman Tim Penyusun (hal. " . ($idx + 1) . "), padahal publikasi punya $word — cek apakah perlu dicantumkan"]
+                ? [$gagal, "Kata '$word' tidak ditemukan di halaman {$label} (hal. " . ($idx + 1) . "), padahal publikasi punya $word — cek apakah perlu dicantumkan"]
                 : ['TIDAK DIPERIKSA', "Publikasi tanpa $word"];
         }
         $this->lokasi[] = ['hal' => $idx + 1, 'teks' => mb_substr($w['text'], 0, 80)];
@@ -719,7 +1089,9 @@ class PdfCheckerService
         $n = count($this->pageTexts);
         return match($target) {
             'page2' => [1, 1],
-            'tim_penyusun' => ($i = $this->timPenyusunIndex()) === null ? [0, 0] : [$i, 1],
+            'katalog', 'tim_penyusun', 'daftar_isi', 'kata_pengantar', 'kata_sambutan', 'abstraksi',
+            'daftar_tabel', 'daftar_gambar', 'daftar_lampiran',
+            'daftar_pustaka', 'glosarium', 'indeks', 'lampiran' => $this->halamanKhusus($target) ?? [0, 0],
             'front' => [0, self::FRONT_PAGES],
             'last'  => [max(0, $n - 1), 1],
             'all'   => [0, $n],
@@ -761,23 +1133,126 @@ class PdfCheckerService
     }
 
     /**
-     * Indeks (0-based) halaman Tim Penyusun di bagian awal: berisi "Tim Penyusun"/"Pengarah"/
-     * "Penanggung Jawab" dan bukan halaman Katalog (yang juga memuat "Penyusun Naskah"/"Penyunting").
-     * Halaman ini sering tidak berjudul, jadi dikenali dari isinya.
+     * Halaman khusus di bagian awal yang dikenali dari isinya (sering tanpa judul):
+     * [indeks awal (0-based), jumlah halaman], atau null bila tidak ditemukan (mis. halaman berupa gambar).
+     *   katalog        — memuat "Nomor Publikasi" + "Ukuran Buku"/"Jumlah Halaman"/"Katalog"
+     *   tim_penyusun   — "Tim Penyusun"/"Pengarah"/"Penanggung Jawab", bukan halaman Katalog
+     *   daftar_isi     — ≥ 3 baris berpengarah titik (….. 12) berisi bab/bagian, bukan daftar tabel/gambar;
+     *                    halaman berikutnya yang serupa ikut dihitung (maks. 4)
+     *   kata_pengantar — judul "Kata Pengantar"/"Preface"/"Foreword", bukan halaman daftar isi
      */
+    private function halamanKhusus(string $nama): ?array
+    {
+        if (array_key_exists($nama, $this->halamanCache)) return $this->halamanCache[$nama];
+        if (isset(self::JUDUL_BELAKANG[$nama])) return $this->halamanCache[$nama] = $this->halamanBelakang($nama);
+
+        $awal = array_slice($this->pageTexts, 1, self::FRONT_PAGES - 1, true);
+        $isKatalog = fn($t) => preg_match('/Nomor\s+Publikasi|Publication\s+Number/iu', $t)
+            && preg_match('/Ukuran\s+Buku|Jumlah\s+Halaman|Book\s+Size|\bKatalog\b|\bCatalog/iu', $t);
+        $isDaftarIsi = function ($t) {
+            $pengarah = preg_match_all('/(?:\.\s?){6,}|…{3,}/u', $t);
+            if ($pengarah < 3) return false;
+            $daftarLain = preg_match_all('/^\s*(?:Tabel|Table|Gambar|Figure|Lampiran|Appendix)\s+\d/imu', $t);
+            return $daftarLain < $pengarah / 2
+                && preg_match('/\bBAB\b|\bCHAPTER\b|DAFTAR\s+ISI|KATA\s+PENGANTAR|PENDAHULUAN|CONTENTS/iu', $t);
+        };
+
+        // Daftar Tabel/Gambar/Lampiran: ≥ 2 baris berpengarah titik dan entri jenis ini paling banyak
+        $isDaftar = function ($t, string $jenis) {
+            if (preg_match_all('/(?:\.\s?){6,}|…{3,}/u', $t) < 2) return false;
+            $hitung = [];
+            foreach (self::ENTRI_DAFTAR as $j => $kata) {
+                $hitung[$j] = preg_match_all('/^\s*(?:' . $kata . ')\s+\d/imu', $t);
+            }
+            return $hitung[$jenis] >= 2 && $hitung[$jenis] === max($hitung);
+        };
+        // halaman yang bukan daftar dan berjudul tertentu (Kata Sambutan, Kata Pengantar, Abstraksi)
+        $berjudul = fn($t, string $judul) => !$isDaftarIsi($t) && preg_match_all('/(?:\.\s?){6,}/u', $t) < 2
+            && preg_match($judul, $t) && mb_strlen(trim($t)) > 200;
+
+        // daftar tabel/gambar/lampiran bisa panjang, jadi dicari sedikit lebih jauh
+        if (isset(self::ENTRI_DAFTAR[$nama])) {
+            $awal = array_slice($this->pageTexts, 1, self::FRONT_PAGES + 9, true);
+        }
+
+        $hasil = null;
+        foreach ($awal as $i => $t) {
+            $cocok = match ($nama) {
+                'katalog'         => $isKatalog($t),
+                'tim_penyusun'    => !$isKatalog($t) && preg_match('/\bTim\s+Penyusun\b|\bPengarah\b|\bPenanggung\s*Jawab\b|\bEditorial\s+Team\b/iu', $t),
+                'daftar_isi'      => $isDaftarIsi($t),
+                'kata_pengantar'  => $berjudul($t, '/KATA\s+PENGANTAR|\bPREFACE\b|\bFOREWORD\b/iu'),
+                'kata_sambutan'   => $berjudul($t, '/KATA\s+SAMBUTAN|\bSAMBUTAN\s+(?:KEPALA|GUBERNUR|BUPATI|WALI\s*KOTA|MENTERI)/iu'),
+                'abstraksi'       => $berjudul($t, '/^\s*(?:ABSTRAK(?:SI)?|ABSTRACT)\b/imu'),
+                'daftar_tabel', 'daftar_gambar', 'daftar_lampiran' => $isDaftar($t, $nama),
+                default           => false,
+            };
+            if (!$cocok) continue;
+
+            $jumlah = 1;
+            if ($nama === 'daftar_isi') {
+                while ($jumlah < 4 && isset($this->pageTexts[$i + $jumlah]) && $isDaftarIsi($this->pageTexts[$i + $jumlah])) $jumlah++;
+            } elseif (isset(self::ENTRI_DAFTAR[$nama])) {
+                while ($jumlah < 8 && isset($this->pageTexts[$i + $jumlah]) && $isDaftar($this->pageTexts[$i + $jumlah], $nama)) $jumlah++;
+            }
+            $hasil = [$i, $jumlah];
+            break;
+        }
+        return $this->halamanCache[$nama] = $hasil;
+    }
+
+    /**
+     * Teks hasil ekstraksi kadang menggandakan kata/frasa yang di-outline/berlapis
+     * ("STATISTIK DAERAHSTATISTIK DAERAH", "202620262026"). Kata/frasa (≥ 4 karakter) atau tahun yang
+     * terulang berdempetan disatukan.
+     */
+    private function bersihkanGanda(string $t): string
+    {
+        return preg_replace('/(\p{L}[\p{L}\d ]{3,}?|\d{4})\1+/u', '$1', $t) ?? $t;
+    }
+
+    /**
+     * Bagian belakang (Daftar Pustaka, Glosarium, Indeks, Lampiran): halaman yang salah satu baris atasnya
+     * berupa judul bagian itu (bukan entri daftar isi berpengarah titik). Halaman sesudahnya ikut dihitung
+     * sampai bertemu judul bagian lain atau halaman kosong (maks. 6).
+     */
+    private function halamanBelakang(string $nama): ?array
+    {
+        $lewati = [];
+        foreach (['daftar_isi', 'daftar_tabel', 'daftar_gambar', 'daftar_lampiran'] as $d) {
+            if ($r = $this->halamanKhusus($d)) $lewati = array_merge($lewati, range($r[0], $r[0] + $r[1] - 1));
+        }
+        $judulDi = function (int $i, string $pola) use ($lewati): bool {
+            if ($i < 3 || in_array($i, $lewati, true)) return false;
+            $baris = array_slice(array_values(array_filter(array_map('trim', preg_split('/\R/u', $this->pageTexts[$i] ?? '')))), 0, 6);
+            foreach ($baris as $b) {
+                if (preg_match('/(?:\.\s?){5,}/u', $b)) continue;
+                if (preg_match($pola, $this->bersihkanGanda($b))) return true;
+            }
+            return false;
+        };
+
+        $n = count($this->pageTexts);
+        for ($i = 3; $i < $n; $i++) {
+            if (!$judulDi($i, self::JUDUL_BELAKANG[$nama])) continue;
+            $jumlah = 1;
+            if ($nama !== 'lampiran') {
+                while ($jumlah < 6 && $i + $jumlah < $n - 1 && trim($this->pageTexts[$i + $jumlah]) !== '') {
+                    foreach (self::JUDUL_BELAKANG as $lain => $pola) {
+                        if ($lain !== $nama && $judulDi($i + $jumlah, $pola)) break 2;
+                    }
+                    $jumlah++;
+                }
+            }
+            return [$i, $jumlah];
+        }
+        return null;
+    }
+
+    /** Indeks halaman Tim Penyusun (dipakai pengecekan posisi kata). */
     private function timPenyusunIndex(): ?int
     {
-        if ($this->timPenyusunIdx !== false) return $this->timPenyusunIdx;
-
-        $found = null;
-        foreach (array_slice($this->pageTexts, 1, self::FRONT_PAGES - 1, true) as $i => $text) {
-            $isKatalog = preg_match('/Nomor\s+Publikasi|Ukuran\s+Buku|Jumlah\s+Halaman|Publication\s+Number|Book\s+Size/iu', $text);
-            if (!$isKatalog && preg_match('/\bTim\s+Penyusun\b|\bPengarah\b|\bPenanggung\s*Jawab\b|\bEditorial\s+Team\b/iu', $text)) {
-                $found = $i;
-                break;
-            }
-        }
-        return $this->timPenyusunIdx = $found;
+        return $this->halamanKhusus('tim_penyusun')[0] ?? null;
     }
 
     /**
@@ -856,7 +1331,7 @@ class PdfCheckerService
         $this->coverText  = '';
         $this->coverWords = [];
         $this->frontWords = [];
-        $this->timPenyusunIdx = false;
+        $this->halamanCache = [];
         $this->page2Text  = '';
         $this->pageTexts  = [];
         $this->ocrPages   = [];

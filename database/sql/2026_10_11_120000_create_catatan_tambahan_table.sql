@@ -1,0 +1,5 @@
+-- Migration: 2026_10_11_120000_create_catatan_tambahan_table
+-- Jalankan HANYA bila baris 2026_10_11_120000_create_catatan_tambahan_table belum ada di tabel `migrations`.
+create table `catatan_tambahan` (`id` bigint unsigned not null auto_increment primary key, `hasil_id` int unsigned not null, `kategori` varchar(150) null, `item` varchar(50) not null, `keterangan` text null, `flag_level` enum('minor', 'moderate', 'major') not null default 'minor', `halaman` smallint unsigned null, `dibuat_oleh` varchar(100) null, `created_at` timestamp null, `updated_at` timestamp null) default character set utf8mb4 collate 'utf8mb4_unicode_ci';
+alter table `catatan_tambahan` add constraint `catatan_tambahan_hasil_id_foreign` foreign key (`hasil_id`) references `hasil_pemeriksaan` (`id`) on delete cascade;
+INSERT INTO `migrations` (`migration`, `batch`) SELECT m.migration, m.batch FROM (SELECT '2026_10_11_120000_create_catatan_tambahan_table' AS migration, IFNULL(MAX(`batch`), 0) + 1 AS batch FROM `migrations`) AS m WHERE NOT EXISTS (SELECT 1 FROM `migrations` WHERE `migration` = '2026_10_11_120000_create_catatan_tambahan_table');
