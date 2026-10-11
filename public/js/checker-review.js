@@ -164,7 +164,7 @@ const CheckerReview = (() => {
     }
 
     function init({ viewerUrl, csrf, saveUrl, contohUrl: cUrl }) {
-        viewerBaseUrl = viewerUrl;
+        viewerBaseUrl = asalSama(viewerUrl); // viewer & PDF harus satu origin (lihat asalSama)
         csrfToken     = csrf;
         saveUrlTpl    = saveUrl;
         contohUrl     = cUrl || null;
@@ -331,7 +331,8 @@ const CheckerReview = (() => {
         const hasOcr = entry.ocrLines && Object.keys(entry.ocrLines).length > 0;
         // Dengan hasil OCR: viewer dibuka kosong dulu, teks OCR dipasang, baru PDF dimuat
         // (supaya kait terpasang sebelum halaman pertama dirender — lihat injectOcrText)
-        const file = hasOcr ? '' : encodeURIComponent(entry.url);
+        const pdfUrl = asalSama(entry.url);
+        const file = hasOcr ? '' : encodeURIComponent(pdfUrl);
         frame.onload = () => {
             try {
                 const win = frame.contentWindow;
@@ -341,7 +342,7 @@ const CheckerReview = (() => {
                     if (hasOcr) {
                         injectOcrText(win, entry.ocrLines);
                         // URL absolut: open() me-resolve URL relatif terhadap lokasi viewer, bukan halaman ini
-                        await app.open({ url: new URL(entry.url, location.href).href });
+                        await app.open({ url: pdfUrl });
                     }
                     setTimeout(goToPage, 300);
                 });
@@ -657,7 +658,19 @@ const CheckerReview = (() => {
 
     // ── Perbandingan: contoh yang benar di samping PDF yang diperiksa ──
     function contohViewerUrl(c) {
-        return viewerBaseUrl + '?file=' + encodeURIComponent(new URL(c.url, location.href).href) + '#pagemode=none';
+        return viewerBaseUrl + '?file=' + encodeURIComponent(asalSama(c.url)) + '#pagemode=none';
+    }
+
+    /**
+     * URL PDF milik aplikasi ini disamakan dengan origin halaman (skema & host). pdf.js menolak file
+     * yang origin-nya beda dari viewer ("file origin does not match viewer's"), dan http di halaman
+     * https diblokir browser — mis. bila URL dibuat sebagai http:// atau tanpa/dengan www di server.
+     * URL blob: (file upload) & data: dibiarkan.
+     */
+    function asalSama(url) {
+        const u = new URL(url, location.href);
+        if (u.protocol === 'blob:' || u.protocol === 'data:') return url;
+        return location.origin + u.pathname + u.search;
     }
 
     function openCompare(kategori, idx) {

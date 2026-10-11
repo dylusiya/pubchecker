@@ -11,6 +11,9 @@ use App\Models\User;
 
 class SsoController extends Controller
 {
+    /** Kode aplikasi di broker SSO kalsel.web.bps.go.id/sso_new (harus terdaftar di Sso.php sso_new). */
+    private const SSO_APP = 'pubchecker';
+
     protected $baseUrl;
     protected $realm;
     protected $clientId;
@@ -53,7 +56,7 @@ class SsoController extends Controller
 
     /**
      * Redirect ke SSO BPS
-     * URL: https://kalsel.web.bps.go.id/sso_new/?app=skm
+     * URL: https://kalsel.web.bps.go.id/sso_new/?app=pubchecker
      */
     public function redirect()
     {
@@ -62,8 +65,8 @@ class SsoController extends Controller
             return redirect()->route('dashboard');
         }
 
-        // Redirect ke sso_new dengan parameter app=skm
-        $ssoUrl = 'https://kalsel.web.bps.go.id/sso_new/?app=skm';
+        // Redirect ke broker sso_new; app=pubchecker → sso_new mengembalikan ke /pubchecker/sso/callback
+        $ssoUrl = 'https://kalsel.web.bps.go.id/sso_new/?app=' . self::SSO_APP;
         
         Log::info('Redirecting to SSO', ['url' => $ssoUrl]);
         
@@ -403,7 +406,7 @@ class SsoController extends Controller
         }
 
         // Production: Redirect ke SSO logout
-        $ssoLogoutUrl = 'https://kalsel.web.bps.go.id/sso_new/?app=skm&logout=1';
+        $ssoLogoutUrl = 'https://kalsel.web.bps.go.id/sso_new/?app=' . self::SSO_APP . '&logout=1';
         
         Log::info('Redirecting to SSO logout', ['url' => $ssoLogoutUrl]);
         

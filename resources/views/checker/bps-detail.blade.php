@@ -363,7 +363,8 @@ let pdfRendering  = false;
 
 function getProxiedPdfUrl() {
     if (!pdfUrl) return null;
-    return '{{ route("checker.bps.pdf_proxy") }}?url=' + encodeURIComponent(pdfUrl);
+    // origin disamakan dengan halaman: pdf.js menolak file beda origin dari viewer
+    return location.origin + '{{ parse_url(route("checker.bps.pdf_proxy"), PHP_URL_PATH) }}?url=' + encodeURIComponent(pdfUrl);
 }
 
 function viewPDF() {
@@ -388,7 +389,7 @@ function viewPDF() {
     card.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
     const proxiedUrl = getProxiedPdfUrl();
-    const viewerUrl = `{{ asset('pdfjs/web/viewer.html') }}?file=${encodeURIComponent(proxiedUrl)}#pagemode=none`;
+    const viewerUrl = `${location.origin}{{ parse_url(asset('pdfjs/web/viewer.html'), PHP_URL_PATH) }}?file=${encodeURIComponent(proxiedUrl)}#pagemode=none`;
 
     const timeout = setTimeout(() => {
         overlay.style.display  = 'none';

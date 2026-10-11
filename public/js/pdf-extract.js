@@ -33,13 +33,14 @@ const PdfExtract = (() => {
     let pdfjsLib  = null;
 
     function init({ pdfjsBuild }) {
-        buildBase = pdfjsBuild.replace(/\/?$/, '/');
+        // modul & worker pdf.js harus satu origin dengan halaman (lihat sameOrigin)
+        buildBase = sameOrigin(pdfjsBuild).replace(/\/?$/, '/');
     }
 
     async function loadPdfjs() {
         if (pdfjsLib) return pdfjsLib;
-        pdfjsLib = await import(buildBase + 'pdf.mjs');
-        pdfjsLib.GlobalWorkerOptions.workerSrc = buildBase + 'pdf.worker.mjs';
+        pdfjsLib = await import(buildBase + 'pdf.mjs?v=pc3');
+        pdfjsLib.GlobalWorkerOptions.workerSrc = buildBase + 'pdf.worker.mjs?v=pc3';
         return pdfjsLib;
     }
 
@@ -307,10 +308,18 @@ const PdfExtract = (() => {
      * @param {ArrayBuffer|string} source  isi file (upload) atau URL PDF (same-origin/proxy)
      * @param {{onProgress?: (msg:string, fraction:number, phase:'download'|'text'|'ocr-wait'|'ocr') => void}} opts
      */
+    function sameOrigin(src) {
+        const u = new URL(src, location.href);
+        if (u.protocol === 'blob:' || u.protocol === 'data:') return src;
+        return location.origin + u.pathname + u.search;
+    }
+
     async function extract(source, { onProgress = () => {} } = {}) {
         const lib  = await loadPdfjs();
-        const task = lib.getDocument(typeof source === 'string'
-            ? { url: source, disableRange: true, disableStream: true }
+        // URL milik aplikasi disamakan dengan origin halaman (http di halaman https diblokir browser)
+        const url = typeof source === 'string' ? sameOrigin(source) : null;
+        const task = lib.getDocument(url
+            ? { url, disableRange: true, disableStream: true }
             : { data: source });
         const mb = b => (b / 1048576).toFixed(1);
         task.onProgress = ({ loaded, total }) => {

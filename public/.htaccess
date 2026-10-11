@@ -1,3 +1,13 @@
+# Tipe file pdf.js 5 (public/pdfjs): modul .mjs WAJIB dikirim sebagai JavaScript —
+# banyak Apache/cPanel mengirimnya sebagai application/octet-stream sehingga browser menolak
+# memuat viewer & worker (PDF tidak tampil). .wasm untuk decoder gambar, .ftl untuk teks bahasa.
+<IfModule mod_mime.c>
+    AddType text/javascript .mjs
+    AddType application/wasm .wasm
+    AddType text/plain .ftl
+    AddType application/octet-stream .bcmap
+</IfModule>
+
 <IfModule mod_rewrite.c>
     <IfModule mod_negotiation.c>
         Options -MultiViews -Indexes

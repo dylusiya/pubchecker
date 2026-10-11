@@ -1,3 +1,12 @@
+# Tipe file pdf.js (modul .mjs) — server tidak mengirim Content-Type untuk .mjs sehingga browser
+# menolak memuat viewer PDF. Sama dengan public/.htaccess (berlaku juga untuk struktur lama).
+<IfModule mod_mime.c>
+    AddType text/javascript .mjs
+    AddType application/wasm .wasm
+    AddType text/plain .ftl
+    AddType application/octet-stream .bcmap
+</IfModule>
+
 # Semua permintaan diteruskan ke folder public/ (alamat tetap /pubchecker).
 # File di folder utama — .env, vendor/, storage/, app/, dll. — tidak bisa dibuka lewat browser:
 # mis. /pubchecker/.env dicari sebagai public/.env (tidak ada) → 404 dari aplikasi.
