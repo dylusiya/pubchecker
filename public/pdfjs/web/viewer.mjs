@@ -960,7 +960,8 @@ const defaultOptions = {
 };
 {
   defaultOptions.defaultUrl = {
-    value: "compressed.tracemonkey-pldi-09.pdf",
+    // Pub Checker: PDF demo pdf.js dihapus — viewer selalu dibuka dengan ?file=
+    value: "",
     kind: OptionKind.VIEWER
   };
   defaultOptions.sandboxBundleSrc = {
