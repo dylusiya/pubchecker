@@ -146,6 +146,8 @@
                         </div>
                         @endif
 
+                        {{-- Ringkasan: hanya kriteria Tidak Sesuai (verifikasi petugas) beserta keterangannya --}}
+                        @php $tidakSesuai = $hasil->detail->where('status', \App\Models\DetailPemeriksaan::STATUS_TIDAK_SESUAI); @endphp
                         <div class="table-responsive">
                             <table class="table table-sm table-hover table-bordered mb-0 bg-white"
                                    style="font-size:12px;">
@@ -153,39 +155,25 @@
                                     <tr>
                                         <th style="width:70px;">Kode</th>
                                         <th style="width:150px;">Kategori</th>
-                                        <th>Deskripsi</th>
-                                        <th style="width:130px;">Status</th>
-                                        <th>Keterangan / Catatan</th>
+                                        <th>Kriteria Tidak Sesuai</th>
+                                        <th>Keterangan</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    @foreach($hasil->detail as $d)
+                                    @forelse($tidakSesuai as $d)
                                     <tr>
                                         <td class="font-monospace text-muted" style="font-size:11px;">
                                             {{ $d->kriteria_id }}
                                         </td>
                                         <td class="text-muted small">{{ $d->kategori }}</td>
                                         <td style="font-size:12px;">{{ $d->deskripsi }}</td>
-                                        <td>
-                                            @php
-                                                $badgeCls = match($d->status) {
-                                                    'OK'              => 'bg-success',
-                                                    'PERLU DICEK'     => 'bg-warning text-dark',
-                                                    'TIDAK ADA',
-                                                    'TIDAK SESUAI'    => 'bg-danger',
-                                                    default           => 'bg-secondary',
-                                                };
-                                            @endphp
-                                            <span class="badge {{ $badgeCls }}">{{ $d->status === 'OK' && $d->ditinjau_at ? 'SESUAI' : $d->status }}</span>
-                                        </td>
-                                        <td class="small">
-                                            @if($d->keterangan)
-                                                <div class="text-danger mb-1"><i class="ti ti-message-exclamation me-1"></i>{{ $d->keterangan }}</div>
-                                            @endif
-                                            <span class="text-muted">{{ $d->catatan ?: ($d->keterangan ? '' : '—') }}</span>
-                                        </td>
+                                        <td class="small text-danger">{{ $d->keterangan ?: '—' }}</td>
                                     </tr>
-                                    @endforeach
+                                    @empty
+                                    <tr>
+                                        <td colspan="4" class="text-center text-secondary py-3">Tidak ada kriteria Tidak Sesuai.</td>
+                                    </tr>
+                                    @endforelse
                                 </tbody>
                             </table>
                         </div>

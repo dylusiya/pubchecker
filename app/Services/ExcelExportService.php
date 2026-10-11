@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\DetailPemeriksaan;
 use App\Models\SesiPemeriksaan;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -118,39 +119,34 @@ class ExcelExportService
 
     private function buildSheetDetailFromArray(Spreadsheet $ss, array $results): void
     {
+        // Ringkasan hanya kriteria Tidak Sesuai (verifikasi petugas) beserta keterangannya
         $ws = $ss->createSheet();
-        $ws->setTitle('Detail');
+        $ws->setTitle('Tidak Sesuai');
 
-        $headers = ['No', 'Nama File', 'Kode', 'Kategori', 'Deskripsi Kriteria', 'Status', 'Catatan', 'Keterangan Tidak Sesuai'];
-        $this->writeHeader($ws, $headers, 1);
+        $this->writeHeader($ws, ['No', 'Nama File', 'Kode', 'Kategori', 'Kriteria Tidak Sesuai', 'Keterangan'], 1);
 
         $rowNum = 2;
         foreach ($results as $i => $r) {
             foreach ($r['checks'] as $ch) {
+                if (($ch['status'] ?? '') !== DetailPemeriksaan::STATUS_TIDAK_SESUAI) continue;
                 $ws->fromArray([
                     $i + 1,
                     $r['filename'],
                     $ch['id'] ?? $ch['kriteria_id'] ?? '',
                     $ch['kategori'],
                     $ch['deskripsi'],
-                    $ch['status'],
-                    $ch['catatan'],
                     $ch['keterangan'] ?? '',
                 ], null, "A{$rowNum}");
-
-                $color = match($ch['status']) {
-                    'OK'              => $this->colors['ok'],
-                    'PERLU DICEK'     => $this->colors['warn'],
-                    'TIDAK ADA', 'TIDAK SESUAI' => $this->colors['err'],
-                    default           => $this->colors['gray'],
-                };
-                $this->applyRowStyle($ws, $rowNum, 8, null, [6], $color);
+                $this->applyRowStyle($ws, $rowNum, 6);
                 $rowNum++;
             }
         }
+        if ($rowNum === 2) {
+            $ws->setCellValue('A2', 'Tidak ada kriteria Tidak Sesuai.');
+        }
 
-        $ws->setAutoFilter('A1:H1');
-        $this->setColumnWidths($ws, ['A'=>6,'B'=>38,'C'=>10,'D'=>22,'E'=>50,'F'=>16,'G'=>55,'H'=>45]);
+        $ws->setAutoFilter('A1:F1');
+        $this->setColumnWidths($ws, ['A'=>6,'B'=>38,'C'=>10,'D'=>22,'E'=>60,'F'=>55]);
         $ws->freezePane('A2');
     }
 

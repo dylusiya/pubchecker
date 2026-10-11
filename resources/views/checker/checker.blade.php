@@ -328,20 +328,12 @@ function renderList() {
                             <tr>
                                 <th style="width:65px;">Kode</th>
                                 <th style="width:140px;">Kategori</th>
-                                <th>Deskripsi</th>
-                                <th style="width:130px;">Status</th>
-                                <th>Catatan</th>
+                                <th>Kriteria Tidak Sesuai</th>
+                                <th>Keterangan</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${r.checks.map(ch => `
-                            <tr>
-                                <td class="font-monospace text-muted" style="font-size:11px;">${ch.id ?? ''}</td>
-                                <td class="text-muted small">${ch.kategori}</td>
-                                <td>${ch.deskripsi}</td>
-                                <td>${statusBadge(ch.status)}</td>
-                                <td class="text-muted small">${ch.catatan || '—'}</td>
-                            </tr>`).join('')}
+                            ${tidakSesuaiRows(r.checks)}
                         </tbody>
                     </table>
                 </div>
@@ -351,6 +343,24 @@ function renderList() {
 }
 
 const statusBadge = CheckerReview.statusBadge;
+
+function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/** Ringkasan hasil: hanya kriteria Tidak Sesuai (verifikasi petugas) beserta keterangannya. */
+function tidakSesuaiRows(checks) {
+    const rows = (checks || []).filter(c => c.status === 'TIDAK SESUAI');
+    return rows.length
+        ? rows.map(ch => `
+            <tr>
+                <td class="font-monospace text-muted" style="font-size:11px;">${esc(ch.id)}</td>
+                <td class="text-muted small">${esc(ch.kategori)}</td>
+                <td>${esc(ch.deskripsi)}</td>
+                <td class="text-danger">${esc(ch.keterangan || '—')}</td>
+            </tr>`).join('')
+        : '<tr><td colspan="4" class="text-center text-secondary py-3">Tidak ada kriteria Tidak Sesuai.</td></tr>';
+}
 
 // ── STEP-BY-STEP REVIEW (lihat js/checker-review.js) ─────────────
 /** @param {number} [jobIndex] kartu yang diklik "Tinjau" — publikasi itu dibuka pertama */

@@ -218,9 +218,8 @@
                                     <tr>
                                         <th width="80">Kode</th>
                                         <th width="150">Kategori</th>
-                                        <th>Deskripsi</th>
-                                        <th width="120">Status</th>
-                                        <th>Catatan</th>
+                                        <th>Kriteria Tidak Sesuai</th>
+                                        <th>Keterangan</th>
                                     </tr>
                                 </thead>
                                 <tbody id="qualityChecks"></tbody>
@@ -595,6 +594,10 @@ async function checkQuality() {
 
 const statusBadge = CheckerReview.statusBadge;
 
+function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 function renderQualityResults(result) {
     document.getElementById('qualitySection').style.display = 'block';
     document.getElementById('qualitySection').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -605,15 +608,17 @@ function renderQualityResults(result) {
     document.getElementById('statErr').textContent  = checks.filter(c => c.status === 'TIDAK ADA' || c.status === 'TIDAK SESUAI').length;
     document.getElementById('statSkip').textContent = checks.filter(c => c.status === 'TIDAK DIPERIKSA').length;
 
-    document.getElementById('qualityChecks').innerHTML = checks.map(ch => `
-        <tr>
-            <td class="font-monospace text-muted small">${ch.id || ''}</td>
-            <td class="text-muted">${ch.kategori || '-'}</td>
-            <td>${ch.deskripsi || '-'}</td>
-            <td>${statusBadge(ch.status)}</td>
-            <td class="text-muted small">${ch.catatan || '—'}</td>
-        </tr>
-    `).join('');
+    // Ringkasan hanya kriteria Tidak Sesuai (hasil verifikasi petugas) beserta keterangannya
+    const tidakSesuai = checks.filter(c => c.status === 'TIDAK SESUAI');
+    document.getElementById('qualityChecks').innerHTML = tidakSesuai.length
+        ? tidakSesuai.map(ch => `
+            <tr>
+                <td class="font-monospace text-muted small">${esc(ch.id)}</td>
+                <td class="text-muted">${esc(ch.kategori || '-')}</td>
+                <td>${esc(ch.deskripsi || '-')}</td>
+                <td class="text-danger">${esc(ch.keterangan || '—')}</td>
+            </tr>`).join('')
+        : `<tr><td colspan="4" class="text-center text-secondary py-3">Tidak ada kriteria Tidak Sesuai.</td></tr>`;
 }
 
 // ── UTILS ─────────────────────────────────────────────────────
