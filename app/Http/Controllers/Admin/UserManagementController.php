@@ -51,10 +51,40 @@ class UserManagementController extends Controller
     {
         $this->checkAdmin();
         
+        // Pegawai BPS (SSO): cukup username + role — nama, email, NIP, jabatan, satker, dll. diisi
+        // otomatis dari SSO saat pengguna login pertama kali (SsoController::findOrCreateUser
+        // mencocokkan username & memperbarui profil tanpa mengubah role).
+        if ($request->input('jenis', 'sso') === 'sso') {
+            $validated = $request->validate([
+                'username' => 'required|string|max:255|unique:users',
+                'role'     => 'required|in:admin,user',
+                // opsional: password cadangan untuk Login Lokal bila SSO sedang bermasalah
+                'password' => 'nullable|string|min:8|confirmed',
+            ], [
+                'username.unique'    => 'Username ini sudah terdaftar.',
+                'password.min'       => 'Password cadangan minimal 8 karakter.',
+                'password.confirmed' => 'Konfirmasi password cadangan tidak sama.',
+            ]);
+
+            $username  = trim($validated['username']);
+            $cadangan  = !empty($validated['password']);
+            User::create([
+                'username' => $username,
+                'name'     => $username, // sementara, diganti nama lengkap dari SSO saat login
+                'role'     => $validated['role'],
+                // tanpa password cadangan: password acak yang tidak diketahui siapa pun (hanya bisa lewat SSO)
+                'password' => Hash::make($cadangan ? $validated['password'] : bin2hex(random_bytes(16))),
+            ]);
+
+            return redirect()->route('admin.users.index')
+                ->with('success', "User {$username} ditambahkan. Nama, email, NIP, dan data lainnya akan terisi dari SSO saat ia login pertama kali."
+                    . ($cadangan ? ' Password cadangan aktif untuk Login Lokal.' : ''));
+        }
+
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'username' => 'required|string|max:255|unique:users',
-            'email' => 'required|string|email|max:255|unique:users',
+            'email' => 'nullable|string|email|max:255|unique:users',
             'password' => 'required|string|min:8|confirmed',
             'role' => 'required|in:admin,user',
             'provinsi' => 'nullable|string|max:255',

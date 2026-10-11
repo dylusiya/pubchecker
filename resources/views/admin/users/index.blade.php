@@ -131,7 +131,13 @@
                                             <span class="avatar avatar-sm me-2 bg-primary-lt">{{ strtoupper(substr($user->name, 0, 1)) }}</span>
                                         @endif
                                         <div>
-                                            <div class="fw-bold">{{ $user->name }}</div>
+                                            <div class="fw-bold">
+                                                {{ $user->name }}
+                                                {{-- dibuat admin dengan username saja; profil terisi dari SSO saat login pertama --}}
+                                                @if(!$user->nip_baru && !$user->email && $user->name === $user->username)
+                                                    <span class="badge bg-yellow-lt fw-normal ms-1" title="Nama, email, NIP, dll. terisi otomatis saat pengguna login lewat SSO">Menunggu login SSO</span>
+                                                @endif
+                                            </div>
                                             <div class="small text-muted">{{ $user->jabatan ?? '-' }}</div>
                                         </div>
                                     </div>

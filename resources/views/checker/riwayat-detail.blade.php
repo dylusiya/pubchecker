@@ -12,6 +12,17 @@
     $bisaKirim     = fn($h) => $sipotretAktif && $h->pdf_url
         && ($h->detail->contains('status', \App\Models\DetailPemeriksaan::STATUS_TIDAK_SESUAI) || $h->catatanTambahan->isNotEmpty());
     $kirimSipotret = $sesi->hasilPemeriksaan->contains($bisaKirim);
+
+    // Salin ketidaksesuaian/catatan ke publikasi lain dalam sesi (butuh ≥ 2 publikasi)
+    $bisaSalin = $sesi->hasilPemeriksaan->count() > 1;
+    $petaSalin = $bisaSalin ? $sesi->hasilPemeriksaan->map(fn($h) => [
+        'id'       => $h->id,
+        'judul'    => $h->judul,
+        // status & keterangan per kode kriteria
+        'kriteria' => $h->detail->mapWithKeys(fn($d) => [$d->kriteria_id => [$d->status, $d->keterangan, (bool) $d->ditinjau_at]]),
+        // kunci catatan tambahan yang sudah ada (item + keterangan) supaya tidak dobel
+        'catatan'  => $h->catatanTambahan->map(fn($c) => mb_strtolower(trim($c->item)) . '|' . mb_strtolower(trim((string) $c->keterangan)))->values(),
+    ])->values() : collect();
 @endphp
 @section('page-actions')
     <a href="{{ route('checker.riwayat') }}" class="btn">
@@ -157,6 +168,7 @@
                                         <th style="width:150px;">Kategori</th>
                                         <th>Kriteria Tidak Sesuai</th>
                                         <th>Keterangan</th>
+                                        @if($bisaSalin)<th style="width:70px;"></th>@endif
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -168,10 +180,19 @@
                                         <td class="text-muted small">{{ $d->kategori }}</td>
                                         <td style="font-size:12px;">{{ $d->deskripsi }}</td>
                                         <td class="small text-danger">{{ $d->keterangan ?: '—' }}</td>
+                                        @if($bisaSalin)
+                                        <td class="text-center">
+                                            <button type="button" class="btn btn-sm btn-ghost-primary py-0 px-1"
+                                                    title="Salin ketidaksesuaian ini ke publikasi lain dalam sesi"
+                                                    data-salin-ts="{{ json_encode(['hasil' => $hasil->id, 'kode' => $d->kriteria_id, 'kategori' => $d->kategori, 'deskripsi' => $d->deskripsi, 'keterangan' => $d->keterangan]) }}">
+                                                <i class="ti ti-copy"></i> Salin
+                                            </button>
+                                        </td>
+                                        @endif
                                     </tr>
                                     @empty
                                     <tr>
-                                        <td colspan="4" class="text-center text-secondary py-3">Tidak ada kriteria Tidak Sesuai.</td>
+                                        <td colspan="{{ $bisaSalin ? 5 : 4 }}" class="text-center text-secondary py-3">Tidak ada kriteria Tidak Sesuai.</td>
                                     </tr>
                                     @endforelse
                                 </tbody>
@@ -193,6 +214,7 @@
                                         <th style="width:60px;">Hal.</th>
                                         <th>Keterangan</th>
                                         <th style="width:130px;">Oleh</th>
+                                        @if($bisaSalin)<th style="width:70px;"></th>@endif
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -204,6 +226,15 @@
                                         <td>{{ $c->halaman ?? '—' }}</td>
                                         <td>{{ $c->keterangan }}</td>
                                         <td class="text-muted">{{ $c->dibuat_oleh ?? '—' }}</td>
+                                        @if($bisaSalin)
+                                        <td class="text-center">
+                                            <button type="button" class="btn btn-sm btn-ghost-primary py-0 px-1"
+                                                    title="Salin catatan ini ke publikasi lain dalam sesi"
+                                                    data-salin-cat="{{ json_encode(['hasil' => $hasil->id, 'kategori' => $c->kategori, 'item' => $c->item, 'flag_level' => $c->flag_level, 'keterangan' => $c->keterangan]) }}">
+                                                <i class="ti ti-copy"></i> Salin
+                                            </button>
+                                        </td>
+                                        @endif
                                     </tr>
                                     @endforeach
                                 </tbody>
@@ -226,6 +257,37 @@
 
     </div>
 </div>
+
+@if($bisaSalin)
+{{-- Salin ketidaksesuaian / catatan tambahan ke publikasi lain dalam sesi --}}
+<div class="modal modal-blur fade" id="modalSalin" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="ti ti-copy me-1"></i> <span id="slJudul">Salin ke publikasi lain</span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Tutup"></button>
+      </div>
+      <div class="modal-body">
+        <div class="border rounded p-2 bg-light small mb-3" id="slSumber"></div>
+        <div class="mb-3">
+          <label class="form-label" for="slKet">Keterangan <span class="text-danger">*</span></label>
+          <textarea class="form-control" id="slKet" rows="2" maxlength="2000"></textarea>
+          <small class="text-secondary">Bisa disesuaikan sebelum disalin (mis. nomor halaman/tabel berbeda).</small>
+        </div>
+        <label class="form-label">Salin ke</label>
+        <div id="slTujuan" class="list-group"></div>
+      </div>
+      <div class="modal-footer">
+        <span class="me-auto small" id="slInfo"></span>
+        <button type="button" class="btn" data-bs-dismiss="modal">Tutup</button>
+        <button type="button" class="btn btn-primary" id="slSimpan" onclick="Salin.simpan()">
+          <i class="ti ti-copy"></i> <span id="slSimpanLbl">Salin</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+@endif
 
 @if($kirimSipotret)
 {{-- Kirim temuan Tidak Sesuai ke SIPOTRET (Pasca Rilis) --}}
@@ -273,6 +335,151 @@
 
 @push('scripts')
 <script>
+@if($bisaSalin)
+/**
+ * Salin satu ketidaksesuaian (kriteria Tidak Sesuai + keterangan) atau catatan tambahan ke
+ * publikasi lain dalam sesi. Ketidaksesuaian disimpan lewat endpoint simpan per kategori yang
+ * sama dengan panel tinjauan; catatan tambahan lewat endpoint catatan.
+ */
+const Salin = (() => {
+    const PETA      = @json($petaSalin);
+    const URL_TS    = @json(route('checker.hasil.review_kategori', '__ID__'));
+    const URL_CAT   = @json(route('checker.hasil.catatan.store', '__ID__'));
+    const CSRF      = document.querySelector('meta[name=csrf-token]')?.content ?? '';
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const kunci = (item, ket) => `${String(item ?? '').trim().toLowerCase()}|${String(ket ?? '').trim().toLowerCase()}`;
+    const LABEL = { 'OK': ['Sesuai', 'bg-green-lt'], 'TIDAK SESUAI': ['Tidak Sesuai', 'bg-red-lt'], 'TIDAK DIPERIKSA': ['Skip', 'bg-secondary-lt'],
+                    'PERLU DICEK': ['Perlu Dicek', 'bg-yellow-lt'], 'TIDAK ADA': ['Tidak Ada', 'bg-orange-lt'] };
+    let sumber = null, jenis = null, berubah = false;
+
+    function buka(j, data) {
+        jenis = j; sumber = data;
+        $('slJudul').textContent = j === 'ts' ? 'Salin ketidaksesuaian ke publikasi lain' : 'Salin catatan tambahan ke publikasi lain';
+        $('slSumber').innerHTML = j === 'ts'
+            ? `<span class="font-monospace text-secondary">${esc(data.kode)}</span> · <span class="text-secondary">${esc(data.kategori)}</span><div>${esc(data.deskripsi)}</div>`
+            : `<span class="text-secondary">${esc(data.kategori || 'Tanpa kategori')}</span> · <strong>${esc(data.item)}</strong> <span class="badge bg-secondary-lt">${esc(data.flag_level)}</span>`;
+        $('slKet').value = data.keterangan || '';
+        $('slInfo').textContent = '';
+        renderTujuan();
+        bootstrap.Modal.getOrCreateInstance($('modalSalin')).show();
+    }
+
+    function renderTujuan() {
+        const ket = $('slKet').value.trim();
+        $('slTujuan').innerHTML = PETA.filter(h => h.id !== sumber.hasil).map(h => {
+            let catatan = '', bisa = true;
+            if (jenis === 'ts') {
+                const k = h.kriteria[sumber.kode];
+                if (!k) { bisa = false; catatan = 'Kriteria tidak ada di publikasi ini'; }
+                else {
+                    const [st, ketLama, ditinjau] = k;
+                    const [lbl, cls] = LABEL[st] || [st, 'bg-secondary-lt'];
+                    if (st === 'TIDAK SESUAI' && (ketLama || '').trim() === ket) { bisa = false; catatan = 'Sudah sama'; }
+                    catatan = `<span class="badge ${cls}">${ditinjau ? '' : 'Otomatis: '}${lbl}</span>` +
+                              (st === 'TIDAK SESUAI' && ketLama ? ` <span class="text-secondary">${esc(ketLama)}</span>` : '') +
+                              (!bisa ? ' · <span class="text-secondary">sudah sama</span>' : '');
+                }
+            } else if (h.catatan.includes(kunci(sumber.item, ket))) {
+                bisa = false; catatan = '<span class="text-secondary">Catatan yang sama sudah ada</span>';
+            }
+            return `
+                <label class="list-group-item d-flex align-items-center gap-2 ${bisa ? '' : 'text-secondary'}">
+                    <input type="checkbox" class="form-check-input m-0 sl-pilih" value="${h.id}" ${bisa ? 'checked' : 'disabled'}>
+                    <div class="flex-fill" style="min-width:0;">
+                        <div class="fw-semibold text-truncate">${esc(h.judul)}</div>
+                        ${catatan ? `<div class="small">${catatan}</div>` : ''}
+                    </div>
+                </label>`;
+        }).join('');
+        hitung();
+    }
+
+    function hitung() {
+        const n = document.querySelectorAll('.sl-pilih:checked').length;
+        $('slSimpan').disabled = !n;
+        $('slSimpanLbl').textContent = n ? `Salin ke ${n} publikasi` : 'Salin';
+    }
+
+    async function simpan() {
+        const ket = $('slKet').value.trim();
+        if (!ket) { $('slInfo').className = 'me-auto small text-danger'; $('slInfo').textContent = 'Keterangan wajib diisi.'; return; }
+        const ids = [...document.querySelectorAll('.sl-pilih:checked')].map(cb => +cb.value);
+        if (!ids.length) return;
+
+        $('slSimpan').disabled = true;
+        $('slInfo').className = 'me-auto small text-secondary';
+        $('slInfo').textContent = 'Menyimpan…';
+        const hasil = await Promise.all(ids.map(async id => {
+            try {
+                const res = jenis === 'ts'
+                    ? await fetch(URL_TS.replace('__ID__', id), {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': CSRF },
+                        body: JSON.stringify({ items: [{ kriteria_id: sumber.kode, status: 'TIDAK SESUAI', keterangan: ket }] }),
+                    })
+                    : await fetch(URL_CAT.replace('__ID__', id), {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': CSRF },
+                        body: JSON.stringify({ kategori: sumber.kategori, item: sumber.item, flag_level: sumber.flag_level, keterangan: ket }),
+                    });
+                if (!res.ok) {
+                    const d = await res.json().catch(() => ({}));
+                    throw new Error(d.message || `Server membalas ${res.status}`);
+                }
+                // perbarui peta supaya daftar tujuan langsung menunjukkan status baru
+                const h = PETA.find(x => x.id === id);
+                if (jenis === 'ts') h.kriteria[sumber.kode] = ['TIDAK SESUAI', ket, true];
+                else h.catatan.push(kunci(sumber.item, ket));
+                return null;
+            } catch (e) {
+                return `${PETA.find(x => x.id === id)?.judul}: ${e.message}`;
+            }
+        }));
+        const gagal = hasil.filter(Boolean);
+        const ok = ids.length - gagal.length;
+        if (ok) berubah = true;
+        renderTujuan();
+        $('slInfo').className = 'me-auto small ' + (gagal.length ? 'text-danger' : 'text-success');
+        $('slInfo').textContent = (ok ? `Tersalin ke ${ok} publikasi.` : '') + (gagal.length ? ` Gagal: ${gagal.join('; ')}` : '');
+    }
+
+    document.addEventListener('click', e => {
+        const ts  = e.target.closest('[data-salin-ts]');
+        const cat = e.target.closest('[data-salin-cat]');
+        if (ts)  buka('ts',  JSON.parse(ts.dataset.salinTs));
+        if (cat) buka('cat', JSON.parse(cat.dataset.salinCat));
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+        $('slTujuan').addEventListener('change', e => { if (e.target.matches('.sl-pilih')) hitung(); });
+        $('slKet').addEventListener('input', () => {
+            // status "sudah sama" bergantung keterangan — hitung ulang; yang sengaja di-uncheck tetap tidak dicentang
+            const dilepas = new Set([...document.querySelectorAll('.sl-pilih:not(:disabled):not(:checked)')].map(cb => cb.value));
+            renderTujuan();
+            document.querySelectorAll('.sl-pilih:not(:disabled)').forEach(cb => { cb.checked = !dilepas.has(cb.value); });
+            hitung();
+        });
+        // muat ulang setelah ada salinan; publikasi sumber dibuka kembali
+        $('modalSalin').addEventListener('hidden.bs.modal', () => {
+            if (!berubah) return;
+            try { sessionStorage.setItem('riwayat.bukaPub', sumber.hasil); } catch { /* abaikan */ }
+            location.reload();
+        });
+        try {
+            const id = sessionStorage.getItem('riwayat.bukaPub');
+            if (id && document.getElementById('detail-' + id)) {
+                sessionStorage.removeItem('riwayat.bukaPub');
+                togglePub(+id);
+                document.getElementById('pub-' + id)?.scrollIntoView({ block: 'start' });
+            }
+        } catch { /* abaikan */ }
+    });
+
+    return { simpan };
+})();
+@endif
+
 @if($kirimSipotret)
 const Sipotret = (() => {
     const URL_PREVIEW = @json(route('checker.riwayat.sipotret', $sesi));
