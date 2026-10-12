@@ -389,7 +389,6 @@ function viewPDF() {
     card.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
     const proxiedUrl = getProxiedPdfUrl();
-    const viewerUrl = `${location.origin}{{ parse_url(asset('pdfjs/web/viewer.html'), PHP_URL_PATH) }}?file=${encodeURIComponent(proxiedUrl)}#pagemode=none`;
 
     const timeout = setTimeout(() => {
         overlay.style.display  = 'none';
@@ -398,40 +397,27 @@ function viewPDF() {
         document.getElementById('fallbackNewTab').href   = pdfUrl;
     }, 60000);
 
-    frame.onload = function () {
-        if (frame.src && frame.src !== 'about:blank') {
+    // Viewer dimuat lewat CheckerReview.mountViewer (srcdoc) — server memblokir <iframe src> ke viewer.html
+    progress.style.width = '60%';
+    status.textContent   = 'Membuka PDF...';
+    CheckerReview.mountViewer(frame, proxiedUrl, {
+        afterOpen: win => {
             clearTimeout(timeout);
             overlay.style.display = 'none';
             wrapper.style.display = 'block';
 
-            // Inject CSS untuk hide toolbar edit buttons
+            // Sembunyikan tombol edit/cetak/unduh di toolbar viewer
             try {
-                const iframeDoc = frame.contentDocument || frame.contentWindow.document;
-                const style = iframeDoc.createElement('style');
+                const style = win.document.createElement('style');
                 style.textContent = `
-                    #editorModeButtons,
-                    #editorModeSeparator,
-                    #printButton,
-                    #downloadButton,
-                    #openFileButton,
-                    #secondaryOpenFile,
-                    #secondaryPrint,
-                    #secondaryDownload {
+                    #editorModeButtons, #editorModeSeparator, #printButton, #downloadButton,
+                    #openFileButton, #secondaryOpenFile, #secondaryPrint, #secondaryDownload {
                         display: none !important;
-                    }
-                `;
-                iframeDoc.head.appendChild(style);
-            } catch(e) {
-                // same-origin harusnya bisa, ignore jika gagal
-            }
-        }
-    };
-
-    setTimeout(() => {
-        progress.style.width = '60%';
-        status.textContent   = 'Membuka PDF...';
-        frame.src = viewerUrl;
-    }, 150);
+                    }`;
+                win.document.head.appendChild(style);
+            } catch (e) { /* abaikan */ }
+        },
+    });
 }
 
 async function renderPage(pageNum) {

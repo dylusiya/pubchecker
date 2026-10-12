@@ -339,30 +339,13 @@ const CheckerReview = (() => {
         groupIndex = startGroup;
         renderGroup(); // panel contoh ikut kategori aktif, tetap terbuka/tertutup sesuai pilihan petugas
 
-        const frame = el('frame');
         const hasOcr = entry.ocrLines && Object.keys(entry.ocrLines).length > 0;
-        // Dengan hasil OCR: viewer dibuka kosong dulu, teks OCR dipasang, baru PDF dimuat
-        // (supaya kait terpasang sebelum halaman pertama dirender — lihat injectOcrText)
-        const pdfUrl = asalSama(entry.url);
-        const file = hasOcr ? '' : encodeURIComponent(pdfUrl);
-        frame.onload = () => {
-            try {
-                const win = frame.contentWindow;
-                const app = win.PDFViewerApplication;
-                if (!app?.initializedPromise) { setTimeout(goToPage, 800); return; }
-                app.initializedPromise.then(async () => {
-                    if (hasOcr) {
-                        injectOcrText(win, entry.ocrLines);
-                        // URL absolut: open() me-resolve URL relatif terhadap lokasi viewer, bukan halaman ini
-                        await app.open({ url: pdfUrl });
-                    }
-                    setTimeout(goToPage, 300);
-                });
-            } catch (e) { /* cross-origin/timing, biarkan viewer dipakai manual */ }
-        };
-        // `v` unik per pemuatan: tanpa itu, URL viewer kosong (mode OCR) sama persis antar publikasi
-        // → browser hanya menganggapnya pindah #hash, iframe tidak dimuat ulang dan PDF lama tetap tampil
-        frame.src = `${viewerBaseUrl}?file=${file}&v=${Date.now()}#pagemode=none`;
+        // Teks OCR dipasang sebelum PDF dibuka, supaya kait terpasang sebelum halaman pertama dirender
+        // (lihat injectOcrText). URL absolut: open() me-resolve URL relatif terhadap lokasi viewer.
+        mountViewer(el('frame'), asalSama(entry.url), {
+            beforeOpen: win => { if (hasOcr) injectOcrText(win, entry.ocrLines); },
+            afterOpen:  ()  => setTimeout(goToPage, 300),
+        });
     }
 
     /**
@@ -669,9 +652,6 @@ const CheckerReview = (() => {
     }
 
     // ── Perbandingan: contoh yang benar di samping PDF yang diperiksa ──
-    function contohViewerUrl(c) {
-        return viewerBaseUrl + '?file=' + encodeURIComponent(asalSama(c.url)) + '#pagemode=none';
-    }
 
     /**
      * URL PDF milik aplikasi ini disamakan dengan origin halaman (skema & host). pdf.js menolak file
@@ -683,6 +663,72 @@ const CheckerReview = (() => {
         const u = new URL(url, location.href);
         if (u.protocol === 'blob:' || u.protocol === 'data:') return url;
         return location.origin + u.pathname + u.search;
+    }
+
+    // ── Viewer pdf.js lewat srcdoc ──────────────────────────────────────────
+    // Server produksi mengirim CSP `frame-ancestors 'none'` (dipasang di depan Apache, tidak bisa
+    // diubah lewat .htaccess), sehingga viewer.html yang dimuat via <iframe src> diblokir browser
+    // (viewer kosong, Network: "blocked:other"). Dokumen srcdoc tidak punya respons HTTP sendiri,
+    // jadi header itu tidak berlaku; isinya tetap viewer.html milik aplikasi (origin sama),
+    // ditambah <base> supaya path relatifnya (viewer.mjs, ../build, locale) tetap benar.
+    let viewerHtmlPromise = null;
+
+    function viewerHtml() {
+        viewerHtmlPromise ??= fetch(viewerBaseUrl, { credentials: 'same-origin' })
+            .then(r => { if (!r.ok) throw new Error(`viewer.html ${r.status}`); return r.text(); })
+            .then(html => html.replace(/<head(\s[^>]*)?>/i, m => `${m}<base href="${esc(new URL('.', viewerBaseUrl).href)}">`))
+            .catch(e => { viewerHtmlPromise = null; throw e; });
+        return viewerHtmlPromise;
+    }
+
+    // Opsi viewer diset sebelum PDFViewerApplication.run(): pdf.js mengirim event ini ke dokumen induk.
+    document.addEventListener('webviewerloaded', e => {
+        const opts = e.detail?.source?.PDFViewerApplicationOptions;
+        if (!opts) return;
+        // Di srcdoc `location` = about:srcdoc: pdf.js me-resolve URL worker terhadapnya (gagal), dan worker
+        // (lewat blob wrapper) mengambil cmaps/fonts/wasm relatif ke lokasinya sendiri — jadikan semua absolut.
+        if (viewerBaseUrl) {
+            for (const name of ['workerSrc', 'cMapUrl', 'iccUrl', 'standardFontDataUrl', 'wasmUrl', 'sandboxBundleSrc']) {
+                const v = opts.get(name);
+                if (typeof v === 'string' && v && !/^[a-z][a-z0-9+.-]*:/i.test(v)) opts.set(name, new URL(v, viewerBaseUrl).href);
+            }
+        }
+        opts.set('disablePreferences', true); // supaya preferensi tersimpan tidak menimpa opsi di bawah
+        opts.set('defaultUrl', '');           // srcdoc tidak punya ?file= — jangan buka PDF demo bawaan
+        opts.set('disableHistory', true);     // history.replaceState di about:srcdoc → SecurityError
+        opts.set('sidebarViewOnLoad', 0);     // pengganti #pagemode=none
+        opts.set('spreadModeOnLoad', 2);      // even spread (mengalahkan /PageLayout milik PDF)
+    });
+
+    /**
+     * Muat viewer pdf.js ke iframe lalu buka pdfUrl.
+     * beforeOpen(win): viewer siap, PDF belum dibuka (mis. pasang teks OCR). afterOpen(win): PDF sudah dibuka.
+     */
+    function mountViewer(frame, pdfUrl, { beforeOpen, afterOpen } = {}) {
+        const token = `${Date.now()}-${Math.random()}`;
+        frame.dataset.viewerToken = token;
+        frame.onload = () => {
+            // abaikan load about:blank awal & pemuatan lama yang sudah diganti
+            if (frame.dataset.viewerToken !== token || !frame.hasAttribute('srcdoc')) return;
+            try {
+                const win = frame.contentWindow;
+                win.PDFViewerApplication?.initializedPromise?.then(async () => {
+                    beforeOpen?.(win);
+                    if (pdfUrl) await win.PDFViewerApplication.open({ url: pdfUrl });
+                    afterOpen?.(win);
+                });
+            } catch (e) { console.error('Viewer PDF gagal dimuat', e); }
+        };
+        viewerHtml()
+            // komentar unik: srcdoc yang sama persis antar publikasi tetap memuat ulang viewer
+            .then(html => { if (frame.dataset.viewerToken === token) frame.srcdoc = `${html}<!-- ${token} -->`; })
+            .catch(e => {
+                console.error('Gagal mengambil viewer.html, pakai pemuatan biasa', e);
+                if (frame.dataset.viewerToken !== token) return;
+                frame.removeAttribute('srcdoc');
+                frame.onload = () => { try { afterOpen?.(frame.contentWindow); } catch { /* abaikan */ } };
+                frame.src = `${viewerBaseUrl}?file=${encodeURIComponent(pdfUrl)}#pagemode=none&spread=even`;
+            });
     }
 
     function openCompare(kategori, idx) {
@@ -702,8 +748,9 @@ const CheckerReview = (() => {
         syncContohUi();
         if (same) return; // jangan muat ulang viewer bila contoh yang sama
         el('compareBody').innerHTML = c.tipe === 'pdf'
-            ? `<iframe src="${esc(contohViewerUrl(c))}" title="Contoh PDF" style="width:100%;height:100%;border:0;"></iframe>`
+            ? `<iframe title="Contoh PDF" style="width:100%;height:100%;border:0;"></iframe>`
             : `<img src="${esc(c.url)}" alt="contoh" style="max-width:100%;max-height:100%;object-fit:contain;background:#fff;">`;
+        if (c.tipe === 'pdf') mountViewer(el('compareBody').querySelector('iframe'), asalSama(c.url));
     }
 
     /** Sembunyikan panel contoh (tanpa mengubah pilihan petugas). */
@@ -753,14 +800,14 @@ const CheckerReview = (() => {
                     ${c.keterangan ? `<div class="fw-semibold">${esc(c.keterangan)}</div>` : ''}
                 </div>
                 ${c.tipe === 'pdf'
-                    ? `<iframe src="${esc(viewerBaseUrl + '?file=' + encodeURIComponent(new URL(c.url, location.href).href) + '#pagemode=none')}"
-                               title="Contoh PDF" style="width:92vw;max-width:1200px;height:78vh;border:0;border-radius:6px;background:#fff;"></iframe>`
+                    ? `<iframe title="Contoh PDF" style="width:92vw;max-width:1200px;height:78vh;border:0;border-radius:6px;background:#fff;"></iframe>`
                     : `<img src="${esc(c.url)}" alt="contoh" style="max-width:92vw;max-height:78vh;object-fit:contain;background:#fff;border-radius:6px;">`}
                 <div style="margin-top:10px;display:flex;gap:8px;">
                     ${list.length > 1 ? '<button type="button" class="btn btn-light btn-sm" data-nav="-1"><i class="ti ti-chevron-left"></i> Sebelumnya</button>' : ''}
                     <button type="button" class="btn btn-light btn-sm" data-nav="close"><i class="ti ti-x"></i> Tutup</button>
                     ${list.length > 1 ? '<button type="button" class="btn btn-light btn-sm" data-nav="1">Berikutnya <i class="ti ti-chevron-right"></i></button>' : ''}
                 </div>`;
+            if (c.tipe === 'pdf') mountViewer(wrap.querySelector('iframe'), asalSama(c.url));
         };
 
         const close = () => { wrap.remove(); document.removeEventListener('keydown', onKey); };
@@ -1419,5 +1466,5 @@ const CheckerReview = (() => {
         onFinishCb();
     }
 
-    return { init, start, next, prev, saveAndExit, setAll, toggleSiblings, statusBadge, statusBadgeClass };
+    return { init, start, next, prev, saveAndExit, setAll, toggleSiblings, mountViewer, statusBadge, statusBadgeClass };
 })();
