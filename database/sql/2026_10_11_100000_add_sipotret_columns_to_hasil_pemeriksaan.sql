@@ -1,0 +1,4 @@
+-- Migration: 2026_10_11_100000_add_sipotret_columns_to_hasil_pemeriksaan
+-- Jalankan HANYA bila baris 2026_10_11_100000_add_sipotret_columns_to_hasil_pemeriksaan belum ada di tabel `migrations`.
+alter table `hasil_pemeriksaan` add `pub_id_api` varchar(100) null after `pdf_url`, add `pub_domain` varchar(10) null after `pub_id_api`, add `pub_issn` varchar(30) null after `pub_domain`, add `pub_tanggal_rilis` date null after `pub_issn`, add `sipotret_terkirim_at` timestamp null after `pub_tanggal_rilis`, add `sipotret_history_id` int unsigned null after `sipotret_terkirim_at`;
+INSERT INTO `migrations` (`migration`, `batch`) SELECT m.migration, m.batch FROM (SELECT '2026_10_11_100000_add_sipotret_columns_to_hasil_pemeriksaan' AS migration, IFNULL(MAX(`batch`), 0) + 1 AS batch FROM `migrations`) AS m WHERE NOT EXISTS (SELECT 1 FROM `migrations` WHERE `migration` = '2026_10_11_100000_add_sipotret_columns_to_hasil_pemeriksaan');

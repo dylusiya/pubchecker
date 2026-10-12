@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\DetailPemeriksaan;
 use App\Models\SesiPemeriksaan;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -38,8 +39,33 @@ class ExcelExportService
 
         $this->buildSheetRekap($spreadsheet, $sesi);
         $this->buildSheetDetail($spreadsheet, $sesi);
+        $this->buildSheetCatatanTambahan($spreadsheet, $sesi);
 
         return $spreadsheet;
+    }
+
+    /** Temuan petugas di luar daftar kriteria — sheet hanya dibuat bila ada isinya. */
+    private function buildSheetCatatanTambahan(Spreadsheet $ss, SesiPemeriksaan $sesi): void
+    {
+        $hasil = $sesi->hasilPemeriksaan()->with('catatanTambahan')->get()->filter(fn($h) => $h->catatanTambahan->isNotEmpty());
+        if ($hasil->isEmpty()) return;
+
+        $ws = $ss->createSheet();
+        $ws->setTitle('Catatan Tambahan');
+        $this->writeHeader($ws, ['No', 'Nama File', 'Kategori', 'Item', 'Level', 'Halaman', 'Keterangan', 'Oleh'], 1);
+
+        $row = 2;
+        foreach ($hasil->values() as $i => $h) {
+            foreach ($h->catatanTambahan as $c) {
+                $ws->fromArray([$i + 1, $h->nama_file, $c->kategori, $c->item, $c->flag_level, $c->halaman, $c->keterangan, $c->dibuat_oleh], null, "A{$row}");
+                $this->applyRowStyle($ws, $row, 8);
+                $row++;
+            }
+        }
+
+        $ws->setAutoFilter('A1:H1');
+        $this->setColumnWidths($ws, ['A'=>6,'B'=>38,'C'=>22,'D'=>30,'E'=>12,'F'=>10,'G'=>60,'H'=>20]);
+        $ws->freezePane('A2');
     }
 
     /** Ekspor dari array hasil (tanpa DB, langsung dari JSON) */
@@ -93,38 +119,34 @@ class ExcelExportService
 
     private function buildSheetDetailFromArray(Spreadsheet $ss, array $results): void
     {
+        // Ringkasan hanya kriteria Tidak Sesuai (verifikasi petugas) beserta keterangannya
         $ws = $ss->createSheet();
-        $ws->setTitle('Detail');
+        $ws->setTitle('Tidak Sesuai');
 
-        $headers = ['No', 'Nama File', 'Kode', 'Kategori', 'Deskripsi Kriteria', 'Status', 'Catatan'];
-        $this->writeHeader($ws, $headers, 1);
+        $this->writeHeader($ws, ['No', 'Nama File', 'Kode', 'Kategori', 'Kriteria Tidak Sesuai', 'Keterangan'], 1);
 
         $rowNum = 2;
         foreach ($results as $i => $r) {
             foreach ($r['checks'] as $ch) {
+                if (($ch['status'] ?? '') !== DetailPemeriksaan::STATUS_TIDAK_SESUAI) continue;
                 $ws->fromArray([
                     $i + 1,
                     $r['filename'],
                     $ch['id'] ?? $ch['kriteria_id'] ?? '',
                     $ch['kategori'],
                     $ch['deskripsi'],
-                    $ch['status'],
-                    $ch['catatan'],
+                    $ch['keterangan'] ?? '',
                 ], null, "A{$rowNum}");
-
-                $color = match($ch['status']) {
-                    'OK'              => $this->colors['ok'],
-                    'PERLU DICEK'     => $this->colors['warn'],
-                    'TIDAK ADA'       => $this->colors['err'],
-                    default           => $this->colors['gray'],
-                };
-                $this->applyRowStyle($ws, $rowNum, 7, null, [6], $color);
+                $this->applyRowStyle($ws, $rowNum, 6);
                 $rowNum++;
             }
         }
+        if ($rowNum === 2) {
+            $ws->setCellValue('A2', 'Tidak ada kriteria Tidak Sesuai.');
+        }
 
-        $ws->setAutoFilter('A1:G1');
-        $this->setColumnWidths($ws, ['A'=>6,'B'=>38,'C'=>10,'D'=>22,'E'=>50,'F'=>16,'G'=>55]);
+        $ws->setAutoFilter('A1:F1');
+        $this->setColumnWidths($ws, ['A'=>6,'B'=>38,'C'=>10,'D'=>22,'E'=>60,'F'=>55]);
         $ws->freezePane('A2');
     }
 
@@ -147,6 +169,7 @@ class ExcelExportService
                 'deskripsi'=> $d->deskripsi,
                 'status'   => $d->status,
                 'catatan'  => $d->catatan,
+                'keterangan' => $d->keterangan,
             ])->toArray(),
         ])->toArray();
 
@@ -164,6 +187,7 @@ class ExcelExportService
                 'deskripsi'=> $d->deskripsi,
                 'status'   => $d->status,
                 'catatan'  => $d->catatan,
+                'keterangan' => $d->keterangan,
             ])->toArray(),
         ])->toArray();
 

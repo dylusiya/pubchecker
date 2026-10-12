@@ -7,6 +7,9 @@ use App\Http\Controllers\HomeController;
 use App\Http\Controllers\CheckerController;
 use App\Http\Controllers\KriteriaController;
 use App\Http\Controllers\BpsImportController;
+use App\Http\Controllers\ContohKategoriController;
+use App\Http\Controllers\SipotretController;
+use App\Http\Controllers\CatatanTambahanController;
 
 /*
 |--------------------------------------------------------------------------
@@ -46,16 +49,28 @@ Route::middleware('auth')->group(function () {
     // Publication Checker
     Route::prefix('checker')->name('checker.')->group(function () {
         Route::get('/',                      [CheckerController::class, 'index'])        ->name('index');
+        Route::post('/sesi',                 [CheckerController::class, 'buatSesi'])     ->name('sesi.create');
         Route::post('/check',                [CheckerController::class, 'check'])        ->name('check');
         Route::post('/export',               [CheckerController::class, 'export'])       ->name('export');
         Route::get('/riwayat',               [CheckerController::class, 'riwayat'])      ->name('riwayat');
         Route::get('/riwayat/{sesi}',        [CheckerController::class, 'riwayatDetail'])->name('riwayat.detail');
         Route::get('/riwayat/{sesi}/export', [CheckerController::class, 'exportSesi'])   ->name('riwayat.export');
+        Route::get('/riwayat/{sesi}/tinjau', [CheckerController::class, 'tinjauSesi'])   ->name('riwayat.tinjau');
+        Route::get('/riwayat/{sesi}/sipotret',  [SipotretController::class, 'preview'])  ->name('riwayat.sipotret');
+        Route::post('/riwayat/{sesi}/sipotret', [SipotretController::class, 'kirim'])    ->name('riwayat.sipotret.kirim');
+        Route::delete('/riwayat',            [CheckerController::class, 'deleteSesiBulk'])->name('riwayat.delete-bulk');
         Route::delete('/riwayat/{sesi}',     [CheckerController::class, 'deleteSesi'])   ->name('riwayat.delete');
         Route::patch('/hasil/{hasil}/review', [CheckerController::class, 'reviewDetail'])->name('hasil.review');
         Route::patch('/hasil/{hasil}/review-kategori', [CheckerController::class, 'reviewKategori'])->name('hasil.review_kategori');
         Route::get('/hasil/{hasil}/tinjau',  [CheckerController::class, 'tinjau'])        ->name('hasil.tinjau');
         Route::get('/hasil/{hasil}/pdf',     [CheckerController::class, 'pdf'])           ->name('hasil.pdf');
+        Route::get('/hasil/{hasil}/catatan',    [CatatanTambahanController::class, 'index'])  ->name('hasil.catatan');
+        Route::post('/hasil/{hasil}/catatan',   [CatatanTambahanController::class, 'store'])  ->name('hasil.catatan.store');
+        Route::patch('/catatan-tambahan/{catatan}',  [CatatanTambahanController::class, 'update']) ->name('catatan.update');
+        Route::delete('/catatan-tambahan/{catatan}', [CatatanTambahanController::class, 'destroy'])->name('catatan.destroy');
+        Route::get('/catatan-tambahan/saran',   [CatatanTambahanController::class, 'saran'])  ->name('catatan.saran');
+        Route::get('/contoh-kategori',          [ContohKategoriController::class, 'json'])  ->name('contoh.json');
+        Route::get('/contoh/{contoh}/gambar',   [ContohKategoriController::class, 'gambar'])->name('contoh.gambar');
     });
 
     
@@ -75,6 +90,14 @@ Route::middleware('auth')->group(function () {
         Route::post('/detail',    [BpsImportController::class, 'detail']) ->name('detail');
     });
 
+
+    // Admin — Gambar contoh yang benar per kategori kriteria
+    Route::prefix('admin/kriteria/contoh')->name('admin.kriteria.contoh.')->group(function () {
+        Route::get('/',            [ContohKategoriController::class, 'index'])  ->name('index');
+        Route::post('/',           [ContohKategoriController::class, 'store'])  ->name('store');
+        Route::patch('/{contoh}',  [ContohKategoriController::class, 'update']) ->name('update');
+        Route::delete('/{contoh}', [ContohKategoriController::class, 'destroy'])->name('destroy');
+    });
 
     // Admin — Kriteria Pemeriksaan
     Route::prefix('admin/kriteria')->name('admin.kriteria.')->group(function () {

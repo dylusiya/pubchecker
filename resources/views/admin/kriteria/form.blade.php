@@ -1,34 +1,22 @@
 @extends('layouts.app')
 
 @section('title', isset($kriteria) ? 'Edit Kriteria ' . $kriteria->kode : 'Tambah Kriteria')
+@section('pretitle', 'Kelola Kriteria')
+@section('page-title', isset($kriteria) ? 'Edit Kriteria ' . $kriteria->kode : 'Tambah Kriteria Baru')
+@section('page-subtitle', 'Konfigurasi kriteria pemeriksaan publikasi BPS')
+@section('page-actions')
+    <a href="{{ route('admin.kriteria.index') }}" class="btn">
+        <i class="ti ti-arrow-left"></i> Kembali
+    </a>
+@endsection
 
 @section('content')
 <div class="row justify-content-center">
     <div class="col-lg-8">
 
-        {{-- Header --}}
-        <div class="card card-rounded mb-3">
-            <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <h4 class="card-title mb-1">
-                            <i class="mdi mdi-{{ isset($kriteria) ? 'pencil' : 'plus-circle' }} text-primary me-2"></i>
-                            {{ isset($kriteria) ? 'Edit Kriteria ' . $kriteria->kode : 'Tambah Kriteria Baru' }}
-                        </h4>
-                        <p class="text-muted mb-0 small">
-                            Konfigurasi kriteria pemeriksaan kover publikasi BPS
-                        </p>
-                    </div>
-                    <a href="{{ route('admin.kriteria.index') }}" class="btn btn-light btn-sm border">
-                        <i class="mdi mdi-arrow-left me-1"></i> Kembali
-                    </a>
-                </div>
-            </div>
-        </div>
-
         @if($errors->any())
         <div class="alert alert-danger py-2 small mb-3">
-            <i class="mdi mdi-alert me-1"></i>
+            <i class="ti ti-alert-triangle me-1"></i>
             <strong>Ada kesalahan:</strong>
             <ul class="mb-0 mt-1">
                 @foreach($errors->all() as $e)
@@ -45,7 +33,7 @@
             @if(isset($kriteria)) @method('PUT') @endif
 
             {{-- Identitas --}}
-            <div class="card card-rounded mb-3">
+            <div class="card mb-3">
                 <div class="card-body">
                     <h5 class="card-title mb-3">Identitas Kriteria</h5>
                     <div class="row g-3">
@@ -83,7 +71,7 @@
             </div>
 
             {{-- Konfigurasi --}}
-            <div class="card card-rounded mb-3">
+            <div class="card mb-3">
                 <div class="card-body">
                     <h5 class="card-title mb-3">Konfigurasi Pengecekan</h5>
                     <div class="row g-3">
@@ -124,7 +112,7 @@
 
                         {{-- REGEX --}}
                         <div id="panel_regex" class="param-panel border rounded p-3 bg-light" style="display:none;">
-                            <p class="small fw-semibold mb-2"><i class="mdi mdi-code-braces me-1 text-info"></i>Parameter Regex</p>
+                            <p class="small fw-semibold mb-2"><i class="ti ti-code me-1 text-info"></i>Parameter Regex</p>
                             <div class="row g-2">
                                 <div class="col-md-9">
                                     <label class="form-label small mb-1">Pattern (tanpa delimiter)</label>
@@ -140,12 +128,147 @@
                                            placeholder="i" maxlength="10">
                                     <small class="text-muted"><code>i</code> = case-insensitive</small>
                                 </div>
+                                <div class="col-md-6">
+                                    <label class="form-label small mb-1">Syarat (opsional, khusus not_regex)</label>
+                                    <input type="text" name="param_syarat" class="form-control form-control-sm font-monospace"
+                                           value="{{ old('param_syarat', ($kriteria->parameter['syarat'] ?? '')) }}"
+                                           placeholder="\bISSN\b">
+                                    <small class="text-muted">Bila pola ini tidak ada di target, hasilnya Skip (bukan OK)</small>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label small mb-1">Pesan bila syarat tidak terpenuhi</label>
+                                    <input type="text" name="param_pesan_syarat" class="form-control form-control-sm"
+                                           value="{{ old('param_pesan_syarat', ($kriteria->parameter['pesan_syarat'] ?? '')) }}"
+                                           placeholder="Tidak ada ISSN di halaman ini" maxlength="200">
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label small mb-1">Abaikan (opsional)</label>
+                                    <input type="text" name="param_abaikan" class="form-control form-control-sm font-monospace"
+                                           value="{{ old('param_abaikan', ($kriteria->parameter['abaikan'] ?? '')) }}"
+                                           placeholder="(?:Volume|Edisi)\s*\d+[^\n]{0,15}?(?:19|20)\d{2}">
+                                    <small class="text-muted">Bagian teks yang cocok pola ini diabaikan sebelum dicek (mis. tahun pada edisi terbitan bukan tahun judul)</small>
+                                </div>
                             </div>
+                        </div>
+
+                        {{-- SAMA_KOVER --}}
+                        <div id="panel_sama_kover" class="param-panel border rounded p-3 bg-light" style="display:none;">
+                            <p class="small fw-semibold mb-2"><i class="ti ti-equal me-1 text-info"></i>Parameter Sama dengan Kover</p>
+                            <div class="row g-2">
+                                <div class="col-md-9">
+                                    <label class="form-label small mb-1">Pola isian (grup tangkap = nilai yang dibandingkan)</label>
+                                    <input type="text" name="param_pola_kover" class="form-control form-control-sm font-monospace"
+                                           value="{{ old('param_pola_kover', ($kriteria->tipe_cek ?? '') === 'sama_kover' ? ($kriteria->parameter['pattern'] ?? '') : '') }}"
+                                           placeholder="\bISSN\s*:?\s*(\d{4}\s*-\s*\d{3}[\dXx])">
+                                    <small class="text-muted">Nilai di halaman target dibandingkan dengan nilai di kover (spasi & tanda hubung diabaikan)</small>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label small mb-1">Flags</label>
+                                    <input type="text" name="param_flags_kover" class="form-control form-control-sm font-monospace"
+                                           value="{{ old('param_flags_kover', ($kriteria->tipe_cek ?? '') === 'sama_kover' ? ($kriteria->parameter['flags'] ?? 'iu') : 'iu') }}" maxlength="10">
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label small mb-1">Pesan bila isian tidak ada di halaman</label>
+                                    <input type="text" name="param_pesan_kover" class="form-control form-control-sm"
+                                           value="{{ old('param_pesan_kover', ($kriteria->tipe_cek ?? '') === 'sama_kover' ? ($kriteria->parameter['pesan_syarat'] ?? '') : '') }}"
+                                           placeholder="Tidak ada ISSN di halaman Daftar Isi" maxlength="200">
+                                </div>
+                            </div>
+                        </div>
+
+                        {{-- URUTAN --}}
+                        <div id="panel_urutan" class="param-panel border rounded p-3 bg-light" style="display:none;">
+                            <p class="small fw-semibold mb-2"><i class="ti ti-list-numbers me-1 text-info"></i>Parameter Urutan</p>
+                            <label class="form-label small mb-1">Komponen sesuai urutan (satu pola regex per baris)</label>
+                            <textarea name="param_urutan" rows="4" class="form-control form-control-sm font-monospace"
+                                      placeholder="Nomor\s+Publikasi&#10;Jumlah\s+Halaman">{{ old('param_urutan', implode("\n", (array) ($kriteria->parameter['label'] ?? []))) }}</textarea>
+                            <small class="text-muted">Setiap komponen harus muncul setelah komponen di baris sebelumnya. Bila ada yang tidak ditemukan, hasilnya Skip (komponen opsional).</small>
+                        </div>
+
+                        {{-- PARITAS --}}
+                        <div id="panel_paritas" class="param-panel border rounded p-3 bg-light" style="display:none;">
+                            <p class="small fw-semibold mb-2"><i class="ti ti-arrows-left-right me-1 text-info"></i>Parameter Halaman Ganjil/Genap</p>
+                            <div class="row g-2">
+                                <div class="col-md-4">
+                                    <label class="form-label small mb-1">Bagian (target) harus dimulai di halaman</label>
+                                    <select name="param_posisi" class="form-select form-select-sm">
+                                        @foreach(['ganjil' => 'Ganjil', 'genap' => 'Genap'] as $val => $label)
+                                        <option value="{{ $val }}" @selected(old('param_posisi', $kriteria->parameter['posisi'] ?? 'ganjil') === $val)>{{ $label }}</option>
+                                        @endforeach
+                                    </select>
+                                </div>
+                                <div class="col-md-8">
+                                    <small class="text-muted d-block mt-md-4">Nomor halaman = urutan halaman di PDF (kover = 1). Pilih target halaman khusus, mis. Katalog / Daftar Isi.</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        {{-- JUMLAH_MIN & NOMOR_URUT --}}
+                        <div id="panel_pola_hitung" class="param-panel border rounded p-3 bg-light" style="display:none;">
+                            <p class="small fw-semibold mb-2"><i class="ti ti-list-numbers me-1 text-info"></i>Parameter Pola</p>
+                            <div class="row g-2">
+                                <div class="col-md-7">
+                                    <label class="form-label small mb-1">Pola entri</label>
+                                    <input type="text" name="param_pola_hitung" class="form-control form-control-sm font-monospace"
+                                           value="{{ old('param_pola_hitung', in_array($kriteria->tipe_cek ?? '', ['jumlah_min', 'nomor_urut', 'abjad']) ? ($kriteria->parameter['pattern'] ?? '') : '') }}"
+                                           placeholder="^\s*(?:Tabel|Table)\s+(\d+(?:\.\d+)*)">
+                                    <small class="text-muted">Nomor Berurutan: grup tangkap pertama = nomornya (mis. <code>2.3</code>). Urut Abjad: grup tangkap pertama = kunci urutan (nama/istilah).</small>
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="form-label small mb-1">Flags</label>
+                                    <input type="text" name="param_flags_hitung" class="form-control form-control-sm font-monospace"
+                                           value="{{ old('param_flags_hitung', in_array($kriteria->tipe_cek ?? '', ['jumlah_min', 'nomor_urut', 'abjad']) ? ($kriteria->parameter['flags'] ?? 'imu') : 'imu') }}" maxlength="10">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label small mb-1">Minimal (khusus Jumlah Minimal)</label>
+                                    <input type="number" name="param_min_hitung" class="form-control form-control-sm" min="1"
+                                           value="{{ old('param_min_hitung', $kriteria->parameter['min'] ?? 3) }}">
+                                </div>
+                            </div>
+                        </div>
+
+                        {{-- BAB --}}
+                        <div id="panel_bab" class="param-panel border rounded p-3 bg-light" style="display:none;">
+                            <p class="small fw-semibold mb-2"><i class="ti ti-book me-1 text-info"></i>Parameter Bab</p>
+                            <select name="param_cek_bab" class="form-select form-select-sm" style="max-width:360px;">
+                                @foreach(['ganjil' => 'Setiap bab dimulai di halaman ganjil', 'berurutan' => 'Nomor bab berurutan (1, 2, 3, …)'] as $val => $label)
+                                <option value="{{ $val }}" @selected(old('param_cek_bab', $kriteria->parameter['cek'] ?? 'ganjil') === $val)>{{ $label }}</option>
+                                @endforeach
+                            </select>
+                            <small class="text-muted d-block mt-1">Awal bab dikenali dari baris "BAB n" / "CHAPTER n" di bagian atas halaman. Target diabaikan.</small>
+                        </div>
+
+                        {{-- BULAN_RILIS --}}
+                        <div id="panel_bulan_rilis" class="param-panel border rounded p-3 bg-light" style="display:none;">
+                            <p class="small text-muted mb-0">
+                                <i class="ti ti-info-circle me-1"></i>
+                                Tidak butuh parameter — mencari "Kota, Bulan Tahun" terakhir di target (mis. Kata Pengantar) dan
+                                membandingkannya dengan tanggal rilis dari API BPS: harus bulan rilis atau sebulan sebelumnya.
+                                Untuk hasil Upload Manual hasilnya Skip (tanggal rilis tidak diketahui).
+                            </p>
+                        </div>
+
+                        {{-- JUDUL_KOVER --}}
+                        <div id="panel_judul_kover" class="param-panel border rounded p-3 bg-light" style="display:none;">
+                            <p class="small text-muted mb-0">
+                                <i class="ti ti-info-circle me-1"></i>
+                                Tidak butuh parameter — kata-kata judul di kover (tanpa nama penerbit, katalog, ISSN, edisi) minimal 70%
+                                harus ada di halaman target, begitu juga tahun judulnya.
+                            </p>
+                        </div>
+
+                        {{-- ROMAWI_GENAP --}}
+                        <div id="panel_romawi_genap" class="param-panel border rounded p-3 bg-light" style="display:none;">
+                            <p class="small text-muted mb-0">
+                                <i class="ti ti-info-circle me-1"></i>
+                                Tidak butuh parameter — mencari jumlah halaman "romawi + arab" (mis. <code>x+52 halaman</code>)
+                                di target dan memeriksa angka romawinya genap.
+                            </p>
                         </div>
 
                         {{-- CONTAINS / NOT_CONTAINS --}}
                         <div id="panel_contains" class="param-panel border rounded p-3 bg-light" style="display:none;">
-                            <p class="small fw-semibold mb-2"><i class="mdi mdi-text-search me-1 text-primary"></i>Parameter Contains</p>
+                            <p class="small fw-semibold mb-2"><i class="ti ti-text-scan-2 me-1 text-primary"></i>Parameter Contains</p>
                             <div class="row g-2 align-items-end">
                                 <div class="col-md-9">
                                     <label class="form-label small mb-1">Teks yang dicari</label>
@@ -166,7 +289,7 @@
 
                         {{-- POSISI_AREA --}}
                         <div id="panel_posisi_area" class="param-panel border rounded p-3 bg-light" style="display:none;">
-                            <p class="small fw-semibold mb-2"><i class="mdi mdi-crosshairs-gps me-1 text-warning"></i>Parameter Posisi Area</p>
+                            <p class="small fw-semibold mb-2"><i class="ti ti-current-location me-1 text-warning"></i>Parameter Posisi Area</p>
                             <div class="row g-2">
                                 <div class="col-md-5">
                                     <label class="form-label small mb-1">Kata yang dicari posisinya</label>
@@ -191,7 +314,7 @@
 
                         {{-- MIN_PAGES --}}
                         <div id="panel_min_pages" class="param-panel border rounded p-3 bg-light" style="display:none;">
-                            <p class="small fw-semibold mb-2"><i class="mdi mdi-file-multiple-outline me-1 text-dark"></i>Parameter Halaman</p>
+                            <p class="small fw-semibold mb-2"><i class="ti ti-files me-1 text-dark"></i>Parameter Halaman</p>
                             <div class="row g-2">
                                 <div class="col-md-4">
                                     <label class="form-label small mb-1">Minimum halaman</label>
@@ -273,7 +396,7 @@
                         {{-- MANUAL --}}
                         <div id="panel_manual" class="param-panel border rounded p-3 bg-light" style="display:none;">
                             <p class="small text-muted mb-0">
-                                <i class="mdi mdi-information-outline me-1"></i>
+                                <i class="ti ti-info-circle me-1"></i>
                                 Tipe <strong>manual</strong> tidak butuh parameter — kriteria ini selalu menghasilkan
                                 <span class="badge bg-warning text-dark">PERLU DICEK</span> dan harus diperiksa manusia.
                             </p>
@@ -284,7 +407,7 @@
             </div>
 
             {{-- Pesan --}}
-            <div class="card card-rounded mb-3">
+            <div class="card mb-3">
                 <div class="card-body">
                     <h5 class="card-title mb-3">Pesan Hasil</h5>
                     <div class="row g-3">
@@ -309,7 +432,7 @@
             </div>
 
             {{-- Aktif + submit --}}
-            <div class="card card-rounded mb-4">
+            <div class="card mb-4">
                 <div class="card-body d-flex justify-content-between align-items-center">
                     <div class="form-check form-switch mb-0">
                         <input class="form-check-input" type="checkbox" role="switch"
@@ -325,7 +448,7 @@
                             Batal
                         </a>
                         <button type="submit" class="btn btn-primary">
-                            <i class="mdi mdi-content-save me-1"></i>
+                            <i class="ti ti-device-floppy me-1"></i>
                             {{ isset($kriteria) ? 'Simpan Perubahan' : 'Tambah Kriteria' }}
                         </button>
                     </div>
@@ -361,6 +484,16 @@ function showParamPanel() {
         urutan_teks:  'panel_urutan_teks',
         syarat_min:   'panel_syarat_min',
         manual:       'panel_manual',
+        urutan:       'panel_urutan',
+        sama_kover:   'panel_sama_kover',
+        paritas:      'panel_paritas',
+        romawi_genap: 'panel_romawi_genap',
+        jumlah_min:   'panel_pola_hitung',
+        nomor_urut:   'panel_pola_hitung',
+        bab:          'panel_bab',
+        bulan_rilis:  'panel_bulan_rilis',
+        abjad:        'panel_pola_hitung',
+        judul_kover:  'panel_judul_kover',
     };
     const target = map[tipe];
     if (target) {
