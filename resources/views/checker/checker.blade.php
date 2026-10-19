@@ -3,7 +3,7 @@
 @section('title', 'Pemeriksaan Publikasi')
 @section('pretitle', 'Publication Checker')
 @section('page-title', 'Pemeriksaan Kover Publikasi')
-@section('page-subtitle', 'Upload hingga 5 PDF publikasi BPS, lalu tinjau per kategori berdampingan dengan contoh yang benar')
+@section('page-subtitle', 'Upload hingga 10 PDF publikasi BPS, lalu tinjau per kategori berdampingan dengan contoh yang benar')
 @section('page-actions')
     <a href="{{ route('checker.riwayat') }}" class="btn btn-primary">
         <i class="ti ti-history"></i> Riwayat
@@ -18,7 +18,7 @@
         <div class="card mb-3">
             <div class="card-body">
                 <h5 class="card-title mb-1">Upload File PDF</h5>
-                <p class="text-muted small mb-3">Drag &amp; drop atau pilih hingga 5 PDF publikasi untuk diperiksa sekaligus</p>
+                <p class="text-muted small mb-3">Drag &amp; drop atau pilih hingga 10 PDF publikasi untuk diperiksa sekaligus</p>
 
                 <div id="dropzone"
                      class="border border-2 rounded-3 p-5 text-center"
@@ -29,7 +29,7 @@
                      ondrop="handleDrop(event)">
                     <i class="ti ti-file-upload text-primary" style="font-size: 48px; opacity: .7;"></i>
                     <h6 class="mt-2 mb-1 fw-semibold">Drag &amp; drop file PDF di sini</h6>
-                    <p class="text-muted small mb-3">Maksimal 5 PDF per pemeriksaan, 50MB per file</p>
+                    <p class="text-muted small mb-3">Maksimal 10 PDF per pemeriksaan, 50MB per file</p>
                     <button class="btn btn-primary btn-sm px-4"
                             onclick="event.stopPropagation(); document.getElementById('fileInput').click()">
                         <i class="ti ti-paperclip me-1"></i> Pilih File PDF
@@ -164,8 +164,8 @@ let sesiId        = null;
 let currentFilter = 'all';
 
 // Maksimal PDF per pemeriksaan: teks & OCR dibaca di browser (±30–40 detik per PDF) dan
-// tinjauan per kategori dilakukan berurutan per file — 5 masih nyaman untuk sekali duduk.
-const MAX_FILES = 5;
+// tinjauan per kategori dilakukan berurutan per file. Pembacaan dibatasi beberapa sekaligus (js/batch-check.js).
+const MAX_FILES = 10;
 
 function addFiles(files) {
     const pdfs = [...files].filter(f => f.name.toLowerCase().endsWith('.pdf'))

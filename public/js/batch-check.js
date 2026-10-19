@@ -1,9 +1,10 @@
 /**
- * BatchCheck — memeriksa beberapa publikasi (maks. 5) sekaligus dengan tampilan kartu berjejer.
+ * BatchCheck — memeriksa beberapa publikasi (maks. 10) sekaligus dengan tampilan kartu berjejer.
  * Dipakai bersama oleh Upload Manual (checker.blade.php) dan BPS Import (bps-import.blade.php).
  *
- * Semua publikasi berjalan paralel (unduh, baca teks, cek kriteria); OCR antre bergiliran di
- * PdfExtract supaya memori browser aman. Tiap kartu menampilkan tahapan, progres & hasilnya sendiri.
+ * Paling banyak MAX_PARALLEL publikasi diproses bersamaan (unduh, baca teks, cek kriteria), sisanya
+ * menunggu giliran; OCR antre satu per satu di PdfExtract — supaya memori browser aman.
+ * Tiap kartu menampilkan tahapan, progres & hasilnya sendiri.
  *
  * Job: {
  *   title:  string,
@@ -13,6 +14,8 @@
  * }
  */
 const BatchCheck = (() => {
+    const MAX_PARALLEL = 3;
+
     const STEPS = [
         ['download', 'Unduh PDF'],
         ['text',     'Baca teks'],
@@ -46,7 +49,7 @@ const BatchCheck = (() => {
                         ${STEPS.map(([key, label]) => `<li data-step="${key}">${ICON.pending} <span>${label}</span></li>`).join('')}
                     </ul>
                     <div class="progress progress-sm"><div class="progress-bar" style="width:0%"></div></div>
-                    <div class="small text-secondary mt-1 batch-msg text-truncate">Menunggu…</div>
+                    <div class="small text-secondary mt-1 batch-msg text-truncate">Menunggu giliran…</div>
                     <div class="batch-result mt-auto pt-2"></div>
                 </div>
             </div>
@@ -98,9 +101,17 @@ const BatchCheck = (() => {
             if (b) onReview?.(parseInt(b.dataset.review, 10));
         };
 
+        // Batasi job yang berjalan bersamaan: tiap PDF (s.d. 50MB) diunduh & diparse di memori browser,
+        // jadi 10 sekaligus bisa membuat tab kehabisan memori. Job lain menunggu giliran ("Menunggu…").
+        let aktif = 0;
+        const antre = [];
+        const ambilSlot = () => aktif < MAX_PARALLEL ? (aktif++, Promise.resolve()) : new Promise(r => antre.push(r));
+        const lepasSlot = () => { const next = antre.shift(); if (next) next(); else aktif--; };
+
         await Promise.all(jobs.map(async (job, i) => {
             const card = cards[i];
             let phaseFrac = { download: 0, text: 0, ocr: 0 };
+            await ambilSlot();
             try {
                 if (!(typeof job.source === 'string')) setStep(card, 'download', 'skip');
 
@@ -146,6 +157,8 @@ const BatchCheck = (() => {
                 card.querySelector('.batch-result').innerHTML =
                     `<div class="text-red small">${esc(err.message)}</div>`;
                 outcomes[i] = { job, error: err.message };
+            } finally {
+                lepasSlot();
             }
         }));
 

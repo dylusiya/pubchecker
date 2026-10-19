@@ -92,6 +92,14 @@ const CheckerReview = (() => {
         btnNext:      'revBtnNext',
         btnExit:      'revBtnExit',
         toggleDetail: 'revToggleDetail',
+        modeToggle:   'revModeToggle',
+        modeTab:      'revModeTab',
+        modeJejer:    'revModeJejer',
+        jejerCari:    'revJejerCari',
+        jejerHasil:   'revJejerHasil',
+        jejerKriteria:'revJejerKriteria',
+        jejerMsg:     'revJejerMsg',
+        jejerStrip:   'revJejerStrip',
     };
 
     const SHOW_LABEL = '<i class="ti ti-eye me-1"></i> Tampilkan Info Lain';
@@ -114,6 +122,13 @@ const CheckerReview = (() => {
     let onFinishCb      = null;
     let hiddenSiblings  = [];
     let siblingsVisible = false;
+
+    // Mode "Jejer Semua" (lihat bagian di bawah)
+    let mode        = 'tab';      // 'tab' = satu publikasi per tab; 'jejer' = semua berdampingan per kriteria
+    let jejerId     = null;       // kode kriteria yang sedang dibuka
+    let jejerObs    = null;       // IntersectionObserver: viewer dimuat saat kolomnya mulai terlihat
+    let jejerSaving = false;
+    const jejerDraft = new Map(); // isian yang belum disimpan: `${index publikasi}|${kode}` → { ts, ket }
 
     function el(key) { return document.getElementById(ID[key]); }
 
@@ -277,6 +292,8 @@ const CheckerReview = (() => {
             groupIndex = parseInt(e.target.value, 10) || 0;
             renderGroup();
         });
+
+        initJejer();
     }
 
     // ── Pengelompokan per kategori (urutan mengikuti urutan kriteria) ──────
@@ -313,6 +330,7 @@ const CheckerReview = (() => {
             });
         });
         onFinishCb = onFinish || (() => {});
+        resetJejer(); // tinjauan baru selalu mulai di mode tab
 
         if (!entries.length) { finish(); return; }
 
@@ -837,8 +855,8 @@ const CheckerReview = (() => {
             </button>`).join('')}</div>`;
     }
 
-    function goToLokasi(hal, teks) {
-        const app = el('frame')?.contentWindow?.PDFViewerApplication;
+    function goToLokasi(hal, teks, frame = el('frame')) {
+        const app = frame?.contentWindow?.PDFViewerApplication;
         if (!app?.pdfDocument) return;
         try {
             app.page = Math.min(hal, app.pagesCount || hal);
@@ -1121,6 +1139,361 @@ const CheckerReview = (() => {
             el('btnNext').disabled = false;
             if (el('btnExit')) el('btnExit').disabled = false;
         }
+    }
+
+    // ── Mode "Jejer Semua": semua publikasi berdampingan untuk satu kriteria ─────────────────
+    // Petugas mencari kriteria lalu cukup menandai publikasi yang Tidak Sesuai (wajib keterangan).
+    // Saat disimpan, publikasi yang tidak ditandai menjadi Sesuai — semuanya dihitung sudah ditinjau.
+
+    /** Kriteria gabungan semua publikasi, urut sesuai urutan kriteria. */
+    function daftarKriteria() {
+        const map = new Map();
+        entries.forEach(e => e.checks.forEach(c => { if (!map.has(c.id)) map.set(c.id, c); }));
+        return [...map.values()];
+    }
+
+    function kriteriaDi(entry, id) {
+        return entry?.checks.find(c => c.id === id) || null;
+    }
+
+    /** Ringkasan satu kriteria di semua publikasi. */
+    function rekapKriteria(id) {
+        let ada = 0, ditinjau = 0, ts = 0;
+        entries.forEach(e => {
+            const c = kriteriaDi(e, id);
+            if (!c) return;
+            ada++;
+            if (c.reviewed) { ditinjau++; if (c.status === TIDAK_SESUAI) ts++; }
+        });
+        return { ada, ditinjau, ts };
+    }
+
+    function jejerCol(i) {
+        return el('jejerStrip')?.querySelector(`[data-jejer="${i}"]`) || null;
+    }
+
+    function setMode(m) {
+        if (m === mode || (m === 'jejer' && entries.length < 2)) return;
+        if (m === 'jejer') collectGroup(); // pilihan di layar mode tab tetap diingat
+        mode = m;
+        applyModeUi();
+        if (m === 'jejer') {
+            if (!el('jejerStrip').children.length) buildJejerStrip();
+            if (jejerId) pilihJejer(jejerId);
+            else { renderJejerKriteria(); renderJejerCari(''); el('jejerCari')?.focus(); }
+        } else {
+            el('jejerHasil').hidden = true;
+            renderGroup();
+            renderFileTabs();
+        }
+    }
+
+    function applyModeUi() {
+        const jejer = mode === 'jejer';
+        el('modeToggle')?.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+        if (el('modeTab'))   el('modeTab').hidden   = jejer;
+        if (el('modeJejer')) el('modeJejer').hidden = !jejer;
+        // judul, "File x/y", badge & progres kategori hanya bermakna untuk satu publikasi
+        el('fileIdx')?.parentElement && (el('fileIdx').parentElement.hidden = jejer);
+        if (el('stepBadge')) el('stepBadge').hidden = jejer;
+        el('progressBar')?.parentElement && (el('progressBar').parentElement.hidden = jejer);
+        if (entries[fileIndex]) el('fileName').textContent = jejer ? `Semua publikasi (${entries.length})` : entries[fileIndex].filename;
+    }
+
+    /** Kembalikan mode jejer ke awal (dipanggil saat tinjauan baru dimulai / selesai). */
+    function resetJejer() {
+        jejerObs?.disconnect();
+        jejerObs = null;
+        jejerId  = null;
+        jejerDraft.clear();
+        if (el('jejerStrip')) el('jejerStrip').innerHTML = ''; // lepas viewer (memori)
+        if (el('jejerHasil')) el('jejerHasil').hidden = true;
+        if (el('jejerMsg'))   el('jejerMsg').style.display = 'none';
+        if (el('jejerCari'))  el('jejerCari').value = '';
+        mode = 'tab';
+        if (el('modeToggle')) el('modeToggle').hidden = entries.length < 2;
+        applyModeUi();
+    }
+
+    /** Kolom per publikasi; viewer dimuat saat kolomnya terlihat (10 PDF sekaligus terlalu berat). */
+    function buildJejerStrip() {
+        const strip = el('jejerStrip');
+        jejerObs?.disconnect();
+        strip.innerHTML = entries.map((e, i) => `
+            <div class="card review-jejer-col" data-jejer="${i}">
+                <div class="card-header py-2 px-2 d-block">
+                    <div class="fw-semibold small text-truncate" title="${esc(e.filename)}">${i + 1}. ${esc(e.filename)}</div>
+                    <div class="jejer-isian mt-1"></div>
+                </div>
+                <div class="jejer-viewer"><iframe title="${esc(e.filename)}"></iframe></div>
+            </div>`).join('');
+
+        jejerObs = new IntersectionObserver(obs => obs.forEach(o => {
+            if (!o.isIntersecting) return;
+            jejerObs.unobserve(o.target);
+            const i = Number(o.target.dataset.jejer), e = entries[i];
+            const hasOcr = e.ocrLines && Object.keys(e.ocrLines).length > 0;
+            mountViewer(o.target.querySelector('iframe'), asalSama(e.url), {
+                beforeOpen: win => { if (hasOcr) injectOcrText(win, e.ocrLines); },
+                afterOpen:  ()  => setTimeout(() => jejerKeHalaman(i), 300),
+            });
+        }), { root: strip, rootMargin: '0px 300px' });
+        strip.querySelectorAll('[data-jejer]').forEach(col => jejerObs.observe(col));
+        entries.forEach((e, i) => renderJejerIsian(i));
+    }
+
+    /** Lompat ke halaman kriteria aktif: lokasi temuan otomatis, atau halaman target kriteria. */
+    function jejerKeHalaman(i) {
+        const c   = jejerId ? kriteriaDi(entries[i], jejerId) : null;
+        const app = jejerCol(i)?.querySelector('iframe')?.contentWindow?.PDFViewerApplication;
+        if (!c || !app?.pdfDocument) return;
+        const total = app.pagesCount || 1;
+        const hal = c.lokasi?.[0]?.hal
+            ?? (c.target === 'page2' ? 2 : c.target === 'last' ? total : c.target === 'cover' ? 1 : null);
+        if (hal) { try { app.page = Math.min(hal, total); } catch { /* viewer belum siap */ } }
+    }
+
+    function renderJejerCari(q) {
+        const box  = el('jejerHasil');
+        const kata = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+        const semua = daftarKriteria();
+        const hasil = kata.length
+            ? semua.filter(c => { const t = [c.id, c.kategori, c.deskripsi].join(' ').toLowerCase(); return kata.every(k => t.includes(k)); })
+            : semua;
+        box.hidden = false;
+        if (!hasil.length) {
+            box.innerHTML = '<div class="list-group-item small text-secondary">Tidak ada kriteria yang cocok.</div>';
+            return;
+        }
+        const MAX = 60;
+        box.innerHTML = hasil.slice(0, MAX).map(c => {
+            const r = rekapKriteria(c.id);
+            return `
+                <button type="button" class="list-group-item list-group-item-action py-2 small ${c.id === jejerId ? 'bg-primary-lt' : ''}" data-jejer-id="${esc(c.id)}">
+                    <div class="d-flex justify-content-between gap-2">
+                        <span><span class="font-monospace text-secondary">${esc(c.id)}</span> · <span class="text-secondary">${esc(c.kategori)}</span></span>
+                        <span class="d-flex gap-1 flex-shrink-0">
+                            ${r.ts ? `<span class="badge bg-red-lt">${r.ts} Tidak Sesuai</span>` : ''}
+                            <span class="badge ${r.ditinjau === r.ada ? 'bg-green-lt' : 'bg-secondary-lt'}">${r.ditinjau}/${r.ada} ditinjau</span>
+                        </span>
+                    </div>
+                    <div class="text-truncate">${esc(c.deskripsi)}</div>
+                </button>`;
+        }).join('') + (hasil.length > MAX
+            ? `<div class="list-group-item small text-secondary">… ${hasil.length - MAX} lainnya, perjelas kata kunci</div>` : '');
+    }
+
+    function pilihJejer(id, { keepMsg = false } = {}) {
+        jejerId = id;
+        el('jejerHasil').hidden = true;
+        if (!keepMsg) el('jejerMsg').style.display = 'none';
+        renderJejerKriteria();
+        entries.forEach((e, i) => { renderJejerIsian(i); jejerKeHalaman(i); });
+    }
+
+    function renderJejerKriteria() {
+        const box = el('jejerKriteria');
+        const c   = jejerId ? daftarKriteria().find(x => x.id === jejerId) : null;
+        box.hidden = false;
+        if (!c) {
+            box.innerHTML = `<div class="small text-secondary"><i class="ti ti-info-circle me-1"></i>
+                Cari dan pilih kriteria di atas. Semua publikasi tampil berdampingan; centang hanya yang
+                <strong class="text-danger">Tidak Sesuai</strong> — publikasi lain disimpan sebagai Sesuai.</div>`;
+            return;
+        }
+        const r = rekapKriteria(c.id);
+        box.innerHTML = `
+            <div class="d-flex flex-wrap gap-2 align-items-start">
+                <div class="flex-fill" style="min-width:260px;">
+                    <div class="small">
+                        <span class="badge bg-light text-dark border font-monospace">${esc(c.id)}</span>
+                        <span class="text-secondary">${esc(c.kategori)} · ${esc(PAGE_LABEL[c.target] ?? PAGE_LABEL.all)}</span>
+                    </div>
+                    <div class="fw-semibold mt-1">${esc(c.deskripsi)}</div>
+                    <div class="small text-secondary mt-1">${r.ditinjau}/${r.ada} publikasi sudah ditinjau untuk kriteria ini${r.ts ? ` · ${r.ts} Tidak Sesuai` : ''}</div>
+                </div>
+                <div class="d-flex gap-2 flex-wrap flex-shrink-0">
+                    <button type="button" class="btn btn-primary btn-sm" data-jejer-simpan="0">
+                        <i class="ti ti-device-floppy me-1"></i> Simpan
+                    </button>
+                    <button type="button" class="btn btn-success btn-sm" data-jejer-simpan="1">
+                        Simpan &amp; Kriteria Berikutnya <i class="ti ti-chevron-right"></i>
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-jejer-selesai
+                            title="Tutup tinjauan; yang belum ditinjau bisa dilanjutkan dari Riwayat">
+                        <i class="ti ti-check me-1"></i> Selesai
+                    </button>
+                </div>
+            </div>`;
+    }
+
+    /** Isian satu kolom untuk kriteria aktif: hasil otomatis/tersimpan, lokasi temuan, centang Tidak Sesuai. */
+    function renderJejerIsian(i) {
+        const col = jejerCol(i);
+        if (!col) return;
+        const box = col.querySelector('.jejer-isian');
+        const c   = jejerId ? kriteriaDi(entries[i], jejerId) : null;
+        col.classList.remove('is-ts');
+        if (!jejerId) { box.innerHTML = ''; return; }
+        if (!c) { box.innerHTML = '<div class="small text-secondary">Kriteria ini tidak ada di publikasi ini.</div>'; return; }
+
+        const draft = jejerDraft.get(`${i}|${c.id}`);
+        const pilih = c.selStatus ?? (c.reviewed ? c.status : null);
+        const ts    = draft ? draft.ts : pilih === TIDAK_SESUAI;
+        const ket   = draft ? draft.ket : (c.selKet ?? c.keterangan ?? '');
+        col.classList.toggle('is-ts', ts);
+
+        const tersimpan = c.reviewed
+            ? `<span class="badge ${statusBadgeClass(c.status)}">${esc(LABEL_PILIHAN[c.status]?.[0] ?? c.status)}</span>`
+            : '<span class="badge bg-yellow-lt">Belum ditinjau</span>';
+        const otomatis = c.autoLabel === 'Otomatis'
+            ? `<span class="text-secondary">Otomatis: <span class="badge ${statusBadgeClass(c.autoStatus)}">${esc(c.autoStatus)}</span></span>`
+            : '<span></span>';
+        box.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center gap-2 small mb-1">${otomatis}${tersimpan}</div>
+            ${c.autoLabel === 'Otomatis' && c.autoCatatan ? `<div class="small text-secondary text-truncate mb-1" title="${esc(c.autoCatatan)}">${esc(c.autoCatatan)}</div>` : ''}
+            ${lokasiButtons(c.lokasi)}
+            <label class="form-check mb-1">
+                <input type="checkbox" class="form-check-input jejer-ts" ${ts ? 'checked' : ''}>
+                <span class="form-check-label fw-semibold text-danger">Tidak Sesuai</span>
+            </label>
+            <textarea class="form-control form-control-sm jejer-ket" rows="2"
+                      placeholder="Keterangan (wajib bila Tidak Sesuai)" ${ts ? '' : 'hidden'}>${esc(ket)}</textarea>`;
+    }
+
+    /** Ingat isian kolom yang belum disimpan (bertahan saat pindah kriteria/mode). */
+    function ingatJejer(col) {
+        if (!jejerId || !col) return;
+        jejerDraft.set(`${col.dataset.jejer}|${jejerId}`, {
+            ts:  !!col.querySelector('.jejer-ts')?.checked,
+            ket: col.querySelector('.jejer-ket')?.value ?? '',
+        });
+    }
+
+    function showJejerMsg(type, text) {
+        const box = el('jejerMsg');
+        box.className = `alert alert-${type} py-2 small mb-2`;
+        box.textContent = text;
+        box.style.display = 'block';
+    }
+
+    /** Kriteria berikutnya (urutan daftar) yang belum ditinjau di semua publikasi. */
+    function kriteriaBerikutnya(id) {
+        const list = daftarKriteria();
+        const from = list.findIndex(c => c.id === id);
+        for (let k = 1; k <= list.length; k++) {
+            const c = list[(from + k) % list.length];
+            const r = rekapKriteria(c.id);
+            if (r.ditinjau < r.ada) return c.id;
+        }
+        return null;
+    }
+
+    /** Simpan kriteria aktif di semua publikasi: dicentang → Tidak Sesuai, lainnya → Sesuai. */
+    async function simpanJejer(lanjut) {
+        if (!jejerId || jejerSaving) return;
+        const id = jejerId;
+        const targets = [];
+        let kurang = 0, first = null;
+        entries.forEach((e, i) => {
+            const c = kriteriaDi(e, id), col = jejerCol(i);
+            if (!c || !col) return;
+            const ts  = !!col.querySelector('.jejer-ts')?.checked;
+            const ta  = col.querySelector('.jejer-ket');
+            const ket = ta?.value.trim() ?? '';
+            if (ts && !ket) { kurang++; ta.classList.add('is-invalid'); first ??= col; }
+            targets.push({ i, e, c, ts, ket });
+        });
+        if (kurang) {
+            first.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+            showJejerMsg('danger', `${kurang} publikasi ditandai Tidak Sesuai tapi belum diberi keterangan.`);
+            return;
+        }
+
+        jejerSaving = true;
+        el('jejerKriteria').querySelectorAll('button').forEach(b => { b.disabled = true; });
+        const hasil = await Promise.allSettled(targets.map(t => {
+            t.c.selStatus = t.ts ? TIDAK_SESUAI : 'OK';
+            t.c.selKet    = t.ts ? t.ket : '';
+            return simpanItems(t.e, [t.c]);
+        }));
+        jejerSaving = false;
+
+        const gagal = [];
+        hasil.forEach((h, k) => {
+            const t = targets[k];
+            if (h.status === 'fulfilled') { jejerDraft.delete(`${t.i}|${id}`); return; }
+            delete t.c.selStatus; // gagal: biarkan seperti sebelum disimpan
+            delete t.c.selKet;
+            gagal.push(`${t.e.filename} (${h.reason?.message || 'gagal'})`);
+        });
+        entries.forEach((e, i) => renderJejerIsian(i));
+        renderJejerKriteria();
+        renderFileTabs();
+
+        if (gagal.length) {
+            showJejerMsg('danger', `Gagal menyimpan di ${gagal.length} publikasi: ${gagal.join('; ')}. Coba lagi.`);
+            return;
+        }
+        const nTs = targets.filter(t => t.ts).length;
+        showJejerMsg('success', `Kriteria ${id} disimpan untuk ${targets.length} publikasi: ${nTs} Tidak Sesuai, ${targets.length - nTs} Sesuai.`);
+        if (lanjut) {
+            const nxt = kriteriaBerikutnya(id);
+            if (nxt) pilihJejer(nxt, { keepMsg: true });
+            else showJejerMsg('success', `Kriteria ${id} disimpan. Semua kriteria sudah ditinjau di semua publikasi.`);
+        }
+    }
+
+    function initJejer() {
+        el('modeToggle')?.addEventListener('click', e => {
+            const b = e.target.closest('[data-mode]');
+            if (b) setMode(b.dataset.mode);
+        });
+
+        const cari = el('jejerCari'), hasil = el('jejerHasil');
+        if (cari && hasil) {
+            cari.addEventListener('input', () => renderJejerCari(cari.value));
+            cari.addEventListener('focus', () => renderJejerCari(cari.value));
+            cari.addEventListener('keydown', e => {
+                if (e.key === 'Escape') { cari.value = ''; hasil.hidden = true; }
+                if (e.key === 'Enter') { e.preventDefault(); hasil.querySelector('[data-jejer-id]')?.click(); }
+            });
+            hasil.addEventListener('click', e => {
+                const b = e.target.closest('[data-jejer-id]');
+                if (b) pilihJejer(b.dataset.jejerId);
+            });
+            document.addEventListener('click', e => {
+                if (!e.target.closest('#revJejerCari, #revJejerHasil')) hasil.hidden = true;
+            });
+        }
+
+        el('jejerKriteria')?.addEventListener('click', e => {
+            const s = e.target.closest('[data-jejer-simpan]');
+            if (s) { simpanJejer(s.dataset.jejerSimpan === '1'); return; }
+            if (e.target.closest('[data-jejer-selesai]')) finish();
+        });
+
+        const strip = el('jejerStrip');
+        strip?.addEventListener('change', e => {
+            const cb = e.target.closest('.jejer-ts');
+            if (!cb) return;
+            const col = cb.closest('[data-jejer]');
+            const ta  = col.querySelector('.jejer-ket');
+            ta.hidden = !cb.checked;
+            col.classList.toggle('is-ts', cb.checked);
+            if (cb.checked) ta.focus();
+            ingatJejer(col);
+        });
+        strip?.addEventListener('input', e => {
+            const ta = e.target.closest('.jejer-ket');
+            if (!ta) return;
+            ta.classList.remove('is-invalid');
+            ingatJejer(ta.closest('[data-jejer]'));
+        });
+        strip?.addEventListener('click', e => {
+            const loc = e.target.closest('button[data-hal]');
+            if (loc) goToLokasi(parseInt(loc.dataset.hal, 10), loc.dataset.teks, loc.closest('[data-jejer]')?.querySelector('iframe'));
+        });
     }
 
     // ── Catatan tambahan per kategori (temuan di luar daftar kriteria → SIPOTRET "Item Lainnya") ──
@@ -1461,6 +1834,7 @@ const CheckerReview = (() => {
         const section = el('section');
         if (section) section.style.display = 'none';
         hideCompare();
+        resetJejer();
         setFocusMode(false);
         entries.forEach(e => e.cleanup?.());
         onFinishCb();

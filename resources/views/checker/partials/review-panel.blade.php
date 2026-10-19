@@ -18,6 +18,17 @@
                     <small class="text-muted">File <span id="revFileIdx">1</span> / <span id="revFileTotal">1</span></small>
                 </div>
                 <div class="d-flex align-items-center gap-2">
+                    {{-- Mode tinjauan: satu publikasi per tab, atau semua publikasi berjejer per kriteria --}}
+                    <div class="btn-group btn-group-sm" role="group" id="revModeToggle" hidden>
+                        <button type="button" class="btn btn-outline-primary active" data-mode="tab"
+                                title="Satu publikasi per tab, ditinjau per kategori">
+                            <i class="ti ti-layout-navbar me-1"></i> Per Publikasi
+                        </button>
+                        <button type="button" class="btn btn-outline-primary" data-mode="jejer"
+                                title="Semua publikasi berjejer: pilih kriteria, tandai yang Tidak Sesuai">
+                            <i class="ti ti-layout-columns me-1"></i> Jejer Semua
+                        </button>
+                    </div>
                     <button type="button" class="btn btn-outline-secondary btn-sm" id="revToggleDetail"
                             style="display:none;" onclick="CheckerReview.toggleSiblings()">
                         <i class="ti ti-eye me-1"></i> Tampilkan Info Lain
@@ -29,6 +40,26 @@
                 <div class="progress-bar bg-info" id="revProgressBar" style="width:0%; transition:width .2s;"></div>
             </div>
 
+            {{-- ── Mode Jejer Semua: semua publikasi berdampingan untuk satu kriteria ── --}}
+            <div id="revModeJejer" hidden>
+                <div class="position-relative mb-2">
+                    <div class="input-icon">
+                        <span class="input-icon-addon"><i class="ti ti-search"></i></span>
+                        <input type="search" class="form-control" id="revJejerCari" autocomplete="off"
+                               placeholder="Cari kriteria (kode/kategori/kata), lalu pilih…">
+                    </div>
+                    <div id="revJejerHasil" class="list-group shadow position-absolute w-100 overflow-auto"
+                         style="z-index:1050; max-height:55vh;" hidden></div>
+                </div>
+
+                <div id="revJejerKriteria" class="border rounded p-2 mb-2 bg-light" hidden></div>
+                <div id="revJejerMsg" class="alert py-2 small mb-2" style="display:none;"></div>
+
+                {{-- Satu kolom per publikasi, digeser ke samping --}}
+                <div id="revJejerStrip" class="review-jejer-strip"></div>
+            </div>
+
+            <div id="revModeTab">
             {{-- Tab publikasi: muncul bila meninjau beberapa publikasi sekaligus --}}
             <ul class="nav nav-tabs review-file-tabs mb-3" id="revFileTabs" hidden></ul>
 
@@ -136,6 +167,7 @@
                     </div>
                 </div>
             </div>
+            </div>{{-- /revModeTab --}}
         </div>
     </div>
 </div>

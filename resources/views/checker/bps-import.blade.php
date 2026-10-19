@@ -3,7 +3,7 @@
 @section('title', 'Import dari API BPS')
 @section('pretitle', 'Publication Checker')
 @section('page-title', 'Import Publikasi dari API BPS')
-@section('page-subtitle', 'Cari publikasi dari portal BPS, centang hingga 5 publikasi untuk diperiksa sekaligus')
+@section('page-subtitle', 'Cari publikasi dari portal BPS, centang hingga 10 publikasi untuk diperiksa sekaligus')
 @section('page-actions')
     <a href="{{ route('checker.index') }}" class="btn">
         <i class="ti ti-upload"></i> Upload Manual
@@ -176,7 +176,7 @@ BPS_DOMAIN=6300</pre>
 <script src="{{ asset('js/batch-check.js') }}?v={{ filemtime(public_path('js/batch-check.js')) }}"></script>
 <script>
 const CSRF      = document.querySelector('meta[name=csrf-token]')?.content ?? '';
-const MAX_PUBS  = 5; // batas publikasi per pemeriksaan (sama dengan Upload Manual)
+const MAX_PUBS  = 10; // batas publikasi per pemeriksaan (sama dengan Upload Manual)
 let currentPage = 1;
 let searchItems = []; // hasil search terakhir
 const selected  = new Map(); // pub_id → pub; tetap tersimpan saat pindah halaman pencarian
