@@ -6,7 +6,8 @@
 <div id="reviewSection" style="display:none;"
      data-catatan-url="{{ route('checker.hasil.catatan', '__ID__') }}"
      data-catatan-hapus-url="{{ route('checker.catatan.destroy', '__ID__') }}"
-     data-catatan-saran-url="{{ route('checker.catatan.saran') }}">
+     data-catatan-saran-url="{{ route('checker.catatan.saran') }}"
+     data-pin-url="{{ route('checker.hasil.pin', '__ID__') }}">
     <div class="card mb-3">
         <div class="card-body">
             <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
@@ -86,7 +87,24 @@
                             <iframe id="revPdfFrame" style="width:100%;height:100%;border:none;" allowfullscreen></iframe>
                         </div>
                     </div>
-                    <small class="text-muted d-block mt-2" id="revPageHint">-</small>
+                    <div class="d-flex justify-content-between align-items-center gap-2 mt-2">
+                        <small class="text-muted" id="revPageHint">-</small>
+                        {{-- Klik area di halaman PDF → catatan tambahan dengan penanda di posisi itu --}}
+                        <div class="d-flex gap-1">
+                            <button type="button" class="btn btn-outline-warning btn-sm" id="revBtnPin" hidden
+                                    title="Aktifkan, lalu klik area di halaman PDF untuk memberi komentar di posisi itu">
+                                <i class="ti ti-message-plus me-1"></i> Komentar di PDF
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm active" id="revBtnIsiKomentar" hidden
+                                    title="Tampilkan/sembunyikan isi komentar di samping penanda pada PDF">
+                                <i class="ti ti-message-2"></i> Isi komentar
+                            </button>
+                            <button type="button" class="btn btn-outline-primary btn-sm" id="revBtnUnduhPdf" hidden
+                                    title="Unduh PDF dengan kriteria Tidak Sesuai & catatan tambahan tertanam sebagai komentar (sticky note) di halamannya">
+                                <i class="ti ti-download me-1"></i> Unduh PDF + Komentar
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
                 {{-- RIGHT: semua kriteria dalam satu kategori --}}

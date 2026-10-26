@@ -167,17 +167,33 @@ let currentFilter = 'all';
 // tinjauan per kategori dilakukan berurutan per file. Pembacaan dibatasi beberapa sekaligus (js/batch-check.js).
 const MAX_FILES = 10;
 
-function addFiles(files) {
+async function addFiles(files) {
     const pdfs = [...files].filter(f => f.name.toLowerCase().endsWith('.pdf'))
         .filter(f => !selectedFiles.some(s => s.name === f.name && s.size === f.size));
+    document.getElementById('fileInput').value = '';
     if (!pdfs.length) return;
 
     const sisa = MAX_FILES - selectedFiles.length;
     if (pdfs.length > sisa) {
         showAlert('warning', `Maksimal ${MAX_FILES} PDF per pemeriksaan — ${pdfs.length - sisa} file tidak ditambahkan.`);
     }
-    selectedFiles = selectedFiles.concat(pdfs.slice(0, Math.max(0, sisa)));
-    document.getElementById('fileInput').value = '';
+
+    // File dari input hanya referensi ke disk — kalau file berubah/terkunci sebelum diproses
+    // (sinkronisasi OneDrive/Drive, masih diunduh, disimpan ulang) browser menolak membacanya
+    // (NotReadableError / ERR_UPLOAD_FILE_CHANGED). Salin isinya ke memori sekarang.
+    const gagal = [];
+    const salinan = await Promise.all(pdfs.slice(0, Math.max(0, sisa)).map(async f => {
+        try {
+            return new File([await f.arrayBuffer()], f.name, { type: f.type || 'application/pdf', lastModified: f.lastModified });
+        } catch (e) {
+            gagal.push(f.name);
+            return null;
+        }
+    }));
+    if (gagal.length) {
+        showAlert('danger', `File tidak bisa dibaca: ${gagal.join(', ')}. Tutup file di aplikasi lain, pastikan sudah selesai diunduh/disinkronkan (OneDrive/Drive), lalu pilih ulang.`);
+    }
+    selectedFiles = selectedFiles.concat(salinan.filter(Boolean));
     renderQueue();
 }
 

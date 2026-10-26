@@ -19,12 +19,24 @@ class DetailPemeriksaan extends Model
         'keterangan',
         'ditinjau_at',
         'lokasi',
+        'pin_halaman',
+        'pin_x',
+        'pin_y',
     ];
 
     protected $casts = [
         'ditinjau_at' => 'datetime',
         'lokasi'      => 'array',
+        'pin_halaman' => 'integer',
+        'pin_x'       => 'float',
+        'pin_y'       => 'float',
     ];
+
+    /** Penanda Tidak Sesuai di halaman PDF untuk panel tinjauan: { hal, x, y } atau null. */
+    public function pinArray(): ?array
+    {
+        return $this->pin_halaman ? ['hal' => $this->pin_halaman, 'x' => $this->pin_x, 'y' => $this->pin_y] : null;
+    }
 
     /** Untuk insert massal (insert() tidak melewati cast). */
     public static function encodeLokasi(?array $lokasi): ?string

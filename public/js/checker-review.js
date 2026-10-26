@@ -77,6 +77,9 @@ const CheckerReview = (() => {
         progressBar:  'revProgressBar',
         frame:        'revPdfFrame',
         pageHint:     'revPageHint',
+        btnPin:       'revBtnPin',
+        btnUnduhPdf:  'revBtnUnduhPdf',
+        btnIsiKomentar: 'revBtnIsiKomentar',
         kategoriSel:  'revKategoriSelect',
         itemCount:    'revItemCount',
         contoh:       'revContoh',
@@ -234,6 +237,7 @@ const CheckerReview = (() => {
 
         el('items')?.addEventListener('click', e => {
             if (klikCatatan(e)) return;
+            if (klikPinKriteria(e)) return;
             const loc = e.target.closest('button[data-hal]');
             if (loc) { goToLokasi(parseInt(loc.dataset.hal, 10), loc.dataset.teks); return; }
             const apply = e.target.closest('button[data-apply-all]');
@@ -247,6 +251,7 @@ const CheckerReview = (() => {
             // jumlah diperbarui, tapi kartu tidak langsung disembunyikan (mis. keterangan masih diisi)
             collectGroup();
             renderFilter();
+            gambarSemuaPin(); // penanda kriteria hanya tampil selama Tidak Sesuai
         });
 
         el('filter')?.addEventListener('click', e => {
@@ -260,8 +265,13 @@ const CheckerReview = (() => {
             }
         });
 
+        let tundaBalon = null;
         el('items')?.addEventListener('input', e => {
-            if (e.target.matches('.rev-ket')) e.target.classList.remove('is-invalid');
+            if (!e.target.matches('.rev-ket')) return;
+            e.target.classList.remove('is-invalid');
+            // balon komentar di PDF ikut keterangan yang sedang diketik
+            clearTimeout(tundaBalon);
+            tundaBalon = setTimeout(() => { collectGroup(); gambarSemuaPin(); }, 400);
         });
 
         // Cari kriteria lintas kategori
@@ -286,6 +296,15 @@ const CheckerReview = (() => {
                 if (!e.target.closest('#revCari, #revCariHasil')) cariHasil.hidden = true;
             });
         }
+
+        el('btnPin')?.addEventListener('click', () => setPinMode(!pinMode));
+        el('btnUnduhPdf')?.addEventListener('click', unduhPdfKomentar);
+        el('btnIsiKomentar')?.addEventListener('click', () => {
+            isiKomentar = !isiKomentar;
+            el('btnIsiKomentar').classList.toggle('active', isiKomentar);
+            try { el('frame').contentWindow.document.body.classList.toggle('pc-tanpa-isi', !isiKomentar); } catch { /* viewer belum siap */ }
+        });
+        document.addEventListener('keydown', e => { if (e.key === 'Escape' && pinMode) setPinMode(false); });
 
         el('kategoriSel')?.addEventListener('change', e => {
             collectGroup();
@@ -357,13 +376,31 @@ const CheckerReview = (() => {
         groupIndex = startGroup;
         renderGroup(); // panel contoh ikut kategori aktif, tetap terbuka/tertutup sesuai pilihan petugas
 
+        setPinMode(false);
+        if (el('btnPin')) el('btnPin').hidden = !(entry.hasilId && catUrl('catatanUrl'));
+        if (el('btnUnduhPdf')) el('btnUnduhPdf').hidden = !(entry.hasilId && catUrl('catatanUrl'));
+        if (el('btnIsiKomentar')) el('btnIsiKomentar').hidden = !(entry.hasilId && catUrl('catatanUrl'));
+
         const hasOcr = entry.ocrLines && Object.keys(entry.ocrLines).length > 0;
         // Teks OCR dipasang sebelum PDF dibuka, supaya kait terpasang sebelum halaman pertama dirender
         // (lihat injectOcrText). URL absolut: open() me-resolve URL relatif terhadap lokasi viewer.
         mountViewer(el('frame'), asalSama(entry.url), {
-            beforeOpen: win => { if (hasOcr) injectOcrText(win, entry.ocrLines); },
-            afterOpen:  ()  => setTimeout(goToPage, 300),
+            beforeOpen: win => { renderTajam(win); if (hasOcr) injectOcrText(win, entry.ocrLines); pasangPin(win); },
+            afterOpen:  ()  => { setTimeout(goToPage, 300); gambarSemuaPin(); },
         });
+    }
+
+    /**
+     * Render halaman minimal 2× resolusi layar. Sel tabel yang tersusun dari kotak warna bersebelahan
+     * menimbulkan garis putih tipis di sambungannya (anti-aliasing tiap kotak di pdf.js — Adobe/Chrome
+     * tidak); di resolusi lebih tinggi celah itu jauh lebih tipis/samar. pdf.js membaca
+     * devicePixelRatio saat merender, jadi cukup dinaikkan sebelum PDF dibuka. Batas memori kanvas
+     * tetap dijaga pdf.js lewat maxCanvasPixels.
+     */
+    function renderTajam(win) {
+        const asli = win.devicePixelRatio || 1;
+        if (asli >= 2) return;
+        try { Object.defineProperty(win, 'devicePixelRatio', { get: () => 2, configurable: true }); } catch { /* abaikan */ }
     }
 
     /**
@@ -590,6 +627,14 @@ const CheckerReview = (() => {
                     <textarea class="form-control form-control-sm rev-ket" rows="2"
                               placeholder="Jelaskan apa yang tidak sesuai (wajib)">${esc(ket)}</textarea>
                     <div class="invalid-feedback">Keterangan wajib diisi untuk kriteria yang Tidak Sesuai.</div>
+                    ${entry.hasilId ? `
+                    <div class="d-flex align-items-center flex-wrap gap-2 mt-1">
+                        <button type="button" class="btn btn-sm btn-outline-warning py-0" data-pin-kriteria
+                                title="Klik tombol ini, lalu klik area yang tidak sesuai di halaman PDF">
+                            <i class="ti ti-map-pin"></i> Tandai di PDF
+                        </button>
+                        <small class="rev-pin-info text-secondary">${pinInfoHtml(c)}</small>
+                    </div>` : ''}
                     ${entries.length > 1 ? `
                     <div class="d-flex align-items-center flex-wrap gap-2 mt-1">
                         <button type="button" class="btn btn-sm btn-outline-danger py-0" data-apply-all
@@ -1033,6 +1078,9 @@ const CheckerReview = (() => {
                         kriteria_id: c.id,
                         status:      c.selStatus,
                         keterangan:  c.selStatus === TIDAK_SESUAI ? c.selKet : null,
+                        pin_halaman: c.selStatus === TIDAK_SESUAI ? (c.pin?.hal ?? null) : null,
+                        pin_x:       c.selStatus === TIDAK_SESUAI ? (c.pin?.x ?? null) : null,
+                        pin_y:       c.selStatus === TIDAK_SESUAI ? (c.pin?.y ?? null) : null,
                     })),
                 }),
             });
@@ -1046,11 +1094,13 @@ const CheckerReview = (() => {
         items.forEach(c => {
             c.status     = c.selStatus;
             c.keterangan = c.selStatus === TIDAK_SESUAI ? c.selKet : null;
+            if (c.selStatus !== TIDAK_SESUAI) c.pin = null;
             c.reviewed   = true;
             delete c.selStatus;
             delete c.selKet;
         });
         recalcSummary(entry);
+        gambarSemuaPin();
     }
 
     /**
@@ -1513,7 +1563,7 @@ const CheckerReview = (() => {
             const res = await fetch(catUrl('catatanUrl').replace('__ID__', entry.hasilId), { headers: { 'Accept': 'application/json' } });
             if (res.ok) entry.catatan = (await res.json()).catatan || [];
         } catch { /* tetap kosong */ }
-        if (entry === entries[fileIndex]) renderCatatanList();
+        if (entry === entries[fileIndex]) { renderCatatanList(); gambarSemuaPin(); }
     }
 
     function loadSaran() {
@@ -1539,6 +1589,8 @@ const CheckerReview = (() => {
         const entry = entries[fileIndex];
         if (!entry?.hasilId || !catUrl('catatanUrl')) return;
         catEditId = null; // kotak baru (pindah kategori/publikasi): form kembali ke mode tambah
+        catPos = null;
+        gambarSemuaPin();
         loadSaran();
 
         el('items').insertAdjacentHTML('beforeend', `
@@ -1565,6 +1617,13 @@ const CheckerReview = (() => {
                         </select>
                         <input type="number" class="form-control form-control-sm" id="revCatHal" min="1" placeholder="Hal." title="Halaman (opsional)" style="max-width:90px;">
                     </div>
+                    <div class="d-flex align-items-center flex-wrap gap-2 mb-1">
+                        <button type="button" class="btn btn-sm btn-outline-warning py-0" data-cat-pin
+                                title="Klik tombol ini, lalu klik area yang dikomentari di halaman PDF">
+                            <i class="ti ti-map-pin"></i> Tandai di PDF
+                        </button>
+                        <small id="revCatPinInfo" class="text-secondary"></small>
+                    </div>
                     <textarea class="form-control form-control-sm mb-1" id="revCatKet" rows="2" maxlength="2000"
                               placeholder="Keterangan, mis. Pada Tabel 4.2.5 istilah asing tidak dicetak miring"></textarea>
                     ${entries.length > 1 ? `
@@ -1589,15 +1648,23 @@ const CheckerReview = (() => {
         if (!box || !entry) return;
         const kat  = kategoriAktif();
         const list = (entry.catatan || []).filter(c => (c.kategori || '') === kat);
+        const pins = pinCatatan(entry);
         catById('revCatCount').textContent = list.length ? `(${list.length})` : '';
         box.innerHTML = list.length
             ? list.map(c => `
                 <div class="d-flex gap-2 align-items-start border-top pt-1 mt-1 small">
                     <div class="flex-fill" style="min-width:0;">
+                        ${pins.includes(c) ? `<span class="badge bg-warning text-white" title="Penanda di halaman PDF">${pins.indexOf(c) + 1}</span>` : ''}
                         <span class="fw-semibold">${esc(c.item)}</span>
                         <span class="badge ${LEVEL_BADGE[c.flag_level] || 'bg-secondary-lt'}">${esc(c.flag_level)}</span>
-                        ${c.halaman ? `<a href="#" data-cat-hal="${c.halaman}">hal. ${c.halaman}</a>` : ''}
                         <div class="text-secondary">${esc(c.keterangan)}</div>
+                        ${c.halaman ? `
+                        <div class="mt-1">
+                            <i class="ti ${pins.includes(c) ? 'ti-map-pin-filled text-warning' : 'ti-file'}"></i>
+                            Hal. ${c.halaman}${pins.includes(c) ? '' : ' <span class="text-secondary">(tanpa penanda)</span>'} ·
+                            <a href="#" data-cat-hal="${c.halaman}" data-cat-id="${c.id}"
+                               title="${pins.includes(c) ? 'Gulir ke penanda komentar ini di PDF' : 'Buka halaman ini di PDF'}">lihat</a>
+                        </div>` : ''}
                     </div>
                     <button type="button" class="btn btn-sm btn-ghost-primary btn-icon" data-cat-edit="${c.id}" title="Edit"><i class="ti ti-pencil"></i></button>
                     <button type="button" class="btn btn-sm btn-ghost-danger btn-icon" data-cat-hapus="${c.id}" title="Hapus"><i class="ti ti-trash"></i></button>
@@ -1607,17 +1674,22 @@ const CheckerReview = (() => {
 
     /**
      * Buka/tutup form catatan. Dengan `catatan`: mode edit (form diisi catatan itu);
-     * tanpa: mode tambah (halaman diisi dari posisi viewer).
+     * tanpa: mode tambah (halaman diisi dari posisi viewer, atau dari `pos` = area yang diklik di PDF).
      */
-    function bukaFormCatatan(buka, catatan = null) {
+    function bukaFormCatatan(buka, catatan = null, pos = null) {
         const form = catById('revCatForm');
         if (!form) return;
         const dariEdit = catEditId !== null;
         form.hidden = !buka;
         catById('revCatInfo').textContent = '';
         catEditId = buka && catatan ? catatan.id : null;
+        catPos = !buka ? null
+               : catatan ? (catatan.pos_x != null ? { halaman: catatan.halaman, x: catatan.pos_x, y: catatan.pos_y } : null)
+               : pos;
         el('items').querySelectorAll('[data-cat-edit]').forEach(b => b.classList.toggle('active', +b.dataset.catEdit === catEditId));
+        gambarSemuaPin();
         if (!buka) return;
+        infoPinCatatan();
 
         if (catatan) {
             catById('revCatItem').value  = catatan.item;
@@ -1626,7 +1698,8 @@ const CheckerReview = (() => {
             catById('revCatKet').value   = catatan.keterangan || '';
         } else {
             if (dariEdit) { catById('revCatItem').value = ''; catById('revCatKet').value = ''; }
-            try { catById('revCatHal').value = el('frame').contentWindow.PDFViewerApplication.page || ''; } catch { /* abaikan */ }
+            if (pos) catById('revCatHal').value = pos.halaman;
+            else try { catById('revCatHal').value = el('frame').contentWindow.PDFViewerApplication.page || ''; } catch { /* abaikan */ }
         }
         // "semua publikasi" hanya untuk catatan baru
         const semua = catById('revCatSemuaWrap');
@@ -1675,11 +1748,16 @@ const CheckerReview = (() => {
         if (!item || !ket) { infoCatatan('text-danger', 'Nama item dan keterangan wajib diisi.'); return; }
 
         const aktif   = entries[fileIndex];
+        const halaman = parseInt(catById('revCatHal').value, 10) || null;
+        // penanda hanya berlaku bila nomor halaman tidak diubah setelah area di PDF diklik
+        const pos     = catPos && catPos.halaman === halaman ? catPos : null;
         const payload = {
             kategori: kategoriAktif(),
             item, keterangan: ket,
             flag_level: catById('revCatLevel').value,
-            halaman: parseInt(catById('revCatHal').value, 10) || null,
+            halaman,
+            pos_x: pos ? pos.x : null,
+            pos_y: pos ? pos.y : null,
         };
         if (catEditId !== null) { ubahCatatan(payload); return; }
         const targets = catById('revCatSemua')?.checked ? entries.filter(e => e.hasilId) : [aktif];
@@ -1693,7 +1771,7 @@ const CheckerReview = (() => {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
                     // nomor halaman hanya berlaku untuk publikasi yang sedang dibuka
-                    body: JSON.stringify(e === aktif ? payload : { ...payload, halaman: null }),
+                    body: JSON.stringify(e === aktif ? payload : { ...payload, halaman: null, pos_x: null, pos_y: null }),
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.message || `Server membalas ${res.status}`);
@@ -1726,6 +1804,7 @@ const CheckerReview = (() => {
         entry.catatan = (entry.catatan || []).filter(c => c.id !== id);
         if (id === catEditId) bukaFormCatatan(false);
         renderCatatanList();
+        gambarSemuaPin();
     }
 
     /** Klik di kotak catatan (didelegasikan dari daftar kriteria). @returns true bila ditangani */
@@ -1739,6 +1818,14 @@ const CheckerReview = (() => {
             if (c) bukaFormCatatan(true, c);
             return true;
         }
+        if (t.closest('[data-cat-pin]')) { setPinMode(!(pinMode && pinTarget === PIN_CATATAN), PIN_CATATAN); return true; }
+        if (t.closest('[data-cat-pin-hapus]')) {
+            e.preventDefault();
+            catPos = null;
+            infoPinCatatan();
+            gambarSemuaPin();
+            return true;
+        }
         if (t.closest('[data-cat-batal]'))  { bukaFormCatatan(false); return true; }
         if (t.closest('[data-cat-simpan]')) { simpanCatatan(); return true; }
         const hapus = t.closest('[data-cat-hapus]');
@@ -1746,10 +1833,471 @@ const CheckerReview = (() => {
         const hal = t.closest('[data-cat-hal]');
         if (hal) {
             e.preventDefault();
-            try { el('frame').contentWindow.PDFViewerApplication.page = parseInt(hal.dataset.catHal, 10); } catch { /* abaikan */ }
+            const c = (entries[fileIndex].catatan || []).find(x => x.id === +hal.dataset.catId);
+            keArea(parseInt(hal.dataset.catHal, 10), c?.pos_x, c?.pos_y, `c:${c?.id}`);
             return true;
         }
         return false;
+    }
+
+    // ── Komentar di halaman PDF: klik area di viewer → catatan tambahan dengan penanda di posisi itu ──
+    // Posisi disimpan sebagai pecahan lebar/tinggi halaman (pos_x/pos_y), jadi tetap pas di semua zoom.
+    const PIN_WARNA = { minor: '#4299e1', moderate: '#f76707', major: '#d63939' };
+    const PIN_TIDAK_SESUAI = '#d63939';
+    let pinMode   = false;
+    let isiKomentar = true; // balon isi komentar di samping penanda (tombol "Isi komentar")
+    let pinTarget = null; // kriteria yang sedang diberi penanda, PIN_CATATAN (form catatan), atau null (catatan baru)
+    let catPos    = null; // penanda untuk form catatan yang sedang dibuka: { halaman, x, y }
+    const PIN_CATATAN = { id: 'catatan tambahan' }; // target: penanda untuk form catatan yang sedang dibuka
+
+    /** Info penanda di form catatan tambahan. */
+    function infoPinCatatan() {
+        const info = catById('revCatPinInfo');
+        if (!info) return;
+        info.innerHTML = catPos
+            ? `<i class="ti ti-map-pin-filled text-warning"></i> Hal. ${catPos.halaman} ·
+               <a href="#" class="text-danger" data-cat-pin-hapus>hapus</a>`
+            : 'Belum ada penanda di PDF';
+        catById('revCatForm')?.querySelector('[data-cat-pin]')?.classList.toggle('active', pinTarget === PIN_CATATAN);
+    }
+
+    /** Catatan publikasi yang punya penanda; urutannya = nomor penanda. */
+    function pinCatatan(entry) {
+        return (entry?.catatan || []).filter(c => c.halaman && c.pos_x != null && c.pos_y != null);
+    }
+
+    /** Status kriteria seperti di layar: pilihan petugas yang belum disimpan, atau status tersimpan. */
+    function statusEfektif(c) {
+        return c.selStatus !== undefined ? c.selStatus : c.status;
+    }
+
+    /** Kriteria Tidak Sesuai yang punya penanda di PDF. */
+    function pinKriteria(entry) {
+        return (entry?.checks || []).filter(c => c.pin?.hal && statusEfektif(c) === TIDAK_SESUAI);
+    }
+
+    function pinInfoHtml(c) {
+        return c.pin?.hal
+            ? `<i class="ti ti-map-pin-filled text-danger"></i> Hal. ${c.pin.hal} ·
+               <a href="#" data-pin-lihat>lihat</a> · <a href="#" class="text-danger" data-pin-hapus>hapus</a>`
+            : 'Belum ada penanda di PDF';
+    }
+
+    /** @param {object|null} target kriteria yang akan diberi penanda; null = catatan tambahan */
+    function setPinMode(on, target = null) {
+        pinMode   = on;
+        pinTarget = on ? target : null;
+        const btn = el('btnPin');
+        if (btn) {
+            btn.classList.toggle('active', on);
+            btn.innerHTML = !on ? '<i class="ti ti-message-plus me-1"></i> Komentar di PDF'
+                : pinTarget ? `<i class="ti ti-pointer me-1"></i> Klik area untuk ${esc(pinTarget.id)}… (Esc batal)`
+                : '<i class="ti ti-pointer me-1"></i> Klik area di PDF… (Esc batal)';
+        }
+        const items = entries[fileIndex] ? currentGroupItems() : [];
+        el('items')?.querySelectorAll('[data-idx]').forEach(card => {
+            card.querySelector('[data-pin-kriteria]')?.classList.toggle('active', !!pinTarget && items[+card.dataset.idx] === pinTarget);
+        });
+        catById('revCatForm')?.querySelector('[data-cat-pin]')?.classList.toggle('active', pinTarget === PIN_CATATAN);
+        try { el('frame').contentWindow.document.body.classList.toggle('pc-pin-mode', on); } catch { /* viewer belum siap */ }
+    }
+
+    /** Tombol penanda di kartu kriteria Tidak Sesuai. @returns true bila ditangani */
+    function klikPinKriteria(e) {
+        const t = e.target.closest('[data-pin-kriteria], [data-pin-lihat], [data-pin-hapus]');
+        const card = t?.closest('[data-idx]');
+        if (!card) return false;
+        e.preventDefault();
+        const c = currentGroupItems()[+card.dataset.idx];
+        if (!c) return true;
+        if (t.matches('[data-pin-kriteria]')) {
+            setPinMode(!(pinMode && pinTarget === c), c);
+        } else if (t.matches('[data-pin-lihat]')) {
+            keArea(c.pin.hal, c.pin.x, c.pin.y, `k:${c.id}`);
+        } else {
+            c.pin = null;
+            card.querySelector('.rev-pin-info').innerHTML = pinInfoHtml(c);
+            gambarSemuaPin();
+            simpanPinKriteria(c, card);
+        }
+        return true;
+    }
+
+    /** Simpan penanda kriteria langsung ke server (tidak menunggu Simpan Kategori). */
+    async function simpanPinKriteria(c, card) {
+        const entry = entries[fileIndex];
+        const info  = card?.querySelector('.rev-pin-info');
+        if (!entry?.hasilId || !catUrl('pinUrl')) return;
+        try {
+            const res = await fetch(catUrl('pinUrl').replace('__ID__', entry.hasilId), {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+                body: JSON.stringify({ kriteria_id: c.id, pin_halaman: c.pin?.hal ?? null, pin_x: c.pin?.x ?? null, pin_y: c.pin?.y ?? null }),
+            });
+            if (!res.ok) throw new Error(`Server membalas ${res.status}`);
+        } catch (err) {
+            if (info) info.innerHTML = pinInfoHtml(c) + ` <span class="text-danger">(gagal disimpan: ${esc(err.message)})</span>`;
+        }
+    }
+
+    /**
+     * Gulir viewer ke posisi penanda (pecahan halaman) lalu kedipkan penandanya.
+     * `kunci` = data-pin-key penanda ('k:<kode kriteria>' / 'c:<id catatan>').
+     */
+    function keArea(hal, x, y, kunci) {
+        hal = parseInt(hal, 10);
+        const win = el('frame')?.contentWindow;
+        const app = win?.PDFViewerApplication;
+        if (!app?.pdfViewer || !hal) return;
+        try {
+            const view = app.pdfViewer.getPageView(hal - 1);
+            if (view?.viewport && x != null && y != null) {
+                const vp = view.viewport;
+                const [, py] = vp.convertToPdfPoint(x * vp.width, y * vp.height);
+                // sisakan ±120px di atas penanda supaya tidak menempel di tepi atas viewer
+                app.pdfViewer.scrollPageIntoView({
+                    pageNumber: hal,
+                    destArray: [null, { name: 'XYZ' }, null, py + 120 / (vp.scale || 1), null],
+                });
+            } else {
+                app.page = hal;
+            }
+        } catch { try { app.page = hal; } catch { /* viewer belum siap */ } }
+
+        // penanda baru tergambar setelah halaman dirender — tunggu sebentar sebelum dikedipkan
+        setTimeout(() => {
+            const pin = win.document.querySelector(`.pc-pin[data-pin-key="${CSS.escape(kunci)}"]`);
+            if (!pin) return;
+            pin.classList.remove('pc-sorot');
+            void pin.offsetWidth;
+            pin.classList.add('pc-sorot');
+        }, 350);
+    }
+
+    /** Penanda kriteria di PDF diklik: buka kategorinya dan sorot kartunya. */
+    function bukaPinKriteria(c) {
+        const entry = entries[fileIndex];
+        const i = entry.checks.indexOf(c);
+        const g = entry.groups.findIndex(gr => gr.idx.includes(i));
+        if (g < 0) return;
+        setPinMode(false);
+        if (g !== groupIndex) {
+            collectGroup();
+            groupIndex = g;
+            renderGroup();
+            try { el('frame').contentWindow.PDFViewerApplication.page = c.pin.hal; } catch { /* abaikan */ }
+        }
+        const card = el('items').querySelector(`[data-idx="${entry.groups[g].idx.indexOf(i)}"]`);
+        if (!card) return;
+        card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        card.classList.add('border-danger');
+        setTimeout(() => card.classList.remove('border-danger'), 1500);
+    }
+
+    /** Pasang gaya, klik halaman & gambar ulang penanda tiap halaman dirender (zoom membuang elemen tambahan). */
+    function pasangPin(win) {
+        const doc = win.document;
+        win.__pcHasilId = entries[fileIndex]?.hasilId;
+        const st = doc.createElement('style');
+        st.textContent = `
+            body.pc-pin-mode .page { cursor: crosshair; }
+            body.pc-pin-mode .textLayer, body.pc-pin-mode .annotationLayer { pointer-events: none; }
+            .pc-pin { position: absolute; z-index: 30; width: 24px; height: 24px; transform: translate(-50%, -50%);
+                      border-radius: 50%; border: 2px solid #fff; color: #fff; font: bold 12px/20px sans-serif;
+                      text-align: center; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,.5); }
+            .pc-pin:hover { transform: translate(-50%, -50%) scale(1.2); }
+            .pc-pin.pc-baru { background: #f59f00; border-style: dashed; animation: pc-denyut 1s infinite alternate; }
+            @keyframes pc-denyut { to { box-shadow: 0 0 0 6px rgba(245,159,0,.35); } }
+            .pc-bubble { position: absolute; z-index: 29; max-width: 230px; padding: 4px 7px; border-radius: 6px;
+                         background: #fff; color: #1e293b; font: 11px/1.35 sans-serif; cursor: pointer;
+                         border-left: 4px solid var(--pc-warna, #d63939); box-shadow: 0 2px 6px rgba(0,0,0,.35);
+                         display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+                         white-space: pre-line; transform: translate(16px, -50%); }
+            .pc-bubble.pc-kiri { transform: translate(calc(-100% - 16px), -50%); }
+            .pc-bubble:hover { -webkit-line-clamp: unset; z-index: 31; max-width: 320px; }
+            .pc-bubble b { display: block; }
+            body.pc-tanpa-isi .pc-bubble { display: none; }
+            .pc-pin.pc-sorot { animation: pc-sorot .5s ease-in-out 4 alternate; }
+            @keyframes pc-sorot { to { transform: translate(-50%, -50%) scale(1.8); box-shadow: 0 0 0 10px rgba(214,57,57,.35); } }`;
+        doc.head.appendChild(st);
+        if (pinMode) doc.body.classList.add('pc-pin-mode');
+        doc.body.classList.toggle('pc-tanpa-isi', !isiKomentar);
+
+        win.PDFViewerApplication.eventBus.on('pagerendered', ({ source, pageNumber }) => gambarPin(source.div, pageNumber));
+
+        doc.addEventListener('click', e => {
+            if (!pinMode) return;
+            const page = e.target.closest?.('.page');
+            if (!page || e.target.closest('.pc-pin')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const r = page.getBoundingClientRect();
+            const frac = v => Math.round(Math.min(1, Math.max(0, v)) * 10000) / 10000;
+            klikHalaman({
+                halaman: parseInt(page.dataset.pageNumber, 10),
+                x: frac((e.clientX - r.left - page.clientLeft) / page.clientWidth),
+                y: frac((e.clientY - r.top - page.clientTop) / page.clientHeight),
+            });
+        }, true);
+        doc.addEventListener('keydown', e => { if (e.key === 'Escape' && pinMode) setPinMode(false); });
+    }
+
+    function gambarPin(pageDiv, halaman) {
+        if (!pageDiv) return;
+        pageDiv.querySelectorAll('.pc-pin, .pc-bubble').forEach(p => p.remove());
+        const doc = pageDiv.ownerDocument;
+        const tambah = (x, y, cls, isi, title, onClick, kunci = '') => {
+            const pin = doc.createElement('div');
+            pin.className = 'pc-pin ' + cls;
+            pin.dataset.pinKey = kunci;
+            pin.style.left = (x * 100) + '%';
+            pin.style.top  = (y * 100) + '%';
+            pin.textContent = isi;
+            pin.title = title;
+            pin.addEventListener('click', ev => { ev.stopPropagation(); onClick?.(); });
+            return pin;
+        };
+        // balon isi komentar di samping penanda (di kiri bila penanda dekat tepi kanan halaman)
+        const balon = (x, y, warna, judul, isi, onClick) => {
+            const b = doc.createElement('div');
+            b.className = 'pc-bubble' + (x > 0.6 ? ' pc-kiri' : '');
+            b.style.left = (x * 100) + '%';
+            b.style.top  = (y * 100) + '%';
+            b.style.setProperty('--pc-warna', warna);
+            const j = doc.createElement('b');
+            j.textContent = judul;
+            b.append(j, isi || '');
+            b.addEventListener('click', ev => { ev.stopPropagation(); onClick?.(); });
+            pageDiv.appendChild(b);
+        };
+        pinCatatan(entries[fileIndex]).forEach((c, n) => {
+            if (+c.halaman !== halaman || (catPos && c.id === catEditId)) return; // yang sedang dipindah: tampil sebagai penanda baru
+            const warna = PIN_WARNA[c.flag_level] || '#667382';
+            const pin = tambah(c.pos_x, c.pos_y, '', n + 1, `${c.item}\n${c.keterangan || ''}`, () => bukaPin(c.id), `c:${c.id}`);
+            pin.style.background = warna;
+            pageDiv.appendChild(pin);
+            balon(c.pos_x, c.pos_y, warna, c.item, c.keterangan, () => bukaPin(c.id));
+        });
+        pinKriteria(entries[fileIndex]).forEach(c => {
+            if (+c.pin.hal !== halaman) return;
+            const ket = c.selKet ?? c.keterangan ?? '';
+            const pin = tambah(c.pin.x, c.pin.y, '', '!', `${c.deskripsi}\nTidak sesuai: ${ket}`, () => bukaPinKriteria(c), `k:${c.id}`);
+            pin.style.background = PIN_TIDAK_SESUAI;
+            pin.style.borderRadius = '4px';
+            pageDiv.appendChild(pin);
+            balon(c.pin.x, c.pin.y, PIN_TIDAK_SESUAI, c.deskripsi, ket ? `Tidak sesuai: ${ket}` : '', () => bukaPinKriteria(c));
+        });
+        if (catPos?.halaman === halaman) {
+            pageDiv.appendChild(tambah(catPos.x, catPos.y, 'pc-baru', '+', 'Komentar yang sedang ditulis'));
+        }
+    }
+
+    function gambarSemuaPin() {
+        let app;
+        try { app = el('frame').contentWindow.PDFViewerApplication; } catch { return; }
+        // viewer lama (sebelum publikasi baru selesai dimuat) tidak digambari
+        if (!app?.pdfViewer || el('frame').contentWindow.__pcHasilId !== entries[fileIndex]?.hasilId) return;
+        for (let i = 1; i <= app.pagesCount; i++) gambarPin(app.pdfViewer.getPageView(i - 1)?.div, i);
+    }
+
+    /** Area di halaman PDF diklik: form catatan baru, atau pindahkan penanda catatan yang sedang diedit. */
+    function klikHalaman(pos) {
+        const target = pinTarget;
+        setPinMode(false);
+        if (target === PIN_CATATAN) {
+            // penanda untuk form catatan yang sedang dibuka (baru maupun edit); tersimpan saat catatan disimpan
+            if (catById('revCatForm')?.hidden !== false) bukaFormCatatan(true, null, pos);
+            catPos = pos;
+            catById('revCatHal').value = pos.halaman;
+            infoPinCatatan();
+            gambarSemuaPin();
+            catById('revCatatanBox')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            return;
+        }
+        if (target) {
+            target.pin = { hal: pos.halaman, x: pos.x, y: pos.y };
+            const items = currentGroupItems();
+            const card = [...el('items').querySelectorAll('[data-idx]')].find(k => items[+k.dataset.idx] === target);
+            const info = card?.querySelector('.rev-pin-info');
+            if (info) info.innerHTML = pinInfoHtml(target);
+            gambarSemuaPin();
+            simpanPinKriteria(target, card);
+            return;
+        }
+        if (!catById('revCatForm')) return;
+        if (catEditId !== null && !catById('revCatForm').hidden) {
+            catPos = pos;
+            catById('revCatHal').value = pos.halaman;
+            infoPinCatatan();
+            gambarSemuaPin();
+        } else {
+            bukaFormCatatan(true, null, pos);
+        }
+        catById('revCatatanBox')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+
+    /** Penanda diklik: buka catatannya untuk diedit (pindah ke kategorinya bila perlu). */
+    function bukaPin(id) {
+        const entry = entries[fileIndex];
+        const c = (entry.catatan || []).find(x => x.id === id);
+        if (!c) return;
+        setPinMode(false);
+        const g = entry.groups.findIndex(gr => gr.kategori === (c.kategori || ''));
+        if (g >= 0 && g !== groupIndex) {
+            collectGroup();
+            groupIndex = g;
+            renderGroup();
+            try { el('frame').contentWindow.PDFViewerApplication.page = c.halaman; } catch { /* abaikan */ }
+        }
+        bukaFormCatatan(true, c);
+        catById('revCatatanBox')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+
+    // ── Unduh PDF dengan catatan tambahan tertanam sebagai anotasi komentar (sticky note) ──
+    // pdf-lib dimuat hanya saat dibutuhkan; lokasinya relatif terhadap skrip ini (app bisa di subfolder).
+    const PDFLIB_URL = document.currentScript
+        ? new URL('../assets/vendors/pdf-lib/pdf-lib.min.js', document.currentScript.src).href : null;
+    let pdfLibPromise = null;
+
+    function muatPdfLib() {
+        if (window.PDFLib) return Promise.resolve(window.PDFLib);
+        pdfLibPromise ??= new Promise((ok, gagal) => {
+            const s = document.createElement('script');
+            s.src = PDFLIB_URL;
+            s.onload  = () => ok(window.PDFLib);
+            s.onerror = () => { pdfLibPromise = null; gagal(new Error('pustaka pdf-lib gagal dimuat')); };
+            document.head.appendChild(s);
+        });
+        return pdfLibPromise;
+    }
+
+    /**
+     * Posisi penanda (pecahan halaman seperti tampil di viewer) → koordinat PDF.
+     * Viewer menampilkan CropBox yang sudah diputar sesuai /Rotate halaman, jadi rotasinya dibalik di sini.
+     */
+    function titikPdf(page, u, v) {
+        const { x, y, width: w, height: h } = page.getCropBox();
+        const rot = ((page.getRotation().angle % 360) + 360) % 360;
+        const [fx, fy] = rot === 90  ? [v, u]
+                       : rot === 180 ? [1 - u, v]
+                       : rot === 270 ? [1 - v, 1 - u]
+                       :               [u, 1 - v];
+        return [x + fx * w, y + fy * h];
+    }
+
+    /**
+     * Cari posisi potongan teks (lokasi temuan cek otomatis) di halaman PDF lewat pdf.js viewer
+     * yang sedang terbuka (teks OCR ikut, lihat injectOcrText). Hasil: koordinat PDF [x, y] atau null.
+     */
+    async function posisiTeks(entry, hal, teks) {
+        const norm = s => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+        const cari = norm(teks);
+        if (!cari) return null;
+        try {
+            const win = el('frame').contentWindow;
+            if (win.__pcHasilId !== entry.hasilId || !win.PDFViewerApplication?.pdfDocument) return null;
+            const page = await win.PDFViewerApplication.pdfDocument.getPage(hal);
+            const items = (await page.getTextContent()).items.filter(it => it.str?.trim());
+            const awal = cari.slice(0, 25);
+            const it = items.find(i => norm(i.str).includes(awal)) || items.find(i => cari.includes(norm(i.str)) && norm(i.str).length > 3);
+            return it ? [it.transform[4], it.transform[5] + (it.height || 10)] : null;
+        } catch { return null; }
+    }
+
+    /** Halaman untuk kriteria Tidak Sesuai: lokasi temuan, atau halaman target kriteria. */
+    function halamanKriteria(c, total) {
+        if (c.lokasi?.[0]?.hal) return Math.min(c.lokasi[0].hal, total);
+        return c.target === 'page2' ? Math.min(2, total) : c.target === 'last' ? total : 1;
+    }
+
+    async function unduhPdfKomentar() {
+        const entry = entries[fileIndex];
+        const btn = el('btnUnduhPdf');
+        if (!entry || btn.disabled) return;
+        const label = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="ti ti-loader-2 icon-spin me-1"></i> Menyiapkan…';
+        try {
+            collectGroup(); // pilihan di layar yang belum disimpan ikut
+            await loadCatatan(entry);
+            const { PDFDocument, PDFString, PDFHexString } = await muatPdfLib();
+            const res = await fetch(asalSama(entry.url), { credentials: 'same-origin' });
+            if (!res.ok) throw new Error(`PDF tidak bisa diambil (${res.status})`);
+            const pdf   = await PDFDocument.load(await res.arrayBuffer(), { ignoreEncryption: true });
+            const pages = pdf.getPages();
+            const pins  = pinCatatan(entry);
+            // halaman → jumlah komentar tanpa posisi, ditumpuk di pojok (catatan kiri, kriteria kanan)
+            const tumpuk = { kiri: {}, kanan: {} };
+            const sudut = (sisi, hal) => {
+                const k = tumpuk[sisi][hal] = (tumpuk[sisi][hal] || 0) + 1;
+                return [sisi === 'kiri' ? 0.04 : 0.96, Math.min(0.96, 0.02 + k * 0.04)];
+            };
+            const rgb = hex => hex.match(/\w\w/g).map(h => parseInt(h, 16) / 255);
+
+            // komentar: { hal, xy (koordinat PDF) | uv (pecahan halaman), judul, isi, oleh, warna, nm }
+            const komentar = [];
+
+            for (const c of entry.checks) {
+                if (statusEfektif(c) !== TIDAK_SESUAI) continue;
+                // penanda petugas → lokasi temuan cek otomatis → pojok halaman target kriteria
+                const pin = c.pin?.hal && c.pin.hal <= pages.length ? c.pin : null;
+                const hal = pin ? pin.hal : halamanKriteria(c, pages.length);
+                const xy  = !pin && c.lokasi?.[0] ? await posisiTeks(entry, hal, c.lokasi[0].teks) : null;
+                komentar.push({
+                    hal, xy, uv: pin ? [pin.x, pin.y] : xy ? null : sudut('kanan', hal),
+                    judul: 'Tidak sesuai',
+                    isi:   `${c.deskripsi}\nTidak sesuai: ${c.selKet || c.keterangan || '-'}`,
+                    warna: rgb(PIN_TIDAK_SESUAI),
+                    nm:    `pubchecker-kriteria-${c.id}`,
+                });
+            }
+
+            for (const c of (entry.catatan || []).filter(c => c.halaman && c.halaman <= pages.length)) {
+                const n = pins.indexOf(c) + 1;
+                komentar.push({
+                    hal: c.halaman, xy: null,
+                    uv: n ? [c.pos_x, c.pos_y] : sudut('kiri', c.halaman),
+                    judul: c.item,
+                    isi:   `${c.item}\n${c.keterangan || ''}`,
+                    oleh:  c.oleh,
+                    warna: rgb(PIN_WARNA[c.flag_level] || '#667382'),
+                    nm:    `pubchecker-catatan-${c.id}`,
+                });
+            }
+
+            for (const k of komentar) {
+                const page = pages[k.hal - 1];
+                const [px, py] = k.xy || titikPdf(page, k.uv[0], k.uv[1]);
+                const annot = pdf.context.obj({
+                    Type: 'Annot', Subtype: 'Text', Name: 'Comment',
+                    Rect: [px - 10, py - 10, px + 10, py + 10],
+                    Contents: PDFHexString.fromText(k.isi),
+                    T: PDFHexString.fromText(k.oleh || 'Pubchecker'),
+                    Subj: PDFHexString.fromText(k.judul),
+                    NM: PDFString.of(k.nm),
+                    M: PDFString.fromDate(new Date()),
+                    C: k.warna,
+                    F: 4 | 8 | 16, // Print | NoZoom | NoRotate
+                    Open: false,
+                });
+                page.node.addAnnot(pdf.context.register(annot));
+            }
+
+            const blob = new Blob([await pdf.save()], { type: 'application/pdf' });
+            const url  = URL.createObjectURL(blob);
+            const a    = document.createElement('a');
+            a.href = url;
+            a.download = entry.filename.replace(/\.pdf$/i, '') + ' - komentar.pdf';
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            if (!komentar.length) alert('Belum ada kriteria Tidak Sesuai atau catatan berhalaman — PDF diunduh tanpa komentar.');
+        } catch (err) {
+            console.error(err);
+            alert('Gagal membuat PDF dengan komentar: ' + err.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = label;
+        }
     }
 
     /** Publikasi lain (setelah yang aktif, berputar) yang masih punya kategori belum ditinjau. */

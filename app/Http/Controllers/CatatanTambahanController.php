@@ -45,6 +45,9 @@ class CatatanTambahanController extends Controller
             'keterangan' => 'required|string|max:2000',
             'flag_level' => ['required', Rule::in(CatatanTambahan::FLAG_LEVELS)],
             'halaman'    => 'nullable|integer|min:1|max:65000',
+            // posisi komentar di halaman PDF (pecahan lebar/tinggi halaman)
+            'pos_x'      => 'nullable|numeric|between:0,1',
+            'pos_y'      => 'nullable|numeric|between:0,1',
         ], [
             'item.required'       => 'Nama item wajib diisi.',
             'item.max'            => 'Nama item maksimal ' . CatatanTambahan::MAX_ITEM . ' karakter (batas SIPOTRET).',

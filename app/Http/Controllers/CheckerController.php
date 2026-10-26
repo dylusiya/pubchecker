@@ -274,6 +274,10 @@ class CheckerController extends Controller
             'items.*.kriteria_id' => 'required|string',
             'items.*.status'      => ['required', Rule::in(DetailPemeriksaan::STATUS_VERIFIKASI)],
             'items.*.keterangan'  => 'nullable|string|max:2000|required_if:items.*.status,' . DetailPemeriksaan::STATUS_TIDAK_SESUAI,
+            // penanda di halaman PDF (opsional; tidak dikirim = tidak diubah)
+            'items.*.pin_halaman' => 'nullable|integer|min:1|max:65000',
+            'items.*.pin_x'       => 'nullable|numeric|between:0,1',
+            'items.*.pin_y'       => 'nullable|numeric|between:0,1',
         ], $this->pesanVerifikasi('items.*.'));
 
         DB::transaction(function () use ($hasil, $data) {
@@ -285,6 +289,28 @@ class CheckerController extends Controller
         });
 
         return response()->json(['ok' => true, 'summary' => $this->summaryOf($hasil)]);
+    }
+
+    // ── PATCH /checker/hasil/{hasil}/pin ──────────────────────
+    // Penanda kriteria di halaman PDF disimpan langsung saat diklik (tidak menunggu Simpan Kategori),
+    // supaya tidak hilang bila halaman dimuat ulang. pin_halaman null = hapus penanda.
+    public function simpanPin(Request $request, HasilPemeriksaan $hasil): JsonResponse
+    {
+        $data = $request->validate([
+            'kriteria_id' => 'required|string',
+            'pin_halaman' => 'nullable|integer|min:1|max:65000',
+            'pin_x'       => 'nullable|required_with:pin_halaman|numeric|between:0,1',
+            'pin_y'       => 'nullable|required_with:pin_halaman|numeric|between:0,1',
+        ]);
+        $ada = !empty($data['pin_halaman']);
+
+        $hasil->detail()->where('kriteria_id', $data['kriteria_id'])->update([
+            'pin_halaman' => $ada ? $data['pin_halaman'] : null,
+            'pin_x'       => $ada ? $data['pin_x'] : null,
+            'pin_y'       => $ada ? $data['pin_y'] : null,
+        ]);
+
+        return response()->json(['ok' => true]);
     }
 
     // ── GET /checker/hasil/{hasil}/tinjau ─────────────────────
@@ -342,6 +368,7 @@ class CheckerController extends Controller
                         : null,
                     'reviewed'  => $d->ditinjau_at !== null,
                     'lokasi'    => $d->lokasi ?? [],
+                    'pin'       => $d->pinArray(),
                 ];
             })->values(),
         ])->values();
@@ -375,13 +402,28 @@ class CheckerController extends Controller
      */
     private function dataVerifikasi(array $item): array
     {
-        $keterangan = trim((string) ($item['keterangan'] ?? ''));
+        $keterangan  = trim((string) ($item['keterangan'] ?? ''));
+        $tidakSesuai = $item['status'] === DetailPemeriksaan::STATUS_TIDAK_SESUAI;
 
-        return [
+        $data = [
             'status'      => $item['status'],
-            'keterangan'  => $item['status'] === DetailPemeriksaan::STATUS_TIDAK_SESUAI && $keterangan !== '' ? $keterangan : null,
+            'keterangan'  => $tidakSesuai && $keterangan !== '' ? $keterangan : null,
             'ditinjau_at' => now(),
         ];
+
+        // Penanda di PDF hanya untuk Tidak Sesuai; bila tidak dikirim (mis. "salin ke semua publikasi") dibiarkan
+        if (!$tidakSesuai) {
+            $data += ['pin_halaman' => null, 'pin_x' => null, 'pin_y' => null];
+        } elseif (array_key_exists('pin_halaman', $item)) {
+            $ada   = !empty($item['pin_halaman']) && isset($item['pin_x'], $item['pin_y']);
+            $data += [
+                'pin_halaman' => $ada ? $item['pin_halaman'] : null,
+                'pin_x'       => $ada ? $item['pin_x'] : null,
+                'pin_y'       => $ada ? $item['pin_y'] : null,
+            ];
+        }
+
+        return $data;
     }
 
     private function pesanVerifikasi(string $prefix = ''): array
