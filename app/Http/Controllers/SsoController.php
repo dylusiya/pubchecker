@@ -2,31 +2,68 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Hash;
-use App\Models\User;
+use Illuminate\Support\Str;
 
+/**
+ * Login via SSO BPS (Keycloak accounts.bps.go.id, OpenID Connect Authorization Code Flow).
+ * Sama dengan sandaran-hati:
+ *
+ * 1. redirect(): kirim browser ke halaman login Keycloak dengan `state` acak.
+ * 2. callback(): Keycloak kembali membawa `code` → tukar jadi token → ambil /userinfo
+ *    → login user lokal (dicocokkan lewat username, lalu email).
+ * 3. logout(): akhiri sesi lokal + sesi Keycloak (id_token_hint), kembali lewat callback.
+ *
+ * Keycloak menolak redirect ke localhost, jadi instance lokal memakai callback production
+ * dengan state berawalan "<key>~"; callback production meneruskannya balik (forwardTarget()).
+ */
 class SsoController extends Controller
 {
-    /** Kode aplikasi di broker SSO kalsel.web.bps.go.id/sso_new (harus terdaftar di Sso.php sso_new). */
-    private const SSO_APP = 'pubchecker';
-
-    protected $baseUrl;
-    protected $realm;
-    protected $clientId;
-    protected $clientSecret;
-    protected $redirectUri;
-
-    public function __construct()
+    public static function enabled(): bool
     {
-        $this->baseUrl = config('services.sso.base_url');
-        $this->realm = config('services.sso.realm');
-        $this->clientId = config('services.sso.client_id');
-        $this->clientSecret = config('services.sso.client_secret');
-        $this->redirectUri = config('services.sso.redirect_uri');
+        return (bool) config('services.sso.client_id');
+    }
+
+    public static function endpoint(string $name): string
+    {
+        $base = rtrim(config('services.sso.keycloak_url'), '/');
+
+        return "{$base}/realms/".config('services.sso.realm')."/protocol/openid-connect/{$name}";
+    }
+
+    public static function redirectUri(): string
+    {
+        return config('services.sso.redirect_uri') ?: route('sso.callback');
+    }
+
+    /**
+     * State acak, berawalan "<key>~" bila SSO_STATE_PREFIX diisi agar callback production
+     * tahu harus meneruskan respons ke instance tersebut (lihat forwardTarget()).
+     */
+    public static function newState(): string
+    {
+        $prefix = config('services.sso.state_prefix');
+
+        return ($prefix ? $prefix.'~' : '').Str::random(40);
+    }
+
+    /**
+     * URL logout Keycloak (RP-initiated). Kembali lewat callback (tanpa `code`), yang lalu
+     * meneruskan/mengarahkan ke halaman login — cukup satu URL yang di-whitelist di Keycloak.
+     */
+    public static function logoutUrl(?string $idToken): string
+    {
+        return self::endpoint('logout').'?'.http_build_query(array_filter([
+            'post_logout_redirect_uri' => self::redirectUri(),
+            'id_token_hint' => $idToken,
+            'client_id' => config('services.sso.client_id'),
+            'state' => self::newState(),
+        ]));
     }
 
     /**
@@ -34,10 +71,7 @@ class SsoController extends Controller
      */
     public function index()
     {
-        if (Auth::check()) {
-            return redirect()->route('dashboard');
-        }
-        return redirect()->route('login');
+        return redirect()->route(Auth::check() ? 'dashboard' : 'login');
     }
 
     /**
@@ -45,268 +79,186 @@ class SsoController extends Controller
      */
     public function login()
     {
-        // Jika sudah login, redirect ke dashboard
         if (Auth::check()) {
             return redirect()->route('dashboard');
         }
 
-        // Tampilkan halaman login
         return view('auth.login');
     }
 
     /**
-     * Redirect ke SSO BPS
-     * URL: https://kalsel.web.bps.go.id/sso_new/?app=pubchecker
+     * Redirect ke halaman login Keycloak
      */
-    public function redirect()
+    public function redirect(Request $request)
     {
-        // Jika sudah login, redirect ke dashboard
+        abort_unless(self::enabled(), 404);
+
         if (Auth::check()) {
             return redirect()->route('dashboard');
         }
 
-        // Redirect ke broker sso_new; app=pubchecker → sso_new mengembalikan ke /pubchecker/sso/callback
-        $ssoUrl = 'https://kalsel.web.bps.go.id/sso_new/?app=' . self::SSO_APP;
-        
-        Log::info('Redirecting to SSO', ['url' => $ssoUrl]);
-        
-        return redirect($ssoUrl);
+        // State acak per login, dicek di callback untuk mencegah login CSRF
+        $state = self::newState();
+        $request->session()->put('sso_state', $state);
+
+        return redirect()->away(self::endpoint('auth').'?'.http_build_query([
+            'response_type' => 'code',
+            'client_id' => config('services.sso.client_id'),
+            'redirect_uri' => self::redirectUri(),
+            'scope' => config('services.sso.scope'),
+            'state' => $state,
+        ]));
     }
 
     /**
-     * Callback dari sso_new controller CodeIgniter
-     * Menerima: username, token, nip, nama, email dari sso_new
+     * Callback dari Keycloak
      */
     public function callback(Request $request)
     {
-        try {
-            // Log SEMUA data yang diterima dari sso_new
-            Log::info('=== SSO CALLBACK RECEIVED ===');
-            Log::info('All Request Data:', $request->all());
-            Log::info('Request Method:', ['method' => $request->method()]);
-            Log::info('Request Headers:', $request->headers->all());
-            
-            // Validasi parameter yang dikirim dari sso_new
-            if (!$request->has('username') || !$request->has('token')) {
-                Log::error('Missing required parameters', [
-                    'has_username' => $request->has('username'),
-                    'has_token' => $request->has('token'),
-                    'all_params' => array_keys($request->all())
-                ]);
-                return redirect()->route('login')->with('error', 'Parameter tidak lengkap dari SSO');
-            }
-    
-            $username = $request->username;
-            $token = $request->token;
-            
-            Log::info('Processing SSO login', [
-                'username' => $username,
-                'token_length' => strlen($token),
-                'token_preview' => substr($token, 0, 20) . '...'
-            ]);
-    
-            // Verifikasi token ke Keycloak untuk keamanan
-            $userInfoUrl = $this->baseUrl . '/realms/' . $this->realm . '/protocol/openid-connect/userinfo';
-            
-            Log::info('Verifying token to Keycloak', ['url' => $userInfoUrl]);
-            
-            $userResponse = Http::withToken($token)
-                ->timeout(10)
-                ->get($userInfoUrl);
-    
-            if (!$userResponse->successful()) {
-                Log::error('Token verification failed', [
-                    'status' => $userResponse->status(),
-                    'body' => $userResponse->body(),
-                    'headers' => $userResponse->headers()
-                ]);
-                return redirect()->route('login')
-                    ->with('error', 'Token tidak valid atau sudah expired. Silakan login ulang.');
-            }
-    
-            $userData = $userResponse->json();
-            
-            // Log data lengkap dari Keycloak
-            Log::info('=== DATA FROM KEYCLOAK ===');
-            Log::info('Full User Data:', $userData);
-            
-            // Buat atau update user
-            $user = $this->findOrCreateUser($userData, $request);
-    
-            if ($user) {
-                Auth::login($user);
-                $request->session()->regenerate();
-                
-                Log::info('User logged in successfully', [
-                    'user_id' => $user->id,
-                    'username' => $user->username,
-                    'name' => $user->name
-                ]);
-                
-                return redirect()->route('dashboard')->with('success', 'Login berhasil! Selamat datang ' . $user->name);
-            }
-    
-            Log::error('Failed to create/update user');
-            return redirect()->route('login')->with('error', 'Gagal membuat/update user. Silakan hubungi administrator.');
-    
-        } catch (\Exception $e) {
-            Log::error('SSO Callback Error', [
-                'message' => $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine(),
-                'trace' => $e->getTraceAsString()
-            ]);
-            
-            return redirect()->route('login')
-                ->with('error', 'Terjadi kesalahan saat proses login SSO: ' . $e->getMessage());
+        abort_unless(self::enabled(), 404);
+
+        // Respons milik instance lain (mis. localhost) → teruskan ke sana
+        if ($target = $this->forwardTarget((string) $request->input('state'))) {
+            return redirect()->away($target.'/sso/callback?'.$request->getQueryString());
         }
+
+        // Tanpa code/error = kembali dari logout Keycloak
+        if (! $request->filled('code') && ! $request->filled('error')) {
+            return redirect()->route('login');
+        }
+
+        if ($request->filled('error')) {
+            return $this->fail('Login SSO dibatalkan atau ditolak: '.$request->input('error_description', $request->input('error')));
+        }
+
+        $expectedState = $request->session()->pull('sso_state', '');
+        if ($expectedState === '' || ! hash_equals($expectedState, (string) $request->input('state'))) {
+            return $this->fail('Sesi login SSO tidak valid atau kedaluwarsa. Silakan ulangi login.');
+        }
+
+        try {
+            $token = Http::asForm()->timeout(15)->post(self::endpoint('token'), [
+                'grant_type' => 'authorization_code',
+                'client_id' => config('services.sso.client_id'),
+                'client_secret' => config('services.sso.client_secret'),
+                'code' => $request->input('code'),
+                'redirect_uri' => self::redirectUri(),
+            ]);
+
+            if (! $token->successful() || ! $token->json('access_token')) {
+                Log::warning('SSO token exchange failed', ['status' => $token->status(), 'body' => $token->body()]);
+
+                return $this->fail('Gagal mendapatkan token dari SSO BPS.');
+            }
+
+            $userinfo = Http::withToken($token->json('access_token'))->timeout(15)->get(self::endpoint('userinfo'));
+
+            if (! $userinfo->successful()) {
+                Log::warning('SSO userinfo failed', ['status' => $userinfo->status(), 'body' => $userinfo->body()]);
+
+                return $this->fail('Gagal mengambil profil pengguna dari SSO BPS.');
+            }
+        } catch (\Throwable $e) {
+            Log::error('SSO request error: '.$e->getMessage());
+
+            return $this->fail('Tidak dapat terhubung ke server SSO BPS.');
+        }
+
+        $profile = $userinfo->json() ?: [];
+
+        // /userinfo SSO baru hanya berisi nama/username/email; atribut pegawai (NIP, jabatan,
+        // wilayah, ...) diambil dari API Pegawai. Gagal → tetap login, data lama tidak ditimpa.
+        $username = $profile['preferred_username'] ?? $profile['username'] ?? null;
+        $pegawai = $username ? $this->fetchPegawai($username) : [];
+        Log::info('SSO login', ['username' => $username, 'api_pegawai' => $pegawai !== []]);
+
+        $user = $this->findOrCreateUser(array_merge($profile, $pegawai));
+
+        if (! $user) {
+            return $this->fail('Gagal membuat/update user dari akun SSO. Silakan hubungi administrator.');
+        }
+
+        Auth::login($user);
+        $request->session()->regenerate();
+        // Disimpan agar logout juga mengakhiri sesi Keycloak (id_token_hint)
+        $request->session()->put('sso_id_token', $token->json('id_token'));
+
+        Log::info('User logged in via SSO', ['user_id' => $user->id, 'username' => $user->username]);
+
+        return redirect()->intended(route('dashboard'))
+            ->with('success', 'Login berhasil! Selamat datang '.$user->name);
     }
 
     /**
-     * Temukan atau buat user baru
+     * Temukan (username, lalu email) atau buat user baru, dan sinkronkan profil dari Keycloak.
      */
-    protected function findOrCreateUser($userData, $request)
+    protected function findOrCreateUser(array $profile): ?User
     {
         try {
-            $username = $userData['username'] ?? $request->username;
-            $email = $userData['email'] ?? $request->email ?? null;
+            $username = $profile['username'] ?? $profile['preferred_username'] ?? null;
+            $email = strtolower(trim($profile['email'] ?? '')) ?: null;
 
-            if (!$username) {
-                Log::error('Username not found in user data');
+            if (! $username) {
+                Log::error('SSO profile has no username', ['keys' => array_keys($profile)]);
+
                 return null;
             }
 
-            Log::info('Finding or creating user', ['username' => $username]);
+            $user = User::where('username', $username)->first()
+                ?? ($email ? User::whereRaw('LOWER(email) = ?', [$email])->first() : null);
 
-            $user = User::where('username', $username)->first();
-
-            // Siapkan data untuk disimpan - ambil SEMUA data dari Keycloak
-            $userDataToSave = [
-                'name' => $userData['name'] ?? $request->nama ?? $username,
-                'first_name' => $userData['first-name'] ?? null,
-                'last_name' => $userData['last-name'] ?? null,
+            $data = [
+                'name' => $profile['name'] ?? $username,
+                'first_name' => $profile['first-name'] ?? $profile['given_name'] ?? null,
+                'last_name' => $profile['last-name'] ?? $profile['family_name'] ?? null,
                 'email' => $email,
                 'username' => $username,
             ];
 
-            // NIP
-            if (isset($userData['nip-lama'])) {
-                $userDataToSave['nip'] = $userData['nip-lama'];
+            if (isset($profile['nip-lama'])) {
+                $data['nip'] = $profile['nip-lama'];
+            }
+            if (isset($profile['nip'])) {
+                $data['nip_baru'] = $profile['nip'];
             }
 
-            if (isset($userData['nip'])) {
-                $userDataToSave['nip_baru'] = $userData['nip'];
+            // Kode organisasi → kode provinsi/kabupaten. Mis. 6301 → prov 6300, kab 6301;
+            // 6300 → prov 6300, kab null (reset bila user sebelumnya di kabupaten).
+            // Hanya disentuh bila klaim ada, agar data wilayah tidak terhapus kalau SSO tidak mengirimnya.
+            if (! empty($profile['organisasi'])) {
+                $kodeOrg = (string) $profile['organisasi'];
+                $data['kode_organisasi'] = $kodeOrg;
+                $data['kode_provinsi'] = substr($kodeOrg, 0, 2).'00';
+                $data['kode_kabupaten'] = substr($kodeOrg, 2, 2) !== '00' ? substr($kodeOrg, 0, 4) : null;
             }
 
-            // Kode Organisasi dan extract Kode Provinsi/Kabupaten
-            if (isset($userData['organisasi'])) {
-                $kodeOrg = $userData['organisasi'];
-                $userDataToSave['kode_organisasi'] = $kodeOrg;
-                
-                // Extract kode provinsi (2 digit pertama + "00")
-                // Contoh: 6301 → 6300, 6371 → 6300
-                $userDataToSave['kode_provinsi'] = substr($kodeOrg, 0, 2) . '00';
-                
-                // Extract kode kabupaten dari kode organisasi
-                // Format: 6301 (63 = provinsi, 01 = kabupaten)
-                // Jika 2 digit terakhir = 00, berarti provinsi (tidak ada kabupaten)
-                $lastTwoDigits = substr($kodeOrg, 2, 2);
-                
-                if ($lastTwoDigits != '00') {
-                    // Ada kabupaten: simpan 4 digit penuh
-                    $userDataToSave['kode_kabupaten'] = substr($kodeOrg, 0, 4);
-                } else {
-                    // 👇 TAMBAHAN: Provinsi saja: PAKSA set kode_kabupaten = null
-                    // Ini penting untuk reset jika user sebelumnya kabupaten
-                    $userDataToSave['kode_kabupaten'] = null;
+            foreach (['provinsi', 'kabupaten'] as $field) {
+                if (isset($profile[$field])) {
+                    $data[$field] = $profile[$field];
                 }
+            }
+
+            foreach (['golongan' => 'golongan', 'jabatan' => 'jabatan', 'foto' => 'foto', 'alamat-kantor' => 'alamat_kantor'] as $claim => $column) {
+                if (isset($profile[$claim])) {
+                    $data[$column] = $profile[$claim];
+                }
+            }
+            if (isset($profile['eselon'])) {
+                $data['eselon'] = in_array($profile['eselon'], ['-', ''], true) ? null : $profile['eselon'];
+            }
+
+            if (! $user) {
+                $data['password'] = bcrypt(Str::random(40)); // tidak dipakai; user SSO login lewat Keycloak
+                $user = User::create($data);
+                Log::info('New SSO user created', ['id' => $user->id, 'username' => $username]);
             } else {
-                // 👇 TAMBAHAN: Jika tidak ada organisasi sama sekali, reset semua
-                $userDataToSave['kode_organisasi'] = null;
-                $userDataToSave['kode_provinsi'] = null;
-                $userDataToSave['kode_kabupaten'] = null;
-            }
-
-            // Nama Provinsi dan Kabupaten
-            if (isset($userData['provinsi'])) {
-                $userDataToSave['provinsi'] = $userData['provinsi'];
-            } else {
-                // 👇 TAMBAHAN: Reset provinsi jika tidak ada
-                $userDataToSave['provinsi'] = null;
-            }
-
-            if (isset($userData['kabupaten'])) {
-                $userDataToSave['kabupaten'] = $userData['kabupaten'];
-            } else {
-                // 👇 TAMBAHAN: Reset kabupaten jika tidak ada
-                $userDataToSave['kabupaten'] = null;
-            }
-
-            // Golongan
-            if (isset($userData['golongan'])) {
-                $userDataToSave['golongan'] = $userData['golongan'];
-            }
-
-            // Jabatan
-            if (isset($userData['jabatan'])) {
-                $userDataToSave['jabatan'] = $userData['jabatan'];
-            }
-
-            // Eselon - ubah "-" jadi null
-            if (isset($userData['eselon'])) {
-                $userDataToSave['eselon'] = $userData['eselon'] == '-' ? null : $userData['eselon'];
-            }
-
-            // Foto
-            if (isset($userData['foto'])) {
-                $userDataToSave['foto'] = $userData['foto'];
-            }
-
-            // Alamat Kantor
-            if (isset($userData['alamat-kantor'])) {
-                $userDataToSave['alamat_kantor'] = $userData['alamat-kantor'];
-            }
-
-            // Log data yang akan disimpan
-            Log::info('=== DATA TO SAVE ===', $userDataToSave);
-
-            if (!$user) {
-                // Buat user baru
-                $userDataToSave['password'] = bcrypt(bin2hex(random_bytes(16)));
-                $user = User::create($userDataToSave);
-                Log::info('New user created', [
-                    'id' => $user->id,
-                    'username' => $username,
-                    'name' => $user->name,
-                    'kode_organisasi' => $user->kode_organisasi,
-                    'kode_provinsi' => $user->kode_provinsi,
-                    'kode_kabupaten' => $user->kode_kabupaten
-                ]);
-            } else {
-                // 👇 PENTING: Update user yang sudah ada
-                // Gunakan update() untuk REPLACE semua field (termasuk set null)
-                $user->update($userDataToSave);
-                
-                Log::info('User updated', [
-                    'id' => $user->id,
-                    'username' => $username,
-                    'name' => $user->name,
-                    'kode_organisasi_old' => $user->getOriginal('kode_organisasi'),
-                    'kode_organisasi_new' => $user->kode_organisasi,
-                    'kode_kabupaten_old' => $user->getOriginal('kode_kabupaten'),
-                    'kode_kabupaten_new' => $user->kode_kabupaten
-                ]);
+                $user->update($data);
             }
 
             return $user;
+        } catch (\Throwable $e) {
+            Log::error('Error creating/updating SSO user', ['message' => $e->getMessage()]);
 
-        } catch (\Exception $e) {
-            Log::error('Error creating/updating user', [
-                'message' => $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine(),
-                'trace' => $e->getTraceAsString()
-            ]);
             return null;
         }
     }
@@ -324,92 +276,124 @@ class SsoController extends Controller
             'password.required' => 'Password harus diisi',
         ]);
 
-        try {
-            Log::info('Local login attempt', ['username' => $request->username]);
+        $user = User::where('username', $request->username)->first();
 
-            // Cari user berdasarkan username
-            $user = User::where('username', $request->username)->first();
+        if (! $user || ! Hash::check($request->password, $user->password)) {
+            Log::warning('Local login failed', ['username' => $request->username]);
 
-            // Cek apakah user ada
-            if (!$user) {
-                Log::warning('Login local failed: User not found', ['username' => $request->username]);
-                return back()
-                    ->with('error', 'Username atau password salah')
-                    ->withInput($request->only('username'));
-            }
-
-            // Cek password
-            if (!Hash::check($request->password, $user->password)) {
-                Log::warning('Login local failed: Wrong password', [
-                    'username' => $request->username,
-                    'user_id' => $user->id
-                ]);
-                return back()
-                    ->with('error', 'Username atau password salah')
-                    ->withInput($request->only('username'));
-            }
-
-            // Login berhasil
-            Auth::login($user);
-            $request->session()->regenerate();
-
-            Log::info('User logged in via local login', [
-                'user_id' => $user->id,
-                'username' => $user->username,
-                'name' => $user->name
-            ]);
-
-            return redirect()->intended(route('dashboard'))
-                ->with('success', 'Login berhasil! Selamat datang ' . $user->name);
-
-        } catch (\Exception $e) {
-            Log::error('Local login error', [
-                'message' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-            return back()->with('error', 'Terjadi kesalahan saat login. Silakan coba lagi.');
+            return back()
+                ->with('error', 'Username atau password salah')
+                ->withInput($request->only('username'));
         }
+
+        Auth::login($user);
+        $request->session()->regenerate();
+
+        return redirect()->intended(route('dashboard'))
+            ->with('success', 'Login berhasil! Selamat datang '.$user->name);
     }
 
     /**
-     * Logout
+     * Logout lokal; bila masuk lewat SSO, akhiri juga sesi Keycloak.
      */
     public function logout(Request $request)
     {
-        // Safety check
-        if (!Auth::check()) {
-            Log::warning('Logout attempt but user not logged in');
-            return redirect()->route('login')->with('info', 'Anda sudah logout');
-        }
-        
-        $username = Auth::user()->username ?? null;
-        $name = Auth::user()->name ?? null;
-        
-        Log::info('User logging out', [
-            'username' => $username,
-            'name' => $name
-        ]);
-        
+        // Dibaca sebelum session di-invalidate
+        $ssoIdToken = $request->session()->get('sso_id_token');
+
         Auth::logout();
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 
-        Log::info('User logged out successfully', ['username' => $username]);
-
-        // Cek environment
-        $isLocal = config('app.env') === 'local' || 
-                   request()->getHost() === 'localhost' || 
-                   request()->getHost() === '127.0.0.1';
-        
-        if ($isLocal) {
-            return redirect()->route('login')->with('success', 'Anda telah logout');
+        if ($ssoIdToken && self::enabled()) {
+            return redirect()->away(self::logoutUrl($ssoIdToken));
         }
 
-        // Production: Redirect ke SSO logout
-        $ssoLogoutUrl = 'https://kalsel.web.bps.go.id/sso_new/?app=' . self::SSO_APP . '&logout=1';
-        
-        Log::info('Redirecting to SSO logout', ['url' => $ssoLogoutUrl]);
-        
-        return redirect($ssoLogoutUrl);
+        return redirect()->route('login')->with('success', 'Anda telah logout');
+    }
+
+    /**
+     * Base URL instance lain pemilik respons ini, dari allowlist tetap
+     * services.sso.forward_targets (tidak pernah dari request — mencegah open redirect).
+     */
+    private function forwardTarget(string $state): ?string
+    {
+        $key = Str::contains($state, '~') ? Str::before($state, '~') : '';
+
+        if ($key === '' || $key === (string) config('services.sso.state_prefix')) {
+            return null;
+        }
+
+        $target = config('services.sso.forward_targets')[$key] ?? null;
+
+        return $target ? rtrim($target, '/') : null;
+    }
+
+    /**
+     * Atribut pegawai dari API Pegawai BPS (GET /realms/{realm}/api/username/{username}),
+     * memakai token service account client ini (grant client_credentials). Hasilnya
+     * dipetakan ke nama klaim SSO lama agar findOrCreateUser() tetap sama.
+     * Contoh atribut: employeeID 340057045, employeeNumber 1992..., org 92000,
+     * provinceCode 63, cityCode 00 → kode_organisasi 630000092000 (format SSO lama).
+     */
+    protected function fetchPegawai(string $username): array
+    {
+        try {
+            $base = rtrim(config('services.sso.keycloak_url'), '/').'/realms/'.config('services.sso.realm');
+
+            $token = Http::asForm()->timeout(15)
+                ->withBasicAuth(config('services.sso.client_id'), config('services.sso.client_secret'))
+                ->post("{$base}/protocol/openid-connect/token", ['grant_type' => 'client_credentials'])
+                ->json('access_token');
+
+            if (! $token) {
+                Log::warning('API Pegawai: gagal mengambil token service account');
+
+                return [];
+            }
+
+            $res = Http::withToken($token)->acceptJson()->timeout(15)
+                ->get("{$base}/api/username/".rawurlencode($username));
+
+            $attr = collect($res->json() ?: [])->firstWhere('username', $username)['attributes'] ?? null;
+
+            if (! $res->successful() || ! $attr) {
+                Log::warning('API Pegawai: data tidak ditemukan', ['username' => $username, 'status' => $res->status()]);
+
+                return [];
+            }
+        } catch (\Throwable $e) {
+            Log::warning('API Pegawai error: '.$e->getMessage());
+
+            return [];
+        }
+
+        $get = fn (string $key) => isset($attr[$key]) ? (string) (is_array($attr[$key]) ? ($attr[$key][0] ?? '') : $attr[$key]) : null;
+
+        $prov = $get('provinceCode');
+        $city = $get('cityCode');
+        $org = $get('org');
+
+        return array_filter([
+            'first-name' => $get('firstName'),
+            'last-name' => $get('lastName'),
+            'nip-lama' => $get('employeeID'),
+            'nip' => $get('employeeNumber'),
+            'organisasi' => ($prov !== null && $city !== null && $org !== null)
+                ? str_pad($prov, 2, '0', STR_PAD_LEFT).str_pad($city, 2, '0', STR_PAD_LEFT).str_pad($org, 8, '0', STR_PAD_LEFT)
+                : null,
+            'provinsi' => $get('province'),
+            'kabupaten' => $get('city'),
+            'jabatan' => $get('jobTitle'),
+            'golongan' => $get('jobGrade'),
+            'eselon' => $get('echelon'),
+            'foto' => $get('photo'),
+            'alamat-kantor' => $get('officeAddress'),
+        ], fn ($v) => $v !== null);
+    }
+
+    private function fail(string $message)
+    {
+        return redirect()->route('login')->with('error', $message);
     }
 }

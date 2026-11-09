@@ -28,7 +28,6 @@ Route::get('/login', [SsoController::class, 'login'])->name('login');
 Route::prefix('sso')->name('sso.')->group(function () {
     Route::get('/redirect',  [SsoController::class, 'redirect'])->name('redirect');
     Route::get('/callback',  [SsoController::class, 'callback'])->name('callback');
-    Route::post('/callback', [SsoController::class, 'callback']);
 });
 
 Route::post('/login/local', [SsoController::class, 'loginLocal'])->name('login.local');
@@ -44,6 +43,12 @@ Route::middleware('auth')->group(function () {
 
     // Dashboard & Profile
     Route::get('/dashboard', [HomeController::class,    'index'])->name('dashboard');
+    Route::get('/dashboard/sipotret/{wilayah}', [HomeController::class, 'sipotretMasalah'])
+        ->whereNumber('wilayah')->name('dashboard.sipotret');
+    Route::get('/dashboard/sipotret/file/{history}', [HomeController::class, 'sipotretFile'])
+        ->whereNumber('history')->name('dashboard.sipotret.file');
+    Route::post('/dashboard/sipotret/approve/{history?}', [HomeController::class, 'sipotretApprove'])
+        ->whereNumber('history')->name('dashboard.sipotret.approve');
     Route::get('/profile',   [ProfileController::class, 'index'])->name('profile.index');
 
     // Publication Checker
@@ -77,6 +82,8 @@ Route::middleware('auth')->group(function () {
     
     Route::get('/checker/bps/pdf-proxy', [BpsImportController::class, 'pdfProxy'])
         ->name('checker.bps.pdf_proxy');
+    Route::get('/checker/bps/cover-proxy', [BpsImportController::class, 'coverProxy'])
+        ->name('checker.bps.cover_proxy');
     Route::get('/checker/bps/stream', [CheckerController::class, 'stream'])
         ->name('checker.bps.stream');
 

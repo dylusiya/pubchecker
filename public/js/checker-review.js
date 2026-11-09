@@ -15,7 +15,11 @@
  *     summary:  object|null,   // referensi ke result.summary, di-update di tempat setelah tiap simpan
  *     url:      string,        // URL PDF untuk viewer (blob: lokal, proxied remote, atau /checker/hasil/{id}/pdf)
  *     cleanup:  function|null, // dipanggil saat pindah/selesai (mis. revoke blob URL)
+ *     usulanCatatan: array|null, // opsional: { item, keterangan, flag_level } — usulan catatan tambahan
+ *                                // (mis. item lainnya dari SIPOTRET periode lalu), dipakai lewat tombol "Pakai"
  *   }
+ * Item checks boleh membawa isian awal: selStatus/selKet (belum tersimpan sampai kategori disimpan)
+ * dan isianSipotret (teks asal isian, ditampilkan di kartu kriteria).
  */
 const CheckerReview = (() => {
     const STATUS_CLASS = {
@@ -616,6 +620,7 @@ const CheckerReview = (() => {
                 </div>
                 <div class="small fw-semibold mb-1">${esc(c.deskripsi)}</div>
                 ${c.autoCatatan ? `<div class="small text-secondary mb-1"><i class="ti ti-robot me-1"></i>${esc(c.autoCatatan)}</div>` : ''}
+                ${c.isianSipotret ? `<div class="small text-danger mb-1"><i class="ti ti-history me-1"></i>${esc(c.isianSipotret)}</div>` : ''}
                 ${lokasiButtons(c.lokasi)}
                 ${c.area ? `<div class="small text-muted mb-1"><i class="ti ti-current-location me-1"></i>Fokus area: ${esc(c.area)}</div>` : ''}
                 <div class="btn-group btn-group-sm w-100 mb-1" role="group">
@@ -1670,6 +1675,25 @@ const CheckerReview = (() => {
                     <button type="button" class="btn btn-sm btn-ghost-danger btn-icon" data-cat-hapus="${c.id}" title="Hapus"><i class="ti ti-trash"></i></button>
                 </div>`).join('')
             : '<div class="small text-secondary">Temuan di kategori ini yang tidak ada di daftar kriteria — dikirim ke SIPOTRET sebagai item lainnya.</div>';
+
+        // usulan dari luar (mis. item lainnya SIPOTRET periode lalu) — baru tersimpan setelah "Pakai" lalu Simpan
+        const usulan = (entry.usulanCatatan || []).map((u, i) => [u, i]).filter(([u]) => !u.dipakai);
+        if (usulan.length) {
+            box.insertAdjacentHTML('beforeend', `
+                <div class="border-top pt-1 mt-1 small">
+                    <div class="text-danger"><i class="ti ti-history"></i> Item lainnya dari SIPOTRET periode lalu:</div>
+                    ${usulan.map(([u, i]) => `
+                    <div class="d-flex gap-2 align-items-start mt-1">
+                        <div class="flex-fill" style="min-width:0;">
+                            <span class="fw-semibold">${esc(u.item)}</span>
+                            ${u.flag_level ? `<span class="badge ${LEVEL_BADGE[u.flag_level] || 'bg-secondary-lt'}">${esc(u.flag_level)}</span>` : ''}
+                            <div class="text-secondary">${esc(u.keterangan)}</div>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-warning py-0" data-cat-usulan="${i}"
+                                title="Isi form catatan tambahan dengan item ini (periksa dulu, lalu Simpan)">Pakai</button>
+                    </div>`).join('')}
+                </div>`);
+        }
     }
 
     /**
@@ -1812,6 +1836,18 @@ const CheckerReview = (() => {
         const t = e.target;
         // "Tambah": buka form kosong (juga keluar dari mode edit); klik lagi saat mode tambah = tutup
         if (t.closest('[data-cat-tambah]')) { bukaFormCatatan(catById('revCatForm')?.hidden || catEditId !== null); return true; }
+        const usulan = t.closest('[data-cat-usulan]');
+        if (usulan) {
+            const u = entries[fileIndex].usulanCatatan?.[+usulan.dataset.catUsulan];
+            if (!u) return true;
+            bukaFormCatatan(true);
+            catById('revCatItem').value = String(u.item || '').slice(0, 50);
+            if (u.flag_level) catById('revCatLevel').value = u.flag_level;
+            catById('revCatKet').value  = u.keterangan || '';
+            u.dipakai = true;
+            renderCatatanList();
+            return true;
+        }
         const edit = t.closest('[data-cat-edit]');
         if (edit) {
             const c = (entries[fileIndex].catatan || []).find(x => x.id === +edit.dataset.catEdit);

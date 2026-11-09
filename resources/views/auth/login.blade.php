@@ -43,12 +43,14 @@
                         @endif
                     @endforeach
 
-                    {{-- SSO --}}
-                    <a href="{{ route('sso.redirect') }}" class="btn btn-primary w-100 btn-lg">
-                        <i class="ti ti-shield-check"></i> Login dengan SSO BPS
-                    </a>
+                    {{-- SSO (tampil bila SSO_CLIENT_ID diisi) --}}
+                    @if(\App\Http\Controllers\SsoController::enabled())
+                        <a href="{{ route('sso.redirect') }}" class="btn btn-primary w-100 btn-lg">
+                            <i class="ti ti-shield-check"></i> Login dengan SSO BPS
+                        </a>
 
-                    <div class="hr-text">atau</div>
+                        <div class="hr-text">atau</div>
+                    @endif
 
                     {{-- Login lokal --}}
                     <form method="POST" action="{{ route('login.local') }}" autocomplete="off">

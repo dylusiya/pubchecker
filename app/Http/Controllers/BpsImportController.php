@@ -8,6 +8,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Symfony\Component\HttpFoundation\HeaderUtils;
 use App\Services\BpsApiService;
 use App\Services\PdfCheckerService;
 use App\Services\ExcelExportService;
@@ -100,6 +101,7 @@ class BpsImportController extends Controller
 
         $items = array_map(fn($pub) => array_merge($pub, [
             'has_pdf' => !empty($pub['pdf']),
+            'cover'   => $this->coverLewatProxy($pub['cover'] ?? null),
         ]), $result['items']);
 
         return response()->json([
@@ -296,7 +298,7 @@ class BpsImportController extends Controller
                 'sch_date'    => $pub['sch_date']   ?? $pub['schedule_date'] ?? null,
                 'rl_date'     => $pub['rl_date']    ?? $pub['rl']       ?? $pub['release_date'] ?? null,
                 'updt_date'   => $pub['updt_date']  ?? $pub['update_date'] ?? null,
-                'cover'       => $pub['cover']      ?? $pub['thumbnail'] ?? null,
+                'cover'       => $this->coverLewatProxy($pub['cover'] ?? $pub['thumbnail'] ?? null),
                 'pdf'         => $pub['pdf']        ?? $pub['pdffile']  ?? null,
                 'has_pdf'     => !empty($pub['pdf'] ?? $pub['pdffile']),
                 'size'        => $pub['size']       ?? $this->formatFileSize($pub['filesize'] ?? 0),
@@ -434,6 +436,43 @@ class BpsImportController extends Controller
         return round($bytes, 2) . ' ' . $units[$pow];
     }
 
+    /** URL sampul BPS → lewat coverProxy, supaya semua halaman (import, detail, batch) memuat sampul dari server sendiri. */
+    private function coverLewatProxy(?string $cover): ?string
+    {
+        return $cover ? route('checker.bps.cover_proxy', ['url' => $cover]) : null;
+    }
+
+    /** Sampul publikasi lewat server — browser sering gagal memuat langsung dari webapi.bps.go.id. */
+    public function coverProxy(Request $request)
+    {
+        $url  = (string) $request->query('url');
+        $host = strtolower((string) parse_url($url, PHP_URL_HOST));
+        if ($host !== 'bps.go.id' && !str_ends_with($host, '.bps.go.id')) {
+            abort(403, 'URL tidak diizinkan');
+        }
+
+        $gambar = Cache::remember('bps_cover.' . md5($url), now()->addDay(), function () use ($url) {
+            try {
+                $res = Http::timeout(20)->withHeaders(['User-Agent' => 'Mozilla/5.0'])->get($url);
+            } catch (\Throwable $e) {
+                return null; // webapi tidak terjangkau
+            }
+            $type = strtok((string) $res->header('Content-Type'), ';');
+            return $res->successful() && str_starts_with($type, 'image/')
+                ? ['type' => $type, 'body' => base64_encode($res->body())]
+                : null;
+        });
+        if (!$gambar) {
+            Cache::forget('bps_cover.' . md5($url)); // jangan simpan kegagalan sehari penuh
+            abort(404);
+        }
+
+        return response(base64_decode($gambar['body']), 200, [
+            'Content-Type'  => $gambar['type'],
+            'Cache-Control' => 'private, max-age=86400',
+        ]);
+    }
+
     public function pdfProxy(Request $request)
     {
         $url = $request->query('url');
@@ -456,9 +495,17 @@ class BpsImportController extends Controller
         // Forward status (200 atau 206 Partial Content)
         $status = $response->status();
 
+        // ?nama=<judul> → diunduh sebagai "<judul>.pdf"; tanpa nama → tampil di viewer (inline)
+        $nama = trim(preg_replace('/[\\\\\/:*?"<>|\x00-\x1F]+/u', ' ', (string) $request->query('nama')));
+        $nama = trim(preg_replace('/\s+/u', ' ', mb_substr($nama, 0, 150)), ' .');
+        $disposition = $nama !== ''
+            ? HeaderUtils::makeDisposition(HeaderUtils::DISPOSITION_ATTACHMENT, "{$nama}.pdf",
+                (preg_replace('/[^\x20-\x7E]/u', '_', $nama) ?: 'publikasi') . '.pdf')
+            : 'inline; filename="publication.pdf"';
+
         $responseHeaders = array_filter([
             'Content-Type'        => 'application/pdf',
-            'Content-Disposition' => 'inline; filename="publication.pdf"',
+            'Content-Disposition' => $disposition,
             'Cache-Control'       => 'private, max-age=3600',
             'X-Frame-Options'     => 'SAMEORIGIN',
             'Accept-Ranges'       => 'bytes',

@@ -304,12 +304,13 @@
             <label class="form-label mb-1" for="spBulan">Periode pemeriksaan</label>
             <select class="form-select" id="spBulan">
               @foreach(['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'] as $i => $b)
-                <option value="{{ $i + 1 }}" @selected($i + 1 === (int) date('n'))>{{ $b }}</option>
+                {{-- periode bawaan bisa dikirim dari halaman Publikasi Bermasalah (?bulan=&tahun=) --}}
+                <option value="{{ $i + 1 }}" @selected($i + 1 === (int) request('bulan', date('n')))>{{ $b }}</option>
               @endforeach
             </select>
           </div>
           <div class="col-auto">
-            <input type="number" class="form-control" id="spTahun" value="{{ date('Y') }}" min="2000" max="2100" style="width:100px;">
+            <input type="number" class="form-control" id="spTahun" value="{{ (int) request('tahun', date('Y')) }}" min="2000" max="2100" style="width:100px;">
           </div>
           <div class="col">
             <small class="text-secondary">
@@ -623,7 +624,10 @@ const Sipotret = (() => {
             muat();
         });
         // muat ulang halaman setelah ada kiriman supaya penanda "SIPOTRET" di daftar ikut tampil
-        $('modalSipotret').addEventListener('hidden.bs.modal', () => { if (terkirim) location.reload(); });
+        // (tanpa ?sipotret=1 supaya modal tidak terbuka lagi)
+        $('modalSipotret').addEventListener('hidden.bs.modal', () => { if (terkirim) location.href = location.pathname; });
+        // datang dari pemeriksaan ulang Publikasi Bermasalah → langsung buka modal kirim dengan periode terisi
+        if (new URLSearchParams(location.search).has('sipotret')) buka();
     });
 
     return { buka, kirim };

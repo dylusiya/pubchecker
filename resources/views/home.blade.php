@@ -6,11 +6,7 @@
 
     $totalSesi    = SesiPemeriksaan::count();
     $totalFile    = HasilPemeriksaan::count();
-    $totalOk      = HasilPemeriksaan::where('status_akhir', 'ok')->count();
-    $totalMasalah = HasilPemeriksaan::where('status_akhir', 'masalah')->count();
-    $totalWarn    = HasilPemeriksaan::where('status_akhir', 'perlu_dicek')->count();
     $recentSesi   = SesiPemeriksaan::latest()->take(10)->get();
-    $pct          = fn($n) => $totalFile ? round($n / $totalFile * 100) : 0;
     $user         = Auth::user();
 @endphp
 
@@ -34,27 +30,9 @@
         <div class="card">
             <div class="card-body">
                 <h3 class="h2 mb-1">Selamat datang, {{ $user->first_name ?? $user->name }}</h3>
-                <p class="text-secondary">
+                <p class="text-secondary mb-0">
                     Sistem pemeriksaan kover dan kelengkapan publikasi BPS Provinsi Kalimantan Selatan.
                 </p>
-                <div class="row g-3 mt-2">
-                    <div class="col-6">
-                        <div class="subheader">File lolos semua kriteria</div>
-                        <div class="d-flex align-items-baseline gap-2">
-                            <div class="h3 mb-0">{{ $pct($totalOk) }}%</div>
-                            <div class="text-secondary small">{{ $totalOk }} file</div>
-                        </div>
-                        <div class="progress progress-sm mt-2"><div class="progress-bar bg-green" style="width: {{ $pct($totalOk) }}%"></div></div>
-                    </div>
-                    <div class="col-6">
-                        <div class="subheader">Ada masalah</div>
-                        <div class="d-flex align-items-baseline gap-2">
-                            <div class="h3 mb-0">{{ $pct($totalMasalah) }}%</div>
-                            <div class="text-secondary small">{{ $totalMasalah }} file</div>
-                        </div>
-                        <div class="progress progress-sm mt-2"><div class="progress-bar bg-red" style="width: {{ $pct($totalMasalah) }}%"></div></div>
-                    </div>
-                </div>
             </div>
         </div>
     </div>
@@ -68,44 +46,118 @@
                 sub="Publikasi yang sudah dicek" />
     </div>
 
-    {{-- Ringkasan status --}}
-    <div class="col-sm-6 col-lg-4">
-        <div class="card card-sm">
-            <div class="card-body">
-                <div class="row align-items-center">
-                    <div class="col-auto"><span class="bg-green text-white avatar"><i class="ti ti-circle-check fs-2"></i></span></div>
-                    <div class="col">
-                        <div class="fw-medium">{{ $totalOk }} Semua OK</div>
-                        <div class="text-secondary">Lolos semua kriteria</div>
-                    </div>
+    {{-- Rekap Pasca Rilis SIPOTRET: publikasi bermasalah per kab/kota per bulan & status centang perbaikan --}}
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <div>
+                    <h3 class="card-title">Publikasi Bermasalah per Kab/Kota — SIPOTRET</h3>
+                    <div class="card-subtitle">Sel: <b>sudah approve / bermasalah</b> (publikasi yang punya catatan Pasca Rilis pada periode tsb) · <i class="ti ti-clock"></i> = file perbaikan menunggu approve</div>
+                </div>
+                <div class="card-actions">
+                    <form method="get" class="d-flex gap-2">
+                        <select name="tahun" class="form-select form-select-sm" onchange="this.form.submit()">
+                            @for($t = date('Y'); $t >= 2024; $t--)
+                                <option value="{{ $t }}" @selected($t == $tahun)>{{ $t }}</option>
+                            @endfor
+                        </select>
+                    </form>
                 </div>
             </div>
-        </div>
-    </div>
-    <div class="col-sm-6 col-lg-4">
-        <div class="card card-sm">
-            <div class="card-body">
-                <div class="row align-items-center">
-                    <div class="col-auto"><span class="bg-yellow text-white avatar"><i class="ti ti-alert-triangle fs-2"></i></span></div>
-                    <div class="col">
-                        <div class="fw-medium">{{ $totalWarn }} Perlu Dicek</div>
-                        <div class="text-secondary">Ada catatan untuk ditinjau</div>
-                    </div>
+            @if($rekapError)
+                <div class="card-body"><div class="alert alert-warning mb-0">{{ $rekapError }}</div></div>
+            @else
+                @php
+                    $bulanNama = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+                    $wilayah = \App\Services\SipotretService::WILAYAH
+                        + collect(array_keys($rekap))->mapWithKeys(fn($k) => [$k => "Domain {$k}"])->all();
+                    $jumlah = fn(array $sel) => [
+                        'masalah'    => array_sum(array_column($sel, 'masalah')),
+                        'menunggu'   => array_sum(array_column($sel, 'menunggu')),
+                        'diperbaiki' => array_sum(array_column($sel, 'diperbaiki')),
+                    ];
+                    // hijau: semua approve · kuning: ada perbaikan menunggu approve · merah: belum ada perbaikan
+                    $kelas = fn($s) => $s['diperbaiki'] >= $s['masalah'] ? 'bg-green-lt' : ($s['menunggu'] > 0 ? 'bg-yellow-lt' : 'bg-red-lt');
+                    $perBulan = [];
+                    foreach (range(1, 12) as $b) {
+                        $perBulan[$b] = $jumlah(array_filter(array_map(fn($r) => $r[$b] ?? null, $rekap)));
+                    }
+                    $total = $jumlah($perBulan);
+                @endphp
+                <div class="table-responsive">
+                    <table class="table card-table table-vcenter table-sm text-nowrap">
+                        <thead>
+                            <tr>
+                                <th>Kab/Kota</th>
+                                @foreach(range(1, 12) as $b)<th class="text-center">{{ $bulanNama[$b] }}</th>@endforeach
+                                <th class="text-center">Total</th>
+                                <th class="text-center">Menunggu</th>
+                                <th class="text-center">Belum upload</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach($wilayah as $kode => $nama)
+                                @php $baris = $jumlah($rekap[$kode] ?? []); @endphp
+                                <tr>
+                                    <td>
+                                        @if($baris['masalah'])
+                                            <a href="{{ route('dashboard.sipotret', ['wilayah' => $kode, 'tahun' => $tahun]) }}">{{ $nama }}</a>
+                                        @else
+                                            {{ $nama }}
+                                        @endif
+                                        <span class="text-secondary small">{{ $kode }}</span>
+                                    </td>
+                                    @foreach(range(1, 12) as $b)
+                                        @php $s = $rekap[$kode][$b] ?? null; @endphp
+                                        <td class="text-center">
+                                            @if($s)
+                                                <a href="{{ route('dashboard.sipotret', ['wilayah' => $kode, 'tahun' => $tahun, 'bulan' => $b]) }}" class="badge {{ $kelas($s) }}"
+                                                   title="{{ $s['masalah'] }} bermasalah · {{ $s['diperbaiki'] }} approve · {{ $s['menunggu'] }} menunggu approve — klik untuk daftar">{{ $s['diperbaiki'] }}/{{ $s['masalah'] }}@if($s['menunggu']) <i class="ti ti-clock"></i>{{ $s['menunggu'] }}@endif</a>
+                                            @else
+                                                <span class="text-secondary">—</span>
+                                            @endif
+                                        </td>
+                                    @endforeach
+                                    <td class="text-center fw-medium">{{ $baris['masalah'] ? $baris['diperbaiki'] . '/' . $baris['masalah'] : '—' }}</td>
+                                    <td class="text-center">
+                                        @if($baris['menunggu'])
+                                            <a href="{{ route('dashboard.sipotret', ['wilayah' => $kode, 'tahun' => $tahun, 'status' => 'menunggu']) }}"
+                                               class="badge bg-yellow text-white" title="Buka daftar perbaikan yang menunggu approve">{{ $baris['menunggu'] }}</a>
+                                        @else
+                                            <span class="text-secondary">—</span>
+                                        @endif
+                                    </td>
+                                    @php $belum = $baris['masalah'] - $baris['diperbaiki'] - $baris['menunggu']; @endphp
+                                    <td class="text-center">
+                                        @if($belum > 0)
+                                            <span class="badge bg-red text-white">{{ $belum }}</span>
+                                        @else
+                                            <span class="text-secondary">—</span>
+                                        @endif
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                        <tfoot>
+                            <tr class="fw-medium">
+                                <td>Total</td>
+                                @foreach(range(1, 12) as $b)
+                                    <td class="text-center">{{ $perBulan[$b]['masalah'] ? $perBulan[$b]['diperbaiki'] . '/' . $perBulan[$b]['masalah'] : '—' }}</td>
+                                @endforeach
+                                <td class="text-center">{{ $total['masalah'] ? $total['diperbaiki'] . '/' . $total['masalah'] : '—' }}</td>
+                                <td class="text-center">{{ $total['menunggu'] ?: '—' }}</td>
+                                <td class="text-center">{{ ($total['masalah'] - $total['diperbaiki'] - $total['menunggu']) ?: '—' }}</td>
+                            </tr>
+                        </tfoot>
+                    </table>
                 </div>
-            </div>
-        </div>
-    </div>
-    <div class="col-sm-6 col-lg-4">
-        <div class="card card-sm">
-            <div class="card-body">
-                <div class="row align-items-center">
-                    <div class="col-auto"><span class="bg-red text-white avatar"><i class="ti ti-circle-x fs-2"></i></span></div>
-                    <div class="col">
-                        <div class="fw-medium">{{ $totalMasalah }} Ada Masalah</div>
-                        <div class="text-secondary">Kriteria tidak terpenuhi</div>
-                    </div>
+                <div class="card-footer text-secondary small">
+                    <span class="badge bg-green-lt">semua approve</span>
+                    <span class="badge bg-yellow-lt">ada yang menunggu approve</span>
+                    <span class="badge bg-red-lt">belum upload perbaikan</span>
+                    <span class="ms-2">Klik nama kab/kota atau sel untuk melihat daftar publikasinya.</span>
                 </div>
-            </div>
+            @endif
         </div>
     </div>
 

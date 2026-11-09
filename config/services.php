@@ -31,17 +31,37 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    /*
+    | SSO BPS (Keycloak accounts.bps.go.id, OIDC Authorization Code Flow) — sama dengan sandaran-hati.
+    | redirect_uri kosong = route('sso.callback'). Keycloak menolak localhost, jadi lokal mengisi
+    | SSO_REDIRECT_URI dengan callback production + SSO_STATE_PREFIX=local; callback production
+    | meneruskan ke forward_targets[prefix]. Production: SSO_STATE_PREFIX kosong.
+    */
     'sso' => [
-        'base_url' => env('SSO_BASE_URL', 'https://sso.bps.go.id'),
-        'realm' => env('SSO_REALM', 'pegawai-bps'),
+        'keycloak_url' => env('SSO_KEYCLOAK_URL', 'https://accounts.bps.go.id'),
+        'realm' => env('SSO_REALM', 'pegawai'),
         'client_id' => env('SSO_CLIENT_ID'),
         'client_secret' => env('SSO_CLIENT_SECRET'),
         'redirect_uri' => env('SSO_REDIRECT_URI'),
+        // Tambah scope atribut pegawai (di SSO lama: "profile-pegawai") bila sudah ditambahkan ke client
+        'scope' => env('SSO_SCOPE', 'openid profile email'),
+        'state_prefix' => env('SSO_STATE_PREFIX'),
+        'forward_targets' => [
+            'local' => 'http://localhost/pubchecker',
+        ],
     ],
 
     'bps_api' => [
         'key'    => env('BPS_API_KEY', ''),
         'domain' => env('BPS_DOMAIN', '0000'),
+    ],
+
+    // File perbaikan yang diunggah di SIPOTRET (pasca_rilis_history.pub_file_rev berisi path relatif,
+    // mis. "upload/fallback/pasca_rilis/REV_x.pdf"). Dicari di folder akar SIPOTRET bila satu server
+    // (bawaan: folder "sipotret" di sebelah pubchecker), lalu lewat URL akarnya.
+    'sipotret' => [
+        'file_path' => env('SIPOTRET_FILE_PATH', base_path('../sipotret')),
+        'file_url'  => env('SIPOTRET_FILE_URL', 'https://kalsel.web.bps.go.id/sipotret'),
     ],
 
 ];

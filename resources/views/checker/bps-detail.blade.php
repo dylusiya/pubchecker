@@ -263,6 +263,7 @@ PdfExtract.init({ pdfjsBuild: '{{ asset("pdfjs/build") }}/' });
 
 let publicationData = null;
 let pdfUrl          = null;
+let pdfJudul        = 'publikasi'; // nama file saat diunduh
 let isFullscreen    = false;
 
 // ── URL PARAMS ────────────────────────────────────────────────
@@ -331,9 +332,10 @@ function renderPublication(pub) {
         document.getElementById('pubAbstract').textContent = pub.abstract;
     }
 
-    pdfUrl = pub.pdf;
+    pdfUrl   = pub.pdf;
+    pdfJudul = pub.title || 'publikasi';
     const hasPdf = pub.has_pdf && pdfUrl;
-    document.getElementById('btnDownloadPDF').href      = hasPdf ? getProxiedPdfUrl() : '#';
+    document.getElementById('btnDownloadPDF').href      = hasPdf ? unduhPdfUrl() : '#';
     document.getElementById('btnOpenNewTab').href       = hasPdf ? pdfUrl : '#';
     document.getElementById('btnViewPDF').disabled      = !hasPdf;
     document.getElementById('btnCheckQuality').disabled = !hasPdf;
@@ -367,6 +369,11 @@ function getProxiedPdfUrl() {
     return location.origin + '{{ parse_url(route("checker.bps.pdf_proxy"), PHP_URL_PATH) }}?url=' + encodeURIComponent(pdfUrl);
 }
 
+/** Unduh lewat proxy dengan nama file = judul publikasi. */
+function unduhPdfUrl() {
+    return pdfUrl ? getProxiedPdfUrl() + '&nama=' + encodeURIComponent(pdfJudul) : null;
+}
+
 function viewPDF() {
     if (!pdfUrl) return;
 
@@ -393,7 +400,7 @@ function viewPDF() {
     const timeout = setTimeout(() => {
         overlay.style.display  = 'none';
         fallback.style.display = 'block';
-        document.getElementById('fallbackDownload').href = proxiedUrl;
+        document.getElementById('fallbackDownload').href = unduhPdfUrl();
         document.getElementById('fallbackNewTab').href   = pdfUrl;
     }, 60000);
 

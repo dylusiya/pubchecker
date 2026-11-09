@@ -195,6 +195,11 @@ function proxied(pdf) {
     return '{{ route("checker.bps.pdf_proxy") }}?url=' + encodeURIComponent(pdf);
 }
 
+/** Unduh lewat proxy (bisa walau BPS tak terjangkau dari jaringan pengguna), nama file = judul. */
+function unduhUrl(pub) {
+    return proxied(pub.pdf) + '&nama=' + encodeURIComponent(pub.title || 'publikasi');
+}
+
 // ── PILIH BEBERAPA PUBLIKASI ──────────────────────────────────
 function toggleSelect(i, cb) {
     const pub = searchItems[i];
@@ -318,16 +323,13 @@ function renderSearchResults(meta, items) {
             </div>
         </div>
         <div class="d-flex gap-2 align-items-center justify-content-end mt-2 flex-wrap">
-            ${pub.has_pdf
-                ? `<span class="badge bg-success fw-normal"><i class="ti ti-file-type-pdf me-1"></i>PDF</span>`
-                : `<span class="badge bg-secondary fw-normal">Tanpa PDF</span>`
-            }
+            ${pub.has_pdf ? '' : `<span class="badge bg-secondary fw-normal">Tanpa PDF</span>`}
             <a href="${detailUrl}" class="btn btn-primary btn-sm" title="Buka publikasi untuk diperiksa">
                 <i class="ti ti-rosette-discount-check"></i>
                 <span class="d-none d-md-inline ms-1">Buka &amp; Periksa</span>
             </a>
             ${pub.has_pdf
-                ? `<a href="${pub.pdf}" download class="btn btn-outline-success btn-sm" onclick="event.stopPropagation()" title="Download PDF">
+                ? `<a href="${esc(unduhUrl(pub))}" download class="btn btn-outline-success btn-sm" onclick="event.stopPropagation()" title="Download PDF">
                     <i class="ti ti-download"></i>
                     <span class="d-none d-md-inline ms-1">PDF</span>
                 </a>`
