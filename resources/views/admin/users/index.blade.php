@@ -15,11 +15,12 @@
     <div class="col-md-12">
         <div class="row row-cards">
             @foreach([
-                ['Total User',   $users->total(),       'users-group',  'blue',   'Terdaftar'],
-                ['Admin',        $stats['admin'] ?? 0,  'shield-check', 'yellow', 'Administrator'],
-                ['Regular User', $stats['user'] ?? 0,   'user',         'green',  'Operator'],
+                ['Total User', $stats->sum(),              'users-group',      'blue',   'Semua akun terdaftar'],
+                ['Admin',      $stats['admin'] ?? 0,       'shield-check',     'yellow', 'Akses penuh'],
+                ['Pemeriksa',  $stats['pemeriksa'] ?? 0,   'rosette-discount-check', 'azure', 'Memeriksa & meninjau publikasi'],
+                ['User',       $stats['user'] ?? 0,        'eye',              'green',  'Hanya melihat'],
             ] as [$label, $value, $icon, $color, $sub])
-            <div class="col-sm-6 col-lg-4">
+            <div class="col-sm-6 col-lg-3">
                 <div class="card card-sm">
                     <div class="card-body">
                         <div class="row align-items-center">
@@ -37,6 +38,19 @@
             @endforeach
         </div>
 
+        @if(($pendingCount ?? 0) > 0)
+            <div class="alert alert-warning mt-3 d-flex align-items-center" role="alert">
+                <i class="ti ti-clock-hour-4 alert-icon"></i>
+                <div class="flex-fill">
+                    <strong>{{ $pendingCount }}</strong> user login lewat SSO dan menunggu persetujuan.
+                    Mereka belum bisa membuka menu apa pun sampai disetujui.
+                </div>
+                @if(request('role') !== 'pending')
+                    <a href="{{ route('admin.users.index', ['role' => 'pending']) }}" class="btn btn-sm btn-warning ms-3">Lihat</a>
+                @endif
+            </div>
+        @endif
+
         <div class="card mt-3">
             <div class="card-body">
                 <div class="d-sm-flex justify-content-between align-items-center mb-3">
@@ -51,7 +65,9 @@
                             <select name="role" class="form-select form-select-sm text-dark">
                                 <option value="">-- Semua Role --</option>
                                 <option value="admin" {{ request('role') == 'admin' ? 'selected' : '' }}>Admin</option>
+                                <option value="pemeriksa" {{ request('role') == 'pemeriksa' ? 'selected' : '' }}>Pemeriksa</option>
                                 <option value="user" {{ request('role') == 'user' ? 'selected' : '' }}>User</option>
+                                <option value="pending" {{ request('role') == 'pending' ? 'selected' : '' }}>Menunggu Persetujuan</option>
                             </select>
                         </div>
                         <div class="col-md-7">
@@ -149,6 +165,10 @@
                                 <td class="py-3 text-center">
                                     @if($user->role === 'admin')
                                         <span class="badge bg-yellow-lt">Admin</span>
+                                    @elseif($user->role === 'pemeriksa')
+                                        <span class="badge bg-blue-lt">Pemeriksa</span>
+                                    @elseif($user->role === 'pending')
+                                        <span class="badge bg-orange-lt">Menunggu Persetujuan</span>
                                     @else
                                         <span class="badge bg-green-lt">User</span>
                                     @endif
@@ -156,6 +176,14 @@
                                 @if(auth()->check() && auth()->user()->role === 'admin')
                                 <td class="py-3 text-center">
                                     <div class="d-flex justify-content-center gap-1">
+                                        @if($user->role === 'pending')
+                                        <form action="{{ route('admin.users.approve', $user->id) }}" method="POST" class="d-inline">
+                                            @csrf
+                                            <button type="submit" class="btn btn-success btn-sm" title="Setujui sebagai User">
+                                                <i class="ti ti-check"></i> Setujui
+                                            </button>
+                                        </form>
+                                        @endif
                                         <a href="{{ route('admin.users.edit', $user->id) }}" class="btn btn-outline-primary btn-sm btn-icon" title="Edit">
                                             <i class="ti ti-pencil"></i>
                                         </a>

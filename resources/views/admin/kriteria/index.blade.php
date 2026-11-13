@@ -3,7 +3,7 @@
 @section('title', 'Kelola Kriteria Pemeriksaan')
 @section('pretitle', 'Administrator')
 @section('page-title', 'Kelola Kriteria Pemeriksaan')
-@section('page-subtitle', $items->total() . ' kriteria terdaftar — urutan menentukan tampilan di hasil pemeriksaan')
+@section('page-subtitle', $items->total() . ' kriteria terdaftar. Urutan menentukan tampilan di hasil pemeriksaan')
 @section('page-actions')
     <a href="{{ route('admin.kriteria.contoh.index') }}" class="btn">
         <i class="ti ti-photo"></i> Contoh per Kategori
@@ -104,7 +104,7 @@
                                         @csrf @method('PATCH')
                                         <button type="submit"
                                                 class="btn btn-sm {{ $item->aktif ? 'btn-success' : 'btn-outline-secondary' }} py-0 px-2"
-                                                title="{{ $item->aktif ? 'Aktif — klik untuk nonaktifkan' : 'Nonaktif — klik untuk aktifkan' }}">
+                                                title="{{ $item->aktif ? 'Aktif, klik untuk menonaktifkan' : 'Nonaktif, klik untuk mengaktifkan' }}">
                                             <i class="ti {{ $item->aktif ? 'ti-check' : 'ti-x' }}"></i>
                                         </button>
                                     </form>

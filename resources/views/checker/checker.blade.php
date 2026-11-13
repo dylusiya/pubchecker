@@ -175,7 +175,7 @@ async function addFiles(files) {
 
     const sisa = MAX_FILES - selectedFiles.length;
     if (pdfs.length > sisa) {
-        showAlert('warning', `Maksimal ${MAX_FILES} PDF per pemeriksaan — ${pdfs.length - sisa} file tidak ditambahkan.`);
+        showAlert('warning', `Maksimal ${MAX_FILES} PDF per pemeriksaan, ${pdfs.length - sisa} file tidak ditambahkan.`);
     }
 
     // File dari input hanya referensi ke disk — kalau file berubah/terkunci sebelum diproses
@@ -211,7 +211,7 @@ function renderQueue() {
     document.getElementById('fileCount').textContent = selectedFiles.length;
     document.getElementById('actionNote').textContent = selectedFiles.length >= MAX_FILES
         ? `${selectedFiles.length} PDF siap diperiksa (maksimal ${MAX_FILES})`
-        : `${selectedFiles.length} PDF siap diperiksa — bisa tambah ${MAX_FILES - selectedFiles.length} lagi`;
+        : `${selectedFiles.length} PDF siap diperiksa, bisa tambah ${MAX_FILES - selectedFiles.length} lagi`;
     chips.innerHTML = selectedFiles.map((f, i) => `
         <span class="file-chip">
             <i class="ti ti-file-type-pdf text-danger"></i>
@@ -255,10 +255,11 @@ async function startCheck() {
             const fd = new FormData();
             fd.append('files[]', file);
             if (sesiId) fd.append('sesi_id', sesiId);
-            if (extracted) fd.append('extracted', JSON.stringify(extracted));
+            if (extracted) fd.append('extracted_b64', PdfExtract.kemas(extracted)); // base64: lihat PdfExtract.kemas
             fd.append('_token', CSRF);
             const res  = await fetch('{{ route("checker.check") }}', { method: 'POST', body: fd, headers: { 'Accept': 'application/json' } });
-            const data = await res.json();
+            // halaman HTML (mis. 403 dari firewall hosting) → pesan yang jelas, bukan "Unexpected token '<'"
+            const data = await res.json().catch(() => { throw new Error(res.status === 403 ? 'Ditolak server (403) sebelum sampai ke aplikasi, kemungkinan firewall hosting. Coba lagi; bila tetap gagal, hubungi pengelola server.' : 'Server membalas ' + res.status + ' (bukan JSON)'); });
             if (data.error || !res.ok) throw new Error(data.error || data.message || ('Server membalas ' + res.status));
             const r = data.results?.[0];
             if (!r || r.error) throw new Error(r?.error || 'Tidak ada hasil pemeriksaan');
@@ -373,7 +374,7 @@ function tidakSesuaiRows(checks) {
                 <td class="font-monospace text-muted" style="font-size:11px;">${esc(ch.id)}</td>
                 <td class="text-muted small">${esc(ch.kategori)}</td>
                 <td>${esc(ch.deskripsi)}</td>
-                <td class="text-danger">${esc(ch.keterangan || '—')}</td>
+                <td class="text-danger">${esc(ch.keterangan || '-')}</td>
             </tr>`).join('')
         : '<tr><td colspan="4" class="text-center text-secondary py-3">Tidak ada kriteria Tidak Sesuai.</td></tr>';
 }
@@ -381,6 +382,8 @@ function tidakSesuaiRows(checks) {
 // ── STEP-BY-STEP REVIEW (lihat js/checker-review.js) ─────────────
 /** @param {number} [jobIndex] kartu yang diklik "Tinjau" — publikasi itu dibuka pertama */
 function beginReview(jobIndex) {
+    // termasuk publikasi yang baru berhasil lewat "Coba lagi" setelah pemeriksaan awal selesai
+    allResults = batchOutcomes.filter(o => o?.result).map(o => o.result);
     const target = Number.isInteger(jobIndex) ? batchOutcomes[jobIndex]?.result : null;
     const entries = allResults
         .map(r => {

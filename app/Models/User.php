@@ -99,6 +99,23 @@ class User extends Authenticatable
     }
 
     /**
+     * Boleh menjalankan & meninjau pemeriksaan publikasi (Gate 'periksa').
+     * Role 'user' hanya bisa melihat dashboard, riwayat, dan hasil.
+     */
+    public function canPeriksa()
+    {
+        return in_array($this->role, ['admin', 'pemeriksa'], true);
+    }
+
+    /**
+     * User SSO baru yang belum disetujui admin (lihat EnsureUserApproved)
+     */
+    public function isPending()
+    {
+        return $this->role === 'pending';
+    }
+
+    /**
      * Check if user is approver
      */
     public function isApprover()

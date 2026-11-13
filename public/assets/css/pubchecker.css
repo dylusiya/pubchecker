@@ -112,8 +112,25 @@
 .review-jejer-col .jejer-viewer iframe { width: 100%; height: 100%; border: 0; display: block; }
 
 /* Tab publikasi di panel tinjauan (bila memeriksa beberapa publikasi) */
-.review-file-tabs { flex-wrap: nowrap; overflow-x: auto; }
-.review-file-tabs .nav-link { white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+/* tab aktif: latar biru muda, garis atas tebal, huruf tebal; nomor & progres tidak ikut terpotong judul */
+.review-file-tabs { position: relative; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.review-file-tabs .nav-link {
+    display: flex; align-items: center; gap: .4rem; white-space: nowrap; max-width: 300px;
+    color: var(--tblr-secondary); border-top: 3px solid transparent;
+}
+.review-file-tabs .nav-link:hover { color: var(--tblr-body-color); background: var(--tblr-bg-surface-secondary); }
+.review-file-tabs .rev-tab-judul { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.review-file-tabs .rev-tab-no, .review-file-tabs .badge, .review-file-tabs .ti { flex-shrink: 0; }
+.review-file-tabs .rev-tab-no {
+    display: inline-flex; align-items: center; justify-content: center; width: 1.35rem; height: 1.35rem;
+    border-radius: 50%; font-size: .75rem; font-weight: 600;
+    background: var(--tblr-bg-surface-secondary); color: var(--tblr-secondary);
+}
+.review-file-tabs .nav-link.active {
+    color: var(--tblr-primary); font-weight: 600; background: var(--tblr-primary-lt);
+    border-color: var(--tblr-border-color) var(--tblr-border-color) transparent; border-top: 3px solid var(--tblr-primary);
+}
+.review-file-tabs .nav-link.active .rev-tab-no { background: var(--tblr-primary); color: #fff; }
 
 /* ── Contoh yang benar per kategori (admin & panel tinjauan) ── */
 .contoh-thumb {

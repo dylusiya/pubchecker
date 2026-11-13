@@ -86,7 +86,7 @@ class ExcelExportService
         $ws = $ss->getActiveSheet();
         $ws->setTitle('Rekap');
 
-        $headers = ['No', 'Nama File', 'Total Halaman', 'Metode', '✓ OK', '⚠ Perlu Dicek', '✗ Tidak Ada', '— Tdk Diperiksa', 'Status Akhir'];
+        $headers = ['No', 'Nama File', 'Total Halaman', 'Metode', '✓ OK', '⚠ Perlu Dicek', '✗ Tidak Ada', 'Tdk Diperiksa', 'Status Akhir'];
         $this->writeHeader($ws, $headers, 1);
 
         foreach ($results as $i => $r) {

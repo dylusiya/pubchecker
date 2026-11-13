@@ -2,8 +2,9 @@
 
 namespace App\Providers;
 
-// use Illuminate\Support\Facades\Gate;
+use App\Models\User;
 use Illuminate\Foundation\Support\Providers\AuthServiceProvider as ServiceProvider;
+use Illuminate\Support\Facades\Gate;
 
 class AuthServiceProvider extends ServiceProvider
 {
@@ -23,6 +24,10 @@ class AuthServiceProvider extends ServiceProvider
     {
         $this->registerPolicies();
 
-        //
+        // Menjalankan/meninjau pemeriksaan (admin & pemeriksa); role 'user' hanya melihat.
+        // Dipakai di route (middleware can:periksa) dan view (@can('periksa')).
+        Gate::define('periksa', fn (User $user) => $user->canPeriksa());
+        // memeriksa satu publikasi BPS (pub_id): ditugaskan ke dia, tidak ditugaskan, atau admin
+        Gate::define('periksa-pub', fn (User $user, ?string $pubId = null) => \App\Models\PenugasanPemeriksaan::boleh($user, $pubId));
     }
 }

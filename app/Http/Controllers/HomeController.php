@@ -42,6 +42,7 @@ class HomeController extends Controller
             'tahun'  => 'nullable|integer|between:2000,2100',
             'bulan'  => 'nullable|integer|between:1,12',
             'status' => 'nullable|in:belum,menunggu,approve',
+            'tugas'  => 'nullable|in:saya,belum',
         ]);
         // selalu satu bulan; bawaan = bulan lalu (Nov → Okt, Jan → Des tahun sebelumnya).
         // Dari dashboard tahun lalu (tanpa bulan) → Desember tahun itu.
@@ -62,8 +63,8 @@ class HomeController extends Controller
         } else {
             try {
                 $daftar = $sipotret->daftarMasalah($wilayah, $tahun, $bulan);
-                // catatan periode terakhir → isian awal tinjauan saat diperiksa ulang
-                $isian  = $sipotret->isianTerakhir(array_column($daftar, 'pub_id_api'));
+                // catatan periode yang dipilih di filter (acuan, disimpan di hasil) → isian awal tinjauan saat diperiksa ulang
+                $isian  = $sipotret->isianPeriode(array_column($daftar, 'pub_id_api'), $bulan, $tahun);
             } catch (\Throwable $e) {
                 report($e);
                 $error = 'Tidak bisa membaca database SIPOTRET: ' . $e->getMessage();
@@ -74,7 +75,22 @@ class HomeController extends Controller
         if ($status) {
             $daftar = array_values(array_filter($daftar, fn($p) => $p['tahap'] === $status));
         }
-        $bisaApprove = (bool) auth()->user()?->isProvinsi();
+
+        // penugasan pemeriksaan per publikasi (pub_id) + filter "Tugas saya" / "Belum ditugaskan"
+        $user  = auth()->user();
+        $tugas = \App\Models\PenugasanPemeriksaan::untuk(array_column($daftar, 'pub_id_api'))->map->ringkas($user)->all();
+        $filterTugas = $request->input('tugas');
+        $jumlahTugas = [
+            'saya'  => count(array_filter($daftar, fn($p) => ($tugas[$p['pub_id_api']]['saya'] ?? false))),
+            'belum' => count(array_filter($daftar, fn($p) => !isset($tugas[$p['pub_id_api']]))),
+        ];
+        if ($filterTugas) {
+            $daftar = array_values(array_filter($daftar, fn($p) => $filterTugas === 'saya'
+                ? ($tugas[$p['pub_id_api']]['saya'] ?? false)
+                : !isset($tugas[$p['pub_id_api']])));
+        }
+        $pemeriksa = $user?->isAdmin() ? \App\Http\Controllers\PenugasanController::daftarPemeriksa() : [];
+        $bisaApprove = (bool) auth()->user()?->isProvinsi() && auth()->user()->canPeriksa();
 
         // periode pemeriksaan ulang: sebulan setelah periode SIPOTRET terakhir publikasi-publikasi ini (Sep → Okt)
         $terakhir = collect($daftar)->flatMap(fn($p) => $p['riwayat'])->max(fn($h) => $h['tahun'] * 12 + $h['bulan'] - 1);
@@ -82,7 +98,8 @@ class HomeController extends Controller
             ? ['bulan' => ($terakhir + 1) % 12 + 1, 'tahun' => intdiv($terakhir + 1, 12)]
             : ['bulan' => (int) date('n'), 'tahun' => (int) date('Y')];
 
-        return view('sipotret-masalah', compact('wilayah', 'nama', 'tahun', 'bulan', 'status', 'daftar', 'jumlah', 'error', 'bisaApprove', 'periodeBaru', 'isian'));
+        return view('sipotret-masalah', compact('wilayah', 'nama', 'tahun', 'bulan', 'status', 'daftar', 'jumlah', 'error', 'bisaApprove', 'periodeBaru', 'isian',
+            'tugas', 'filterTugas', 'jumlahTugas', 'pemeriksa'));
     }
 
     // ── GET /dashboard/sipotret/file/{history}?nama= — file perbaikan yang diunggah di SIPOTRET ──
@@ -156,7 +173,7 @@ class HomeController extends Controller
 
         $lewat = count($ids) - $ok;
         if (!$ok) {
-            return back()->with('warning', 'Tidak ada yang diubah — status perbaikannya bukan "uploaded" / "uploaded_kabkota" lagi.');
+            return back()->with('warning', 'Tidak ada yang diubah karena status perbaikannya bukan "uploaded" / "uploaded_kabkota" lagi.');
         }
         return back()->with('success', "{$ok} perbaikan disetujui (approve) di SIPOTRET."
             . ($lewat ? " {$lewat} dilewati karena statusnya sudah bukan menunggu approve." : ''));

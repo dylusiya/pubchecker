@@ -38,7 +38,28 @@ class HasilPemeriksaan extends Model
         'pub_tanggal_rilis',
         'sipotret_terkirim_at',
         'sipotret_history_id',
+        // periode catatan SIPOTRET yang dipilih petugas sebagai acuan isian awal tinjauan
+        'sipotret_acuan_bulan',
+        'sipotret_acuan_tahun',
+        // periode pemeriksaan SIPOTRET yang dituju (dicatat saat Periksa ditekan)
+        'periode_bulan',
+        'periode_tahun',
     ];
+
+    /** Kolom periode_bulan/periode_tahun sudah ada (migrasi 2026_11_10_110000 sudah dijalankan). */
+    public static function punyaKolomPeriode(): bool
+    {
+        static $ada = null;
+        return $ada ??= \Illuminate\Support\Facades\Schema::hasColumn('hasil_pemeriksaan', 'periode_bulan');
+    }
+
+    /** Acuan isian awal dari SIPOTRET: ['bulan' => int, 'tahun' => int] atau null bila tidak dipilih. */
+    public function acuanSipotret(): ?array
+    {
+        return $this->sipotret_acuan_bulan && $this->sipotret_acuan_tahun
+            ? ['bulan' => (int) $this->sipotret_acuan_bulan, 'tahun' => (int) $this->sipotret_acuan_tahun]
+            : null;
+    }
 
     protected $casts = [
         'created_at'           => 'datetime',

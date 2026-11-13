@@ -8,14 +8,20 @@
 @endsection
 @php
     // Tombol kirim: koneksi SIPOTRET diatur & ada hasil Import API BPS yang punya temuan Tidak Sesuai
-    $sipotretAktif = (bool) config('database.connections.sipotret.database');
-    $bisaKirim     = fn($h) => $sipotretAktif && $h->pdf_url
+    // role 'user' hanya melihat: tanpa tinjau, kirim SIPOTRET, dan salin
+    $bisaPeriksa   = Gate::allows('periksa');
+    // penugasan: publikasi yang ditugaskan ke pemeriksa lain hanya bisa dilihat (admin selalu boleh)
+    $tugas       ??= collect();
+    $tugasDari     = fn($h) => $tugas[(string) $h->pub_id_api] ?? null;
+    $bolehHasil    = fn($h) => \App\Models\PenugasanPemeriksaan::boleh(auth()->user(), $h->pub_id_api, $tugasDari($h));
+    $sipotretAktif = $bisaPeriksa && (bool) config('database.connections.sipotret.database');
+    $bisaKirim     = fn($h) => $sipotretAktif && $bolehHasil($h) && $h->pdf_url
         && ($h->detail->contains('status', \App\Models\DetailPemeriksaan::STATUS_TIDAK_SESUAI) || $h->catatanTambahan->isNotEmpty());
     $kirimSipotret = $sesi->hasilPemeriksaan->contains($bisaKirim);
 
     // Salin ketidaksesuaian/catatan ke publikasi lain dalam sesi (butuh ≥ 2 publikasi)
-    $bisaSalin = $sesi->hasilPemeriksaan->count() > 1;
-    $petaSalin = $bisaSalin ? $sesi->hasilPemeriksaan->map(fn($h) => [
+    $bisaSalin = $bisaPeriksa && $sesi->hasilPemeriksaan->count() > 1;
+    $petaSalin = $bisaSalin ? $sesi->hasilPemeriksaan->filter($bolehHasil)->map(fn($h) => [
         'id'       => $h->id,
         'judul'    => $h->judul,
         // status & keterangan per kode kriteria
@@ -28,7 +34,7 @@
     <a href="{{ route('checker.riwayat') }}" class="btn">
         <i class="ti ti-arrow-left"></i> Kembali
     </a>
-    @if($sesi->hasilPemeriksaan->filter(fn($h) => $h->hasPdf())->count() > 1)
+    @if($bisaPeriksa && $sesi->hasilPemeriksaan->filter(fn($h) => $h->hasPdf() && $bolehHasil($h))->count() > 1)
         <a href="{{ route('checker.riwayat.tinjau', $sesi) }}" class="btn btn-primary"
            title="Buka semua PDF di sesi ini, satu tab per publikasi">
             <i class="ti ti-player-play"></i> Tinjau Semua
@@ -76,18 +82,29 @@
                         <span class="flex-grow-1 fw-semibold small text-truncate"
                               title="{{ $hasil->nama_file }}">{{ $hasil->judul }}</span>
 
+                        {{-- dihitung dari detail saat ini (bukan kolom total_* hasil cek otomatis) supaya sama dengan tabel di bawah:
+                             "Tidak Sesuai" = kriteria Tidak Sesuai + catatan tambahan; temuan otomatis yang belum ditinjau terpisah --}}
+                        @php
+                            $hitung = $hasil->detail->countBy('status');
+                            $nTs    = ($hitung[\App\Models\DetailPemeriksaan::STATUS_TIDAK_SESUAI] ?? 0);
+                            $nCat   = $hasil->catatanTambahan->count();
+                            $nAuto  = $hasil->detail->where('status', \App\Models\DetailPemeriksaan::STATUS_TIDAK_ADA)->whereNull('ditinjau_at')->count();
+                        @endphp
                         <div class="d-flex gap-1 flex-shrink-0">
-                            @if($hasil->total_ok)
-                                <span class="badge bg-success">{{ $hasil->total_ok }} OK</span>
+                            @if($hitung['OK'] ?? 0)
+                                <span class="badge bg-success" title="Sesuai / OK">{{ $hitung['OK'] }} OK</span>
                             @endif
-                            @if($hasil->total_perlu_dicek)
-                                <span class="badge bg-warning text-dark">{{ $hasil->total_perlu_dicek }} Dicek</span>
+                            @if($hitung[\App\Models\DetailPemeriksaan::STATUS_PERLU_DICEK] ?? 0)
+                                <span class="badge bg-warning text-dark" title="Perlu dicek manual (hasil cek otomatis)">{{ $hitung[\App\Models\DetailPemeriksaan::STATUS_PERLU_DICEK] }} Dicek</span>
                             @endif
-                            @if($hasil->total_tidak_ada)
-                                <span class="badge bg-danger">{{ $hasil->total_tidak_ada }} Masalah</span>
+                            @if($nTs + $nCat)
+                                <span class="badge bg-danger" title="Sama dengan tabel di bawah: {{ $nTs }} kriteria Tidak Sesuai{{ $nCat ? ' + ' . $nCat . ' catatan tambahan' : '' }}">{{ $nTs + $nCat }} Tidak Sesuai</span>
                             @endif
-                            @if($hasil->total_tdk_diperiksa)
-                                <span class="badge bg-secondary">{{ $hasil->total_tdk_diperiksa }} Skip</span>
+                            @if($nAuto)
+                                <span class="badge bg-orange-lt" title="Cek otomatis menemukan masalah (Tidak Ada) tetapi belum ditinjau petugas — belum masuk tabel Tidak Sesuai & tidak ikut dikirim ke SIPOTRET">{{ $nAuto }} temuan otomatis</span>
+                            @endif
+                            @if($hitung[\App\Models\DetailPemeriksaan::STATUS_TIDAK_DIPERIKSA] ?? 0)
+                                <span class="badge bg-secondary" title="Skip / tidak diperiksa">{{ $hitung[\App\Models\DetailPemeriksaan::STATUS_TIDAK_DIPERIKSA] }} Skip</span>
                             @endif
                         </div>
 
@@ -101,7 +118,7 @@
                               title="Kategori yang sudah ditinjau manual">
                             <i class="ti ti-clipboard-check"></i> {{ $kategoriSelesai }}/{{ $grupKategori->count() }}
                         </span>
-                        @if($hasil->hasPdf())
+                        @if($hasil->hasPdf() && $bisaPeriksa && $bolehHasil($hasil))
                         <a href="{{ route('checker.hasil.tinjau', $hasil) }}" onclick="event.stopPropagation()"
                            class="btn btn-sm {{ $tinjauSelesai ? 'btn-outline-success' : 'btn-primary' }} py-0 px-2 flex-shrink-0 ms-1 text-nowrap">
                             <i class="ti ti-{{ $tinjauSelesai ? 'pencil' : 'player-play' }}"></i>
@@ -113,7 +130,7 @@
                             <button type="button" onclick="event.stopPropagation(); Sipotret.buka({{ $hasil->id }})"
                                     class="btn btn-sm {{ $hasil->sipotret_terkirim_at ? 'btn-outline-danger' : 'btn-danger' }} py-0 px-2 flex-shrink-0 ms-1 text-nowrap"
                                     title="{{ $hasil->sipotret_terkirim_at
-                                        ? 'Terakhir dikirim ke SIPOTRET ' . $hasil->sipotret_terkirim_at->format('d M Y H:i') . ' — kirim lagi (item yang sudah ada dilewati)'
+                                        ? 'Terakhir dikirim ke SIPOTRET ' . $hasil->sipotret_terkirim_at->format('d M Y H:i') . '. Klik untuk kirim lagi (item yang sudah ada dilewati)'
                                         : 'Kirim temuan Tidak Sesuai publikasi ini ke SIPOTRET' }}">
                                 <i class="ti ti-{{ $hasil->sipotret_terkirim_at ? 'circle-check' : 'send' }}"></i>
                                 {{ $hasil->sipotret_terkirim_at ? 'Terkirim' : 'Kirim' }}
@@ -122,6 +139,20 @@
                             <span class="badge bg-red-lt flex-shrink-0 ms-1"
                                   title="Temuan Tidak Sesuai terakhir dikirim ke SIPOTRET {{ $hasil->sipotret_terkirim_at->format('d M Y H:i') }}">
                                 <i class="ti ti-send"></i> SIPOTRET
+                            </span>
+                        @endif
+                        {{-- penugasan pemeriksaan publikasi ini --}}
+                        @if($t = $tugasDari($hasil))
+                            <span class="badge {{ (int) $t->user_id === (int) auth()->id() ? 'bg-green-lt' : 'bg-purple-lt' }} flex-shrink-0 ms-1"
+                                  title="Hanya pemeriksa yang ditugaskan (dan admin) yang bisa meninjau & mengirim publikasi ini">
+                                <i class="ti ti-user-check"></i> {{ (int) $t->user_id === (int) auth()->id() ? 'Tugas saya' : $t->user?->full_name }}
+                            </span>
+                        @endif
+                        {{-- acuan isian awal tinjauan: catatan SIPOTRET periode yang dipilih petugas --}}
+                        @if($acuan = $hasil->acuanSipotret())
+                            <span class="badge bg-azure-lt flex-shrink-0 ms-1"
+                                  title="Tinjauan memakai catatan SIPOTRET periode ini sebagai isian awal">
+                                <i class="ti ti-history"></i> Acuan {{ \Illuminate\Support\Str::substr(['', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'][$acuan['bulan']], 0, 3) }} {{ $acuan['tahun'] }}
                             </span>
                         @endif
                         <small class="text-muted flex-shrink-0 ms-1">
@@ -146,13 +177,15 @@
                             <small class="text-muted">
                                 Tinjauan manual: {{ $kategoriSelesai }} dari {{ $grupKategori->count() }} kategori selesai
                             </small>
-                            @if($hasil->hasPdf())
+                            @if($hasil->hasPdf() && $bisaPeriksa && $bolehHasil($hasil))
                                 <a href="{{ route('checker.hasil.tinjau', $hasil) }}" class="btn btn-primary btn-sm">
                                     <i class="ti ti-{{ $tinjauSelesai ? 'pencil' : 'player-play' }} me-1"></i>
                                     {{ $tinjauSelesai ? 'Tinjau Ulang' : ($kategoriSelesai ? 'Lanjutkan Tinjauan' : 'Mulai Tinjauan') }}
                                 </a>
-                            @else
-                                <small class="text-muted fst-italic">PDF tidak tersimpan — tinjauan tidak bisa dilanjutkan</small>
+                            @elseif(!$hasil->hasPdf())
+                                <small class="text-muted fst-italic">PDF tidak tersimpan, tinjauan tidak bisa dilanjutkan</small>
+                            @elseif($bisaPeriksa && $tugasDari($hasil))
+                                <small class="text-muted fst-italic">Ditugaskan ke {{ $tugasDari($hasil)->user?->full_name }}, hanya bisa dilihat</small>
                             @endif
                         </div>
                         @endif
@@ -179,7 +212,7 @@
                                         </td>
                                         <td class="text-muted small">{{ $d->kategori }}</td>
                                         <td style="font-size:12px;">{{ $d->deskripsi }}</td>
-                                        <td class="small text-danger">{{ $d->keterangan ?: '—' }}</td>
+                                        <td class="small text-danger">{{ $d->keterangan ?: '-' }}</td>
                                         @if($bisaSalin)
                                         <td class="text-center">
                                             <button type="button" class="btn btn-sm btn-ghost-primary py-0 px-1"
@@ -220,17 +253,17 @@
                                 <tbody>
                                     @foreach($hasil->catatanTambahan as $c)
                                     <tr>
-                                        <td class="text-muted">{{ $c->kategori ?? "—" }}</td>
+                                        <td class="text-muted">{{ $c->kategori ?? "-" }}</td>
                                         <td class="fw-semibold">{{ $c->item }}</td>
-                                        <td><span class="badge {{ ['minor' => 'bg-azure-lt', 'moderate' => 'bg-orange-lt', 'major' => 'bg-red-lt'][$c->flag_level] ?? 'bg-secondary-lt' }}">{{ $c->flag_level }}</span></td>
-                                        <td>{{ $c->halaman ?? '—' }}</td>
+                                        <td><span class="badge {{ ['minor' => 'bg-azure-lt', 'moderate' => 'bg-orange-lt', 'major' => 'bg-red-lt'][$c->flag_level] ?? 'bg-secondary-lt' }}">{{ $c->flag_level ?: 'tanpa level' }}</span></td>
+                                        <td>{{ $c->halaman ?? '-' }}</td>
                                         <td>{{ $c->keterangan }}</td>
-                                        <td class="text-muted">{{ $c->dibuat_oleh ?? '—' }}</td>
+                                        <td class="text-muted">{{ $c->dibuat_oleh ?? '-' }}</td>
                                         @if($bisaSalin)
                                         <td class="text-center">
                                             <button type="button" class="btn btn-sm btn-ghost-primary py-0 px-1"
                                                     title="Salin catatan ini ke publikasi lain dalam sesi"
-                                                    data-salin-cat="{{ json_encode(['hasil' => $hasil->id, 'kategori' => $c->kategori, 'item' => $c->item, 'flag_level' => $c->flag_level, 'keterangan' => $c->keterangan]) }}">
+                                                    data-salin-cat="{{ json_encode(['hasil' => $hasil->id, 'kategori' => $c->kategori, 'item' => $c->item, 'item_periksa_id' => $c->item_periksa_id, 'flag_level' => $c->flag_level, 'keterangan' => $c->keterangan]) }}">
                                                 <i class="ti ti-copy"></i> Salin
                                             </button>
                                         </td>
@@ -295,28 +328,41 @@
   <div class="modal-dialog modal-xl modal-dialog-scrollable" role="document">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title"><i class="ti ti-send me-1"></i> Kirim ke SIPOTRET — Pasca Rilis <span class="text-secondary fw-normal" id="spJudul"></span></h5>
+        <h5 class="modal-title"><i class="ti ti-send me-1"></i> Kirim ke SIPOTRET: Pasca Rilis <span class="text-secondary fw-normal" id="spJudul"></span></h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Tutup"></button>
       </div>
       <div class="modal-body">
         <div class="row g-2 align-items-end mb-3">
           <div class="col-auto">
+            {{-- bawaan: periode bulan lalu (diperiksa November = periode Oktober), supaya petugas tidak salah kirim
+                 ke bulan berjalan; periode dari Publikasi Bermasalah / Tugas Saya (?bulan=&tahun=) tetap dipakai --}}
+            @php $periodeLalu = now()->subMonthNoOverflow(); @endphp
             <label class="form-label mb-1" for="spBulan">Periode pemeriksaan</label>
             <select class="form-select" id="spBulan">
               @foreach(['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'] as $i => $b)
                 {{-- periode bawaan bisa dikirim dari halaman Publikasi Bermasalah (?bulan=&tahun=) --}}
-                <option value="{{ $i + 1 }}" @selected($i + 1 === (int) request('bulan', date('n')))>{{ $b }}</option>
+                <option value="{{ $i + 1 }}" @selected($i + 1 === (int) request('bulan', $periodeLalu->month))>{{ $b }}</option>
               @endforeach
             </select>
           </div>
           <div class="col-auto">
-            <input type="number" class="form-control" id="spTahun" value="{{ (int) request('tahun', date('Y')) }}" min="2000" max="2100" style="width:100px;">
+            <input type="number" class="form-control" id="spTahun" value="{{ (int) request('tahun', $periodeLalu->year) }}" min="2000" max="2100" style="width:100px;">
           </div>
           <div class="col">
             <small class="text-secondary">
-              Hanya kriteria berstatus <strong>Tidak Sesuai</strong> beserta keterangannya. Item yang sudah tercatat
-              untuk publikasi & periode yang sama di SIPOTRET dilewati.
+              Hanya kriteria berstatus <strong>Tidak Sesuai</strong> beserta keterangannya, dibandingkan dengan yang sudah
+              tercatat di SIPOTRET untuk publikasi &amp; periode yang sama: <em>sama</em> dilewati, <em>beda</em> dilewati kecuali
+              dicentang untuk diperbarui.
             </small>
+          </div>
+          <div class="col-12" id="spPerbaruiWrap" hidden>
+            <label class="form-check mb-0">
+              <input type="checkbox" class="form-check-input" id="spPerbarui">
+              <span class="form-check-label small">
+                Perbarui yang <strong class="text-orange">beda</strong> di SIPOTRET dengan keterangan dari pubchecker
+                <span class="text-secondary">(item lainnya: level &amp; nama itemnya juga)</span>
+              </span>
+            </label>
           </div>
         </div>
         <div id="spBody"></div>
@@ -359,7 +405,7 @@ const Salin = (() => {
         $('slJudul').textContent = j === 'ts' ? 'Salin ketidaksesuaian ke publikasi lain' : 'Salin catatan tambahan ke publikasi lain';
         $('slSumber').innerHTML = j === 'ts'
             ? `<span class="font-monospace text-secondary">${esc(data.kode)}</span> · <span class="text-secondary">${esc(data.kategori)}</span><div>${esc(data.deskripsi)}</div>`
-            : `<span class="text-secondary">${esc(data.kategori || 'Tanpa kategori')}</span> · <strong>${esc(data.item)}</strong> <span class="badge bg-secondary-lt">${esc(data.flag_level)}</span>`;
+            : `<span class="text-secondary">${esc(data.kategori || 'Tanpa kategori')}</span> · <strong>${esc(data.item)}</strong> <span class="badge bg-secondary-lt">${esc(data.flag_level || 'tanpa level')}</span>`;
         $('slKet').value = data.keterangan || '';
         $('slInfo').textContent = '';
         renderTujuan();
@@ -422,7 +468,7 @@ const Salin = (() => {
                     : await fetch(URL_CAT.replace('__ID__', id), {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': CSRF },
-                        body: JSON.stringify({ kategori: sumber.kategori, item: sumber.item, flag_level: sumber.flag_level, keterangan: ket }),
+                        body: JSON.stringify({ kategori: sumber.kategori, item: sumber.item, item_periksa_id: sumber.item_periksa_id ?? null, flag_level: sumber.flag_level ?? null, keterangan: ket }),
                     });
                 if (!res.ok) {
                     const d = await res.json().catch(() => ({}));
@@ -495,7 +541,8 @@ const Sipotret = (() => {
     const BULAN = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
     const STATUS = {
         baru:          ['bg-green-lt',     'Akan dikirim'],
-        sudah_ada:     ['bg-secondary-lt', 'Sudah ada di SIPOTRET'],
+        sama:          ['bg-secondary-lt', 'Sudah ada, sama'],
+        beda:          ['bg-orange-lt',    'Sudah ada, beda'],
         tidak_dikenal: ['bg-yellow-lt',    'Item tidak dikenal di SIPOTRET'],
     };
 
@@ -531,9 +578,14 @@ const Sipotret = (() => {
             $('spBody').innerHTML = '<div class="text-center text-secondary py-4">Tidak ada kriteria Tidak Sesuai di sesi ini.</div>';
             return;
         }
+        const perbarui = $('spPerbarui')?.checked;
+        const nBeda = list.reduce((n, h) => n + h.items.filter(i => i.status === 'beda').length, 0);
+        if ($('spPerbaruiWrap')) $('spPerbaruiWrap').hidden = !nBeda;
         $('spBody').innerHTML = list.map(h => {
             const baru = h.items.filter(i => i.status === 'baru').length;
-            const bisa = h.bisa && baru > 0;
+            const beda = h.items.filter(i => i.status === 'beda').length;
+            const sama = h.items.filter(i => i.status === 'sama').length;
+            const bisa = h.bisa && (baru > 0 || (perbarui && beda > 0));
             const terdaftar = h.periode.length
                 ? ` · terdaftar di periode ${h.periode.map(p => `<a href="#" data-periode="${p.bulan}/${p.tahun}">${BULAN[p.bulan - 1]} ${p.tahun}</a>`).join(', ')}`
                 : '';
@@ -541,7 +593,7 @@ const Sipotret = (() => {
                 : (h.pasca_ada
                     ? `Publikasi ditemukan di SIPOTRET${h.cocok_judul ? ' (dicocokkan lewat judul)' : ''}` +
                       (h.history_ada ? ' · sudah ada di periode ini' : ' · <span class="text-warning">akan ditambahkan ke periode baru ini</span>') + terdaftar
-                    : 'Publikasi belum ada di SIPOTRET — akan dibuat beserta periodenya');
+                    : 'Publikasi belum ada di SIPOTRET, akan dibuat beserta periodenya');
             return `
             <div class="card mb-3">
                 <div class="card-header py-2">
@@ -551,7 +603,12 @@ const Sipotret = (() => {
                             <div class="fw-semibold text-truncate">${esc(h.judul)}</div>
                             <div class="small text-secondary">${tujuan}${h.terkirim_at ? ` · terakhir dikirim ${esc(h.terkirim_at)}` : ''}</div>
                         </div>
-                        <span class="badge bg-green-lt">${baru} baru</span>
+                        <span class="d-flex gap-1 flex-shrink-0">
+                            <span class="badge bg-green-lt">${baru} baru</span>
+                            ${beda ? `<span class="badge bg-orange-lt">${beda} beda</span>` : ''}
+                            ${sama ? `<span class="badge bg-secondary-lt">${sama} sama</span>` : ''}
+                            ${h.hanya_sipotret?.length ? `<span class="badge bg-azure-lt" title="Tercatat di SIPOTRET periode ini, tidak ada di temuan pubchecker">${h.hanya_sipotret.length} hanya di SIPOTRET</span>` : ''}
+                        </span>
                     </label>
                 </div>
                 ${h.items.length ? `
@@ -562,9 +619,20 @@ const Sipotret = (() => {
                             <tr>
                                 <td class="font-monospace text-secondary">${esc(i.kode)}</td>
                                 <td><div>${esc(i.nama)}</div><div class="text-secondary">${esc(i.kategori)}</div></td>
-                                <td>${esc(i.keterangan)}</td>
+                                <td>
+                                    <div>${esc(i.keterangan)}</div>
+                                    ${i.status === 'beda' ? `<div class="text-orange mt-1"><i class="ti ti-arrows-diff"></i> Di SIPOTRET: ${esc(i.sipotret_keterangan || '(kosong)')}${i.beda_level ? ` · level ${esc(i.sipotret_flag ?? 'kosong')}` : ''}${i.beda_nama ? `<div class="text-orange">nama item di SIPOTRET: ${esc(i.sipotret_nama || '(kosong)')}</div>` : ''}</div>` : ''}
+                                </td>
                                 <td>${esc(i.flag ?? '-')}</td>
-                                <td><span class="badge ${STATUS[i.status][0]}">${STATUS[i.status][1]}</span></td>
+                                <td><span class="badge ${STATUS[i.status][0]}">${i.status === 'beda' && perbarui ? 'Akan diperbarui' : STATUS[i.status][1]}</span></td>
+                            </tr>`).join('')}
+                            ${(h.hanya_sipotret || []).map(s => `
+                            <tr class="text-secondary">
+                                <td class="font-monospace">-</td>
+                                <td>${esc(s.nama)}</td>
+                                <td>${esc(s.keterangan)}</td>
+                                <td>${esc(s.flag ?? '-')}</td>
+                                <td><span class="badge bg-azure-lt" title="Tidak ada di temuan pubchecker (mungkin sudah dinilai Sesuai). Tidak diubah.">Hanya di SIPOTRET</span></td>
                             </tr>`).join('')}
                         </tbody>
                     </table>
@@ -576,9 +644,12 @@ const Sipotret = (() => {
 
     function hitung() {
         const pilih = [...document.querySelectorAll('.sp-pilih:checked')];
-        const item = pilih.reduce((n, cb) => n + data.hasil.find(h => h.id == cb.value).items.filter(i => i.status === 'baru').length, 0);
+        const perbarui = $('spPerbarui')?.checked;
+        const hitungStatus = st => pilih.reduce((n, cb) => n + data.hasil.find(h => h.id == cb.value).items.filter(i => i.status === st).length, 0);
+        const item = hitungStatus('baru'), ubah = perbarui ? hitungStatus('beda') : 0;
         $('spKirim').disabled = !pilih.length;
-        $('spKirimLabel').textContent = pilih.length ? `Kirim ${item} temuan (${pilih.length} publikasi)` : 'Kirim';
+        $('spKirimLabel').textContent = pilih.length
+            ? `Kirim ${item} temuan${ubah ? ` + perbarui ${ubah}` : ''} (${pilih.length} publikasi)` : 'Kirim';
     }
 
     async function kirim() {
@@ -590,7 +661,7 @@ const Sipotret = (() => {
             const res = await fetch(URL_KIRIM, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': CSRF },
-                body: JSON.stringify({ ...periode(), hasil_ids: ids }),
+                body: JSON.stringify({ ...periode(), hasil_ids: ids, perbarui: !!$('spPerbarui')?.checked }),
             });
             const json = await res.json();
             if (!res.ok || json.error) throw new Error(json.error || json.message || 'Server membalas ' + res.status);
@@ -598,10 +669,11 @@ const Sipotret = (() => {
             const ok = json.laporan.filter(l => !l.error);
             const gagal = json.laporan.filter(l => l.error);
             const tambah = ok.reduce((n, l) => n + l.ditambah, 0);
-            await muat(); // tampilkan status terbaru (yang terkirim jadi "Sudah ada")
+            const diperbarui = ok.reduce((n, l) => n + (l.diperbarui || 0), 0);
+            await muat(); // tampilkan status terbaru (yang terkirim jadi "Sudah ada, sama")
             $('spBody').insertAdjacentHTML('afterbegin', `
                 <div class="alert ${gagal.length ? 'alert-warning' : 'alert-success'}">
-                    ${tambah} temuan ditambahkan ke SIPOTRET dari ${ok.length} publikasi.
+                    ${tambah} temuan ditambahkan${diperbarui ? `, ${diperbarui} diperbarui` : ''} ke SIPOTRET dari ${ok.length} publikasi.
                     ${gagal.map(l => `<div class="text-danger small mt-1">${esc(l.judul)}: ${esc(l.error)}</div>`).join('')}
                 </div>`);
         } catch (e) {
@@ -614,6 +686,8 @@ const Sipotret = (() => {
         $('spBulan').addEventListener('change', muat);
         $('spTahun').addEventListener('change', muat);
         $('spBody').addEventListener('change', e => { if (e.target.matches('.sp-pilih')) hitung(); });
+        // centang/lepas "perbarui yang beda": status & publikasi yang bisa dipilih ikut berubah
+        $('spPerbarui').addEventListener('change', () => { if (data) render(); });
         // klik periode yang sudah terdaftar → pakai periode itu
         $('spBody').addEventListener('click', e => {
             const a = e.target.closest('[data-periode]');

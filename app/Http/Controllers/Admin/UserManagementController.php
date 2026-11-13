@@ -24,14 +24,57 @@ class UserManagementController extends Controller
     }
 
     /**
+     * Aturan password lokal (juga password cadangan user SSO): minimal 8 karakter,
+     * mengandung huruf besar, huruf kecil, dan angka.
+     */
+    private static function passwordRules(string $presence): array
+    {
+        return [$presence, 'string', 'min:8', 'regex:/[a-z]/', 'regex:/[A-Z]/', 'regex:/[0-9]/', 'confirmed'];
+    }
+
+    private static function passwordMessages(): array
+    {
+        return [
+            'password.required'  => 'Password wajib diisi.',
+            'password.min'       => 'Password minimal 8 karakter.',
+            'password.regex'     => 'Password harus mengandung huruf besar, huruf kecil, dan angka.',
+            'password.confirmed' => 'Konfirmasi password tidak sama.',
+        ];
+    }
+
+    /**
      * Display a listing of the resource.
      */
     public function index()
     {
         $this->checkAdmin();
         
-        $users = User::orderBy('created_at', 'desc')->paginate(10);
-        return view('admin.users.index', compact('users'));
+        // User 'pending' (login SSO, belum disetujui) tampil paling atas
+        $users = User::when(request('role'), fn ($q, $role) => $q->where('role', $role))
+            ->orderByRaw("role = 'pending' DESC")
+            ->orderBy('created_at', 'desc')
+            ->paginate(10)
+            ->withQueryString();
+        // jumlah per role untuk kartu statistik (seluruh user, tidak terpengaruh filter)
+        $stats = User::selectRaw('role, COUNT(*) AS jml')->groupBy('role')->pluck('jml', 'role');
+        $pendingCount = (int) ($stats['pending'] ?? 0);
+
+        return view('admin.users.index', compact('users', 'pendingCount', 'stats'));
+    }
+
+    /**
+     * Setujui user SSO 'pending' menjadi user biasa.
+     */
+    public function approve($id)
+    {
+        $this->checkAdmin();
+
+        $user = User::findOrFail($id);
+        if ($user->isPending()) {
+            $user->update(['role' => 'user']);
+        }
+
+        return back()->with('success', "User {$user->username} disetujui dan sekarang bisa memakai aplikasi.");
     }
 
     /**
@@ -57,14 +100,12 @@ class UserManagementController extends Controller
         if ($request->input('jenis', 'sso') === 'sso') {
             $validated = $request->validate([
                 'username' => 'required|string|max:255|unique:users',
-                'role'     => 'required|in:admin,user',
+                'role'     => 'required|in:admin,pemeriksa,user',
                 // opsional: password cadangan untuk Login Lokal bila SSO sedang bermasalah
-                'password' => 'nullable|string|min:8|confirmed',
+                'password' => self::passwordRules('nullable'),
             ], [
-                'username.unique'    => 'Username ini sudah terdaftar.',
-                'password.min'       => 'Password cadangan minimal 8 karakter.',
-                'password.confirmed' => 'Konfirmasi password cadangan tidak sama.',
-            ]);
+                'username.unique' => 'Username ini sudah terdaftar.',
+            ] + self::passwordMessages());
 
             $username  = trim($validated['username']);
             $cadangan  = !empty($validated['password']);
@@ -85,10 +126,10 @@ class UserManagementController extends Controller
             'name' => 'required|string|max:255',
             'username' => 'required|string|max:255|unique:users',
             'email' => 'nullable|string|email|max:255|unique:users',
-            'password' => 'required|string|min:8|confirmed',
-            'role' => 'required|in:admin,user',
+            'password' => self::passwordRules('required'),
+            'role' => 'required|in:admin,pemeriksa,user',
             'provinsi' => 'nullable|string|max:255',
-        ]);
+        ], self::passwordMessages());
 
         $validated['password'] = Hash::make($validated['password']);
 
@@ -118,14 +159,15 @@ class UserManagementController extends Controller
         
         $user = User::findOrFail($id);
 
+        // username tidak bisa diubah di form edit (kunci pencocokan SSO), jadi tidak divalidasi;
+        // email opsional — user yang ditambahkan lewat username baru punya email setelah login SSO
         $validated = $request->validate([
             'name' => 'required|string|max:255',
-            'username' => 'required|string|max:255|unique:users,username,' . $id,
-            'email' => 'required|string|email|max:255|unique:users,email,' . $id,
-            'password' => 'nullable|string|min:8|confirmed',
-            'role' => 'required|in:admin,user',
+            'email' => 'nullable|string|email|max:255|unique:users,email,' . $id,
+            'password' => self::passwordRules('nullable'),
+            'role' => 'required|in:admin,pemeriksa,user',
             'provinsi' => 'nullable|string|max:255',
-        ]);
+        ], self::passwordMessages());
 
         if (!empty($validated['password'])) {
             $validated['password'] = Hash::make($validated['password']);

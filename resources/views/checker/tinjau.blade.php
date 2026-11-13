@@ -89,13 +89,23 @@
 
 @push('scripts')
 <script src="{{ asset('js/checker-review.js') }}?v={{ filemtime(public_path('js/checker-review.js')) }}"></script>
+{{-- pembaca teks PDF di browser: dipakai "Scan ulang" di panel tinjauan --}}
+<script src="{{ asset('js/pdf-extract.js') }}?v={{ filemtime(public_path('js/pdf-extract.js')) }}"></script>
 <script>
 const CSRF = document.querySelector('meta[name=csrf-token]')?.content ?? '';
+PdfExtract.init({ pdfjsBuild: '{{ asset("pdfjs/build") }}/' });
 CheckerReview.init({ viewerUrl: '{{ asset("pdfjs/web/viewer.html") }}', csrf: CSRF, saveUrl: '{{ route("checker.hasil.review_kategori", "__ID__") }}', contohUrl: '{{ route("checker.contoh.json") }}' });
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Semua publikasi dalam sesi, tab per publikasi — seperti saat pemeriksaan
-    CheckerReview.start(@json($entries), {
+    // Catatan SIPOTRET periode terakhir → isian awal kriteria yang belum ditinjau + usulan item lainnya,
+    // sama seperti saat pemeriksaan dari Publikasi Bermasalah / detail publikasi
+    const entries = @json($entries);
+    entries.forEach(e => {
+        CheckerReview.terapkanIsian(e, e.isianSipotret);
+        if (e._usulanCatatan?.length) e.usulanCatatan = e._usulanCatatan;
+    });
+    // Semua publikasi dalam sesi, tab per publikasi, seperti saat pemeriksaan
+    CheckerReview.start(entries, {
         startIndex: @json($startIndex),
         onFinish: () => { window.location = @json(route('checker.riwayat.detail', $sesi)); },
     });

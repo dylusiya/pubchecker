@@ -82,24 +82,30 @@ class BpsApiService
         $url = "{$this->baseUrl}/api/view/domain/{$domain}/model/publication/lang/ind/id/{$pubId}/key/{$this->apiKey}/";
 
         try {
-            $response = Http::timeout(30)->get($url);
+            // webapi.bps.go.id kadang me-reset koneksi (cURL 56) → coba ulang beberapa kali
+            $response = Http::timeout(30)
+                ->connectTimeout(10)
+                ->retry(3, 800, fn ($e) => $e instanceof \Illuminate\Http\Client\ConnectionException
+                    || $e instanceof \GuzzleHttp\Exception\RequestException, throw: false)
+                ->get($url);
 
             if (!$response->successful()) {
                 Log::warning("BPS view HTTP {$response->status()} pub_id={$pubId} domain={$domain}");
-                return ['status' => 'ERROR', 'data' => []];
+                // 5xx = gangguan server BPS, bukan publikasi tidak ada
+                return ['status' => 'ERROR', 'data' => [], 'reason' => $response->serverError() ? 'koneksi' : 'http'];
             }
 
             $raw = $response->json();
 
             if (($raw['data-availability'] ?? '') !== 'available' || empty($raw['data'])) {
-                return ['status' => 'ERROR', 'data' => []];
+                return ['status' => 'ERROR', 'data' => [], 'reason' => 'tidak_ada'];
             }
 
             return $raw;
 
         } catch (\Throwable $e) {
             Log::error('BPS getPublicationDetail: ' . $e->getMessage());
-            return ['status' => 'ERROR', 'data' => []];
+            return ['status' => 'ERROR', 'data' => [], 'reason' => 'koneksi'];
         }
     }
 

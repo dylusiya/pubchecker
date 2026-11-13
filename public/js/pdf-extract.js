@@ -131,14 +131,14 @@ const PdfExtract = (() => {
                             <i class="ti ti-photo-scan text-primary me-1"></i> Diperlukan OCR untuk membaca gambar
                         </h5>
                         <p class="small mb-2">
-                            Halaman <strong>${list}</strong> perlu dibaca dengan OCR — judul kover sering berupa
+                            Halaman <strong>${list}</strong> perlu dibaca dengan OCR karena judul kover sering berupa
                             gambar JPG / outline, dan halaman hasil scan tidak memiliki teks.
                         </p>
                         <div class="alert alert-warning py-2 px-3 small mb-2">
                             <i class="ti ti-download me-1"></i>
                             Browser Anda akan <strong>mengunduh mesin OCR ± ${OCR_SIZE_MB} MB</strong>
                             (Tesseract, bahasa Indonesia &amp; Inggris) dari internet.
-                            Ini hanya terjadi <strong>sekali</strong> — setelahnya tersimpan di cache browser.
+                            Ini hanya terjadi <strong>sekali</strong>, setelahnya tersimpan di cache browser.
                         </div>
                         <p class="small text-muted mb-0">
                             Hasil OCR bisa salah baca (mis. angka 0 terbaca huruf O), jadi kriteria di halaman tersebut
@@ -404,5 +404,18 @@ const PdfExtract = (() => {
         };
     }
 
-    return { init, extract };
+    /**
+     * Hasil ekstraksi → base64 (JSON UTF-8) untuk dikirim ke server sebagai `extracted_b64`.
+     * Teks publikasi apa adanya bisa memuat pola yang salah dibaca firewall hosting (WAF) sebagai serangan,
+     * sehingga permintaan ditolak 403 sebelum sampai ke aplikasi; base64 menghindari salah baca itu.
+     */
+    function kemas(extracted) {
+        if (!extracted) return null;
+        const bytes = new TextEncoder().encode(JSON.stringify(extracted));
+        let biner = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) biner += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        return btoa(biner);
+    }
+
+    return { init, extract, kemas };
 })();

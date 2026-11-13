@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 
 class DetailPemeriksaan extends Model
@@ -26,7 +27,6 @@ class DetailPemeriksaan extends Model
 
     protected $casts = [
         'ditinjau_at' => 'datetime',
-        'lokasi'      => 'array',
         'pin_halaman' => 'integer',
         'pin_x'       => 'float',
         'pin_y'       => 'float',
@@ -36,6 +36,21 @@ class DetailPemeriksaan extends Model
     public function pinArray(): ?array
     {
         return $this->pin_halaman ? ['hal' => $this->pin_halaman, 'x' => $this->pin_x, 'y' => $this->pin_y] : null;
+    }
+
+    /**
+     * Lokasi temuan [{hal, teks}] sebagai array. Teks JSON yang ter-encode dua kali (draf "tinjau sambil diproses"
+     * sebelum diperbaiki, 11 Nov 2026) ikut dibaca benar; isian berupa array/teks JSON keduanya diterima.
+     */
+    protected function lokasi(): Attribute
+    {
+        return Attribute::make(
+            get: function ($v) {
+                for ($i = 0; is_string($v) && $i < 2; $i++) $v = json_decode($v, true);
+                return is_array($v) ? array_values(array_filter($v, 'is_array')) : null;
+            },
+            set: fn($v) => is_array($v) ? self::encodeLokasi($v) : ($v === '' ? null : $v),
+        );
     }
 
     /** Untuk insert massal (insert() tidak melewati cast). */
@@ -57,6 +72,8 @@ class DetailPemeriksaan extends Model
     const STATUS_TIDAK_ADA       = 'TIDAK ADA';
     const STATUS_TIDAK_SESUAI    = 'TIDAK SESUAI';
     const STATUS_TIDAK_DIPERIKSA = 'TIDAK DIPERIKSA';
+    /** Draf (ditinjau sambil diproses): cek otomatis belum selesai. Diganti hasil cek saat selesai. */
+    const STATUS_MENUNGGU        = 'MENUNGGU';
 
     /** Status yang bisa dipilih petugas di panel tinjauan. */
     const STATUS_VERIFIKASI = [self::STATUS_OK, self::STATUS_TIDAK_SESUAI, self::STATUS_TIDAK_DIPERIKSA];

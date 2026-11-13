@@ -2,18 +2,24 @@
     $isAdmin       = auth()->check() && auth()->user()->role === 'admin';
     $totalSesi     = \App\Models\SesiPemeriksaan::count();
     $totalKriteria = $isAdmin ? \App\Models\KriteriaPemeriksaan::where('aktif', true)->count() : 0;
+    // publikasi yang ditugaskan ke user ini (tabel bisa belum ada bila migrasi penugasan belum dijalankan)
+    try { $totalTugas = auth()->check() ? \App\Models\PenugasanPemeriksaan::where('user_id', auth()->id())->count() : 0; }
+    catch (\Throwable $e) { $totalTugas = 0; }
 
     $menu = [
         ['route' => 'dashboard',         'active' => 'dashboard',        'icon' => 'home',           'label' => 'Dashboard'],
-        ['route' => 'checker.index',     'active' => 'checker.index',    'icon' => 'file-search',    'label' => 'Pemeriksaan'],
+        ['route' => 'checker.index',     'active' => 'checker.index',    'icon' => 'file-search',    'label' => 'Pemeriksaan', 'can' => 'periksa'],
         ['route' => 'checker.bps.index', 'active' => 'checker.bps.*',    'icon' => 'cloud-download', 'label' => 'Import API BPS'],
         ['route' => 'checker.riwayat',   'active' => 'checker.riwayat*', 'icon' => 'history',        'label' => 'Riwayat Sesi', 'badge' => $totalSesi],
+        ['route' => 'checker.tugas',     'active' => 'checker.tugas',    'icon' => 'user-check',     'label' => 'Tugas Saya', 'can' => 'periksa', 'badge' => $totalTugas],
     ];
     $adminMenu = [
         ['route' => 'admin.kriteria.index',        'active' => ['admin.kriteria.index', 'admin.kriteria.create', 'admin.kriteria.edit'], 'icon' => 'list-check', 'label' => 'Kelola Kriteria', 'badge' => $totalKriteria],
         ['route' => 'admin.kriteria.contoh.index', 'active' => 'admin.kriteria.contoh.*', 'icon' => 'photo',      'label' => 'Contoh per Kategori'],
         ['route' => 'admin.users.index',           'active' => 'admin.users.*',           'icon' => 'users',      'label' => 'Manajemen User'],
     ];
+    // role 'user' hanya melihat — sembunyikan menu yang butuh izin
+    $menu = array_filter($menu, fn ($m) => empty($m['can']) || Gate::allows($m['can']));
     $adminActive = $isAdmin && request()->routeIs('admin.*');
 @endphp
 

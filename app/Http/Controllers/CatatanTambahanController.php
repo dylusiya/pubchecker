@@ -41,18 +41,22 @@ class CatatanTambahanController extends Controller
     {
         return $request->validate([
             'kategori'   => 'nullable|string|max:150',
-            'item'       => 'required|string|max:' . CatatanTambahan::MAX_ITEM,
+            // nama lengkap; di SIPOTRET tersimpan utuh di kolom catatan (TEXT)
+            'item'       => 'required|string|max:' . CatatanTambahan::MAX_NAMA,
             'keterangan' => 'required|string|max:2000',
-            'flag_level' => ['required', Rule::in(CatatanTambahan::FLAG_LEVELS)],
+            // kosong = tidak perlu perbaikan (seperti flag kosong di SIPOTRET)
+            'flag_level' => ['nullable', Rule::in(CatatanTambahan::FLAG_LEVELS)],
+            // item master SIPOTRET (mis. dari acuan, tanpa kriteria di pubchecker); kosong = item custom
+            'item_periksa_id' => 'nullable|integer|min:1',
             'halaman'    => 'nullable|integer|min:1|max:65000',
             // posisi komentar di halaman PDF (pecahan lebar/tinggi halaman)
             'pos_x'      => 'nullable|numeric|between:0,1',
             'pos_y'      => 'nullable|numeric|between:0,1',
         ], [
             'item.required'       => 'Nama item wajib diisi.',
-            'item.max'            => 'Nama item maksimal ' . CatatanTambahan::MAX_ITEM . ' karakter (batas SIPOTRET).',
+            'item.max'            => 'Nama item maksimal :max karakter (batas SIPOTRET).',
             'keterangan.required' => 'Keterangan wajib diisi.',
-            'flag_level.required' => 'Pilih level: minor, moderate, atau major.',
+            'flag_level.in'       => 'Level harus minor, moderate, major, atau kosong.',
         ]);
     }
 

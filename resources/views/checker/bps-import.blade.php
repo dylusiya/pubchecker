@@ -5,9 +5,11 @@
 @section('page-title', 'Import Publikasi dari API BPS')
 @section('page-subtitle', 'Cari publikasi dari portal BPS, centang hingga 10 publikasi untuk diperiksa sekaligus')
 @section('page-actions')
+    @can('periksa')
     <a href="{{ route('checker.index') }}" class="btn">
         <i class="ti ti-upload"></i> Upload Manual
     </a>
+    @endcan
     <a href="{{ route('checker.riwayat') }}" class="btn btn-primary">
         <i class="ti ti-history"></i> Riwayat
     </a>
@@ -126,12 +128,29 @@ BPS_DOMAIN=6300</pre>
                     </div>
 
                     {{-- Pilihan beberapa publikasi (maks. MAX_PUBS) untuk diperiksa sekaligus --}}
-                    <div class="alert alert-info d-flex align-items-center flex-wrap gap-2 py-2 mb-3" id="selectionBar">
+                    <div class="alert alert-info d-flex align-items-center flex-wrap gap-2 py-2 mb-3" id="selectionBar" @cannot('periksa') hidden @endcannot>
                         <i class="ti ti-checkbox"></i>
                         <span class="flex-fill small" id="selectionInfo"></span>
                         <button type="button" class="btn btn-sm btn-ghost-secondary" id="btnClearSel" onclick="clearSelection()" hidden>
                             <i class="ti ti-x"></i> <span>Batal Pilih</span>
                         </button>
+                        @if($pemeriksa)
+                            {{-- admin: tugaskan publikasi yang dicentang ke satu pemeriksa --}}
+                            <div class="d-flex align-items-center gap-1" id="tugasBar" hidden>
+                                <select id="tugasUser" class="form-select form-select-sm w-auto" aria-label="Pemeriksa">
+                                    <option value="">Pilih pemeriksa…</option>
+                                    @foreach($pemeriksa as $u)
+                                        <option value="{{ $u['id'] }}">{{ $u['nama'] }}{{ $u['role'] === 'admin' ? ' (admin)' : '' }}</option>
+                                    @endforeach
+                                </select>
+                                <button type="button" class="btn btn-sm btn-purple" onclick="tugaskanTerpilih()" title="Tugaskan publikasi yang dicentang ke pemeriksa ini">
+                                    <i class="ti ti-user-check"></i> <span id="btnTugasLabel">Tugaskan</span>
+                                </button>
+                                <button type="button" class="btn btn-sm btn-ghost-secondary" onclick="tugaskanTerpilih(true)" title="Lepas penugasan publikasi yang dicentang">
+                                    <i class="ti ti-user-off"></i>
+                                </button>
+                            </div>
+                        @endif
                         <button type="button" class="btn btn-sm btn-primary" id="btnCheckSel" onclick="startCheck()" disabled>
                             <i class="ti ti-rosette-discount-check"></i> <span id="btnCheckSelLabel">Periksa Terpilih</span>
                         </button>
@@ -172,11 +191,15 @@ BPS_DOMAIN=6300</pre>
 
 @push('scripts')
 <script src="{{ asset('js/checker-review.js') }}?v={{ filemtime(public_path('js/checker-review.js')) }}"></script>
+<script src="{{ asset('js/penugasan.js') }}?v={{ filemtime(public_path('js/penugasan.js')) }}"></script>
 <script src="{{ asset('js/pdf-extract.js') }}?v={{ filemtime(public_path('js/pdf-extract.js')) }}"></script>
 <script src="{{ asset('js/batch-check.js') }}?v={{ filemtime(public_path('js/batch-check.js')) }}"></script>
 <script>
 const CSRF      = document.querySelector('meta[name=csrf-token]')?.content ?? '';
+const CAN_PERIKSA = @json(Gate::allows('periksa')); // role 'user': hanya melihat
 const MAX_PUBS  = 10; // batas publikasi per pemeriksaan (sama dengan Upload Manual)
+const ADMIN_TUGAS = @json((bool) $pemeriksa); // admin: bisa menugaskan publikasi ke pemeriksa
+Penugasan.init({ url: '{{ route("checker.penugasan.simpan") }}', csrf: CSRF });
 let currentPage = 1;
 let searchItems = []; // hasil search terakhir
 const selected  = new Map(); // pub_id → pub; tetap tersimpan saat pindah halaman pencarian
@@ -235,6 +258,35 @@ function renderSelection() {
     document.getElementById('btnCheckSel').disabled = !n;
     document.getElementById('btnCheckSelLabel').textContent = n ? `Periksa (${n})` : 'Periksa Terpilih';
     document.getElementById('btnClearSel').hidden = !n;
+    if (ADMIN_TUGAS) {
+        document.getElementById('tugasBar').hidden = !n;
+        document.getElementById('btnTugasLabel').textContent = n ? `Tugaskan (${n})` : 'Tugaskan';
+    }
+}
+
+// ── PENUGASAN PEMERIKSAAN (admin) ─────────────────────────────
+async function tugaskanTerpilih(lepas = false) {
+    const pubs = [...selected.values()];
+    if (!pubs.length) return;
+    const sel = document.getElementById('tugasUser');
+    if (!lepas && !sel.value) { sel.focus(); showAlert('warning', 'Pilih pemeriksa dulu.'); return; }
+    const nama = sel.selectedOptions[0]?.textContent.trim();
+    if (!confirm(lepas ? `Lepas penugasan ${pubs.length} publikasi?` : `Tugaskan ${pubs.length} publikasi ke ${nama}?
+
+Selama ditugaskan, hanya pemeriksa itu (dan admin) yang bisa memeriksa, meninjau, dan mengirim ke SIPOTRET.`)) return;
+    try {
+        const r = await Penugasan.simpan(pubs.map(p => ({ pub_id: String(p.pub_id), judul: p.title, domain: String(p.domain || p._domain || '') })), lepas ? null : sel.value);
+        pubs.forEach(p => { p.tugas = r.tugas[String(p.pub_id)] ?? null; });
+        searchItems.forEach((p, i) => {
+            if (!selected.has(String(p.pub_id))) return;
+            p.tugas = r.tugas[String(p.pub_id)] ?? null;
+            const box = document.getElementById('tugas-' + i);
+            if (box) box.innerHTML = Penugasan.badge(p.tugas);
+        });
+        showAlert('success', r.pesan);
+    } catch (e) {
+        showAlert('danger', 'Gagal menyimpan penugasan: ' + e.message);
+    }
 }
 
 // ── SEARCH ────────────────────────────────────────────────────
@@ -298,8 +350,12 @@ function renderSearchResults(meta, items) {
     <div class="pub-card mb-2 ${isSel ? 'border-primary' : ''}" id="pubcard-${i}">
         <div class="d-flex gap-3 align-items-start flex-wrap" style="cursor:pointer;"
              onclick="window.location='${detailUrl}'">
-            ${pub.has_pdf
-                ? `<label class="form-check m-0 pt-1" onclick="event.stopPropagation()" title="Pilih untuk diperiksa sekaligus">
+            ${!CAN_PERIKSA ? '' : !Penugasan.boleh(pub.tugas)
+                ? `<label class="form-check m-0 pt-1" onclick="event.stopPropagation()" title="Ditugaskan ke ${esc(pub.tugas.nama)}">
+                       <input type="checkbox" class="form-check-input" disabled>
+                   </label>`
+                : pub.has_pdf || ADMIN_TUGAS
+                ? `<label class="form-check m-0 pt-1" onclick="event.stopPropagation()" title="Pilih untuk diperiksa sekaligus${ADMIN_TUGAS ? ' atau ditugaskan' : ''}">
                        <input type="checkbox" class="form-check-input pub-select" ${isSel ? 'checked' : ''}
                               onchange="toggleSelect(${i}, this)">
                    </label>`
@@ -319,14 +375,15 @@ function renderSearchResults(meta, items) {
                     ${pub.issn ? `<span class="badge bg-secondary fw-normal">${pub.issn}</span>` : ''}
                     ${pub.rl_date ? `<small class="text-muted">${pub.rl_date}</small>` : ''}
                     ${pub.size ? `<small class="text-muted">${pub.size}</small>` : ''}
+                    <span id="tugas-${i}">${Penugasan.badge(pub.tugas)}</span>
                 </div>
             </div>
         </div>
         <div class="d-flex gap-2 align-items-center justify-content-end mt-2 flex-wrap">
             ${pub.has_pdf ? '' : `<span class="badge bg-secondary fw-normal">Tanpa PDF</span>`}
-            <a href="${detailUrl}" class="btn btn-primary btn-sm" title="Buka publikasi untuk diperiksa">
-                <i class="ti ti-rosette-discount-check"></i>
-                <span class="d-none d-md-inline ms-1">Buka &amp; Periksa</span>
+            <a href="${detailUrl}" class="btn btn-primary btn-sm" title="Buka detail publikasi">
+                <i class="ti ti-${CAN_PERIKSA ? 'rosette-discount-check' : 'eye'}"></i>
+                <span class="d-none d-md-inline ms-1">${CAN_PERIKSA ? 'Buka &amp; Periksa' : 'Lihat Detail'}</span>
             </a>
             ${pub.has_pdf
                 ? `<a href="${esc(unduhUrl(pub))}" download class="btn btn-outline-success btn-sm" onclick="event.stopPropagation()" title="Download PDF">
@@ -382,18 +439,21 @@ async function startCheck() {
                         pdf:     pub.pdf,
                         domain:  String(pub.domain || pub._domain || ''),
                         issn:    pub.issn || null,
+                        catalog: pub.catalog || null, // cadangan cek sama_api bila detail Web API gagal diambil server
+                        pub_no:  pub.pub_no || null,
                         rl_date: pub.rl_date || null,
                     }],
-                    extracted: extracted ? JSON.stringify(extracted) : null,
+                    extracted_b64: PdfExtract.kemas(extracted), // base64: lihat PdfExtract.kemas
                     sesi_id: sesiId,
                 }),
             });
-            const data = await res.json();
+            const data = await res.json().catch(() => { throw new Error(res.status === 403 ? 'Ditolak server (403) sebelum sampai ke aplikasi, kemungkinan firewall hosting. Coba lagi; bila tetap gagal, hubungi pengelola server.' : 'Server membalas ' + res.status + ' (bukan JSON)'); });
             if (data.error || !res.ok) throw new Error(data.error || data.message || ('Server membalas ' + res.status));
             const r = data.results?.[0];
             if (!r || r.error) throw new Error(r?.error || 'Tidak ada hasil pemeriksaan');
             sesiId ??= data.sesi_id;
             r._pdfUrl = proxied(pub.pdf); // PDF untuk viewer — jangan mengandalkan urutan
+            r._pub = pub; // pub_id & domain: data publikasi di judul panel tinjauan diambil dari API BPS
             return r;
         },
     }));
@@ -415,6 +475,8 @@ async function startCheck() {
 
 /** @param {number} [jobIndex] kartu yang diklik "Tinjau" — publikasi itu dibuka pertama */
 function beginReview(jobIndex) {
+    // termasuk publikasi yang baru berhasil lewat "Coba lagi" setelah pemeriksaan awal selesai
+    allResults = batchOutcomes.filter(o => o?.result).map(o => o.result);
     const target  = Number.isInteger(jobIndex) ? batchOutcomes[jobIndex]?.result : null;
     const entries = allResults
         .filter(r => r.checks?.length)
@@ -425,6 +487,8 @@ function beginReview(jobIndex) {
             ocrLines: r.ocr_lines,
             summary:  r.summary,
             url:      r._pdfUrl,
+            pubId:     r._pub?.pub_id ?? null,
+            pubDomain: r._pub?.domain || r._pub?._domain || null,
         }));
     if (!entries.length) return;
 

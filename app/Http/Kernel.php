@@ -63,5 +63,8 @@ class Kernel extends HttpKernel
         'signed' => \App\Http\Middleware\ValidateSignature::class,
         'throttle' => \Illuminate\Routing\Middleware\ThrottleRequests::class,
         'verified' => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
+        'approved' => \App\Http\Middleware\EnsureUserApproved::class,
+        // hanya pemeriksa yang ditugaskan ke publikasi {hasil}/{catatan} (atau admin)
+        'tugas'    => \App\Http\Middleware\CekPenugasan::class,
     ];
 }

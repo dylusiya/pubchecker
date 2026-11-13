@@ -52,6 +52,7 @@ class CheckerController extends Controller
                 'sesi_id' => 'nullable|integer|exists:sesi_pemeriksaan,id',
                 // teks hasil ekstraksi di browser (js/pdf-extract.js), JSON
                 'extracted' => 'nullable|string',
+                'extracted_b64' => 'nullable|string', // base64 dari PdfExtract.kemas
             ]);
         } catch (\Throwable $e) {
             return response()->json([
@@ -73,7 +74,7 @@ class CheckerController extends Controller
         try {
             foreach ($request->file('files') as $file) {
                 try {
-                    $extracted = json_decode((string) $request->input('extracted'), true);
+                    $extracted = PdfCheckerService::extractedDari($request);
                     $result    = is_array($extracted)
                         ? $this->checker->checkFromText($extracted, $file->getClientOriginalName(), $file->getSize())
                         : $this->checker->check($file); // fallback: ekstraksi di server (butuh exec untuk PDF terenkripsi)
@@ -335,12 +336,18 @@ class CheckerController extends Controller
     /** Tinjauan semua publikasi ber-PDF dalam satu sesi, seperti saat pemeriksaan. */
     private function tampilTinjauan(SesiPemeriksaan $sesi, ?int $mulaiId)
     {
-        $semua = $sesi->hasilPemeriksaan()->with('detail')->orderBy('id')->get();
-        $daftar = $semua->filter(fn($h) => $h->hasPdf() && $h->detail->isNotEmpty())->values();
+        $semua = $sesi->hasilPemeriksaan()->with('detail', 'catatanTambahan')->orderBy('id')->get();
+        // publikasi yang ditugaskan ke pemeriksa lain tidak ikut ditinjau
+        $tugas  = \App\Models\PenugasanPemeriksaan::untuk($semua->pluck('pub_id_api'));
+        $boleh  = fn($h) => \App\Models\PenugasanPemeriksaan::boleh(auth()->user(), $h->pub_id_api, $tugas[(string) $h->pub_id_api] ?? null);
+        $daftar = $semua->filter(fn($h) => $h->hasPdf() && $h->detail->isNotEmpty() && $boleh($h))->values();
+        $isian  = $this->isianSipotret($daftar);
 
         if ($daftar->isEmpty()) {
             return redirect()->route('checker.riwayat.detail', $sesi)
-                ->with('error', 'Tidak ada PDF tersimpan di sesi ini, tinjauan tidak bisa dilanjutkan.');
+                ->with('error', $semua->contains(fn($h) => !$boleh($h))
+                    ? 'Publikasi di sesi ini ditugaskan ke pemeriksa lain, tinjauan tidak bisa dibuka.'
+                    : 'Tidak ada PDF tersimpan di sesi ini, tinjauan tidak bisa dilanjutkan.');
         }
 
         // target/area tidak disimpan di detail — ambil dari master kriteria untuk petunjuk halaman
@@ -350,6 +357,14 @@ class CheckerController extends Controller
         $entries = $daftar->map(fn($hasil) => [
             'filename' => $hasil->judul,
             'hasilId'  => $hasil->id,
+            // data publikasi (ISSN, revisi terakhir, dll.) diambil CheckerReview dari API BPS lewat pub_id
+            'pubId'     => $hasil->pub_id_api,
+            'pubDomain' => $hasil->pub_domain,
+            // catatan SIPOTRET periode acuan (tersimpan di hasil) → isian awal kriteria yang belum ditinjau;
+            // acuanPilihan: periode yang bisa dipilih sebagai acuan (CheckerReview, kotak isian awal)
+            'isianSipotret' => $isian[$hasil->id]['isian'] ?? null,
+            'acuan'         => $hasil->acuanSipotret(),
+            'acuanPilihan'  => $isian[$hasil->id]['pilihan'] ?? null,
             'summary'  => null,
             'url'      => route('checker.hasil.pdf', $hasil),
             'ocrLines' => $hasil->ocr_lines ?: (object) [],
@@ -384,6 +399,46 @@ class CheckerController extends Controller
         ]);
     }
 
+    /**
+     * Isian awal dari SIPOTRET untuk tinjauan yang dilanjutkan dari Riwayat, per hasil Import API:
+     * - isian:   catatan periode ACUAN yang dipilih petugas & tersimpan di hasil (sipotret_acuan_*),
+     *            bukan "periode terakhir" yang bisa berubah. Tanpa acuan tersimpan → tanpa isian.
+     *            Item lainnya yang sudah tersimpan sebagai catatan tambahan tidak diusulkan lagi.
+     * - pilihan: periode SIPOTRET publikasi itu yang punya catatan, untuk memilih/mengganti acuan.
+     * SIPOTRET gagal → tanpa isian & pilihan (tinjauan tetap bisa jalan).
+     *
+     * @return array<int, array{isian: ?array, pilihan: array}> hasil_id → isian & pilihan acuan
+     */
+    private function isianSipotret($daftar): array
+    {
+        $sipotret = app(\App\Services\SipotretService::class);
+        $denganPub = $daftar->filter(fn($h) => $h->pub_id_api);
+        if ($denganPub->isEmpty() || !$sipotret->enabled()) return [];
+
+        $kunci = fn($item, $ket) => mb_strtolower(trim((string) $item)) . '|' . mb_strtolower(trim((string) $ket));
+        $hasil = [];
+        try {
+            foreach ($denganPub as $h) {
+                $pub   = (string) $h->pub_id_api;
+                $acuan = $h->acuanSipotret();
+                $isi   = $acuan ? ($sipotret->isianPeriode([$pub], $acuan['bulan'], $acuan['tahun'])[$pub] ?? null) : null;
+                if ($isi) {
+                    $ada = $h->catatanTambahan->map(fn($c) => $kunci($c->item, $c->keterangan))->all();
+                    $isi['lainnya'] = array_values(array_filter($isi['lainnya'], fn($u) => !in_array($kunci($u['item'], $u['keterangan']), $ada, true)));
+                }
+                $pilihan = collect($sipotret->riwayatPublikasi($pub))
+                    ->filter(fn($r) => count($r['catatan']) > 0)
+                    ->map(fn($r) => ['bulan' => $r['bulan'], 'tahun' => $r['tahun'], 'catatan' => count($r['catatan'])])
+                    ->values()->all();
+                $hasil[$h->id] = ['isian' => $isi, 'pilihan' => $pilihan];
+            }
+        } catch (\Throwable $e) {
+            report($e);
+            return [];
+        }
+        return $hasil;
+    }
+
     // ── GET /checker/hasil/{hasil}/pdf ────────────────────────
     public function pdf(HasilPemeriksaan $hasil)
     {
@@ -391,9 +446,38 @@ class CheckerController extends Controller
             return response()->file(Storage::disk(HasilPemeriksaan::DISK)->path($hasil->pdf_path), ['Content-Type' => 'application/pdf']);
         }
         if ($hasil->pdf_url) {
-            return redirect()->route('checker.bps.pdf_proxy', ['url' => $hasil->pdf_url]);
+            return redirect()->route('checker.bps.pdf_proxy', ['url' => $this->pdfUrlSegar($hasil)]);
         }
         abort(404, 'File PDF tidak tersimpan.');
+    }
+
+    /**
+     * Link unduh PDF dari API BPS (webapi.bps.go.id/download.php?f=<token>) kedaluwarsa, sehingga
+     * hasil lama tidak bisa ditinjau ulang (portal membalas 400). Untuk hasil Import API yang menyimpan
+     * pub_id, ambil link baru dari API BPS (disimpan 30 menit) dan perbarui pdf_url-nya.
+     * Bila API BPS gagal, link lama tetap dicoba.
+     */
+    private function pdfUrlSegar(HasilPemeriksaan $hasil): string
+    {
+        if (!$hasil->pub_id_api) {
+            return $hasil->pdf_url;
+        }
+
+        $segar = \Illuminate\Support\Facades\Cache::remember("pubchecker.pdf_url.{$hasil->id}", now()->addMinutes(30), function () use ($hasil) {
+            $domain = $hasil->pub_domain ?: config('services.bps_api.domain', '6300');
+            $data   = app(\App\Services\BpsApiService::class)->getPublicationDetail((string) $domain, (string) $hasil->pub_id_api)['data'] ?? [];
+            $pdf    = is_array($data) ? ($data['pdf'] ?? $data['pdffile'] ?? null) : null;
+            return $pdf ?: null;
+        });
+
+        if (!$segar) {
+            \Illuminate\Support\Facades\Cache::forget("pubchecker.pdf_url.{$hasil->id}"); // jangan simpan kegagalan
+            return $hasil->pdf_url;
+        }
+        if ($segar !== $hasil->pdf_url) {
+            $hasil->forceFill(['pdf_url' => $segar])->save();
+        }
+        return $segar;
     }
 
     /**
@@ -461,7 +545,8 @@ class CheckerController extends Controller
     public function riwayatDetail(SesiPemeriksaan $sesi)
     {
         $sesi->load('hasilPemeriksaan.detail', 'hasilPemeriksaan.catatanTambahan');
-        return view('checker.riwayat-detail', compact('sesi'));
+        $tugas = \App\Models\PenugasanPemeriksaan::untuk($sesi->hasilPemeriksaan->pluck('pub_id_api'));
+        return view('checker.riwayat-detail', compact('sesi', 'tugas'));
     }
 
     // ── GET /checker/riwayat/{sesi}/export ───────────────────

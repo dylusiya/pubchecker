@@ -242,17 +242,39 @@
                         <div id="panel_bulan_rilis" class="param-panel border rounded p-3 bg-light" style="display:none;">
                             <p class="small text-muted mb-0">
                                 <i class="ti ti-info-circle me-1"></i>
-                                Tidak butuh parameter — mencari "Kota, Bulan Tahun" terakhir di target (mis. Kata Pengantar) dan
+                                Tidak butuh parameter. Mencari "Kota, Bulan Tahun" terakhir di target (mis. Kata Pengantar) dan
                                 membandingkannya dengan tanggal rilis dari API BPS: harus bulan rilis atau sebulan sebelumnya.
                                 Untuk hasil Upload Manual hasilnya Skip (tanggal rilis tidak diketahui).
                             </p>
+                        </div>
+
+                        {{-- SAMA_API --}}
+                        <div id="panel_sama_api" class="param-panel border rounded p-3 bg-light" style="display:none;">
+                            <p class="small fw-semibold mb-2"><i class="ti ti-world-check me-1 text-info"></i>Parameter Sama dengan Web API</p>
+                            <div class="row g-2">
+                                <div class="col-md-4">
+                                    <label class="form-label small mb-1">Isian yang dibandingkan</label>
+                                    <select name="param_isian_api" class="form-select form-select-sm">
+                                        @foreach(['issn' => 'ISSN/ISBN', 'katalog' => 'Nomor Katalog', 'nomor_publikasi' => 'Nomor Publikasi'] as $val => $label)
+                                        <option value="{{ $val }}" @selected(old('param_isian_api', $kriteria->parameter['isian'] ?? 'issn') === $val)>{{ $label }}</option>
+                                        @endforeach
+                                    </select>
+                                </div>
+                                <div class="col-md-8">
+                                    <small class="text-muted d-block mt-md-4">
+                                        Semua isian setelah label (mis. "ISSN :", "Katalog/Catalogue :", "Nomor Publikasi :") di target
+                                        dibandingkan dengan isian Web API BPS, tanpa memperhatikan spasi, titik & tanda hubung.
+                                        Untuk hasil Upload Manual hasilnya Skip (data Web API tidak ada).
+                                    </small>
+                                </div>
+                            </div>
                         </div>
 
                         {{-- JUDUL_KOVER --}}
                         <div id="panel_judul_kover" class="param-panel border rounded p-3 bg-light" style="display:none;">
                             <p class="small text-muted mb-0">
                                 <i class="ti ti-info-circle me-1"></i>
-                                Tidak butuh parameter — kata-kata judul di kover (tanpa nama penerbit, katalog, ISSN, edisi) minimal 70%
+                                Tidak butuh parameter. Kata-kata judul di kover (tanpa nama penerbit, katalog, ISSN, edisi) minimal 70%
                                 harus ada di halaman target, begitu juga tahun judulnya.
                             </p>
                         </div>
@@ -261,7 +283,7 @@
                         <div id="panel_romawi_genap" class="param-panel border rounded p-3 bg-light" style="display:none;">
                             <p class="small text-muted mb-0">
                                 <i class="ti ti-info-circle me-1"></i>
-                                Tidak butuh parameter — mencari jumlah halaman "romawi + arab" (mis. <code>x+52 halaman</code>)
+                                Tidak butuh parameter. Mencari jumlah halaman "romawi + arab" (mis. <code>x+52 halaman</code>)
                                 di target dan memeriksa angka romawinya genap.
                             </p>
                         </div>
@@ -300,7 +322,7 @@
                                 <div class="col-md-7">
                                     <label class="form-label small mb-1">Area yang diharapkan</label>
                                     <select name="param_area" class="form-select form-select-sm">
-                                        <option value="">— Pilih area —</option>
+                                        <option value="">-- Pilih area --</option>
                                         @foreach($areas as $val => $label)
                                         <option value="{{ $val }}"
                                             {{ old('param_area', ($kriteria->parameter['area'] ?? '')) === $val ? 'selected' : '' }}>
@@ -397,7 +419,7 @@
                         <div id="panel_manual" class="param-panel border rounded p-3 bg-light" style="display:none;">
                             <p class="small text-muted mb-0">
                                 <i class="ti ti-info-circle me-1"></i>
-                                Tipe <strong>manual</strong> tidak butuh parameter — kriteria ini selalu menghasilkan
+                                Tipe <strong>manual</strong> tidak butuh parameter, kriteria ini selalu menghasilkan
                                 <span class="badge bg-warning text-dark">PERLU DICEK</span> dan harus diperiksa manusia.
                             </p>
                         </div>
@@ -494,6 +516,7 @@ function showParamPanel() {
         bulan_rilis:  'panel_bulan_rilis',
         abjad:        'panel_pola_hitung',
         judul_kover:  'panel_judul_kover',
+        sama_api:     'panel_sama_api',
     };
     const target = map[tipe];
     if (target) {

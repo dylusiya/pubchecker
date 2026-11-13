@@ -183,7 +183,11 @@ class SsoController extends Controller
         // Disimpan agar logout juga mengakhiri sesi Keycloak (id_token_hint)
         $request->session()->put('sso_id_token', $token->json('id_token'));
 
-        Log::info('User logged in via SSO', ['user_id' => $user->id, 'username' => $user->username]);
+        Log::info('User logged in via SSO', ['user_id' => $user->id, 'username' => $user->username, 'role' => $user->role]);
+
+        if ($user->isPending()) {
+            return redirect()->route('pending');
+        }
 
         return redirect()->intended(route('dashboard'))
             ->with('success', 'Login berhasil! Selamat datang '.$user->name);
@@ -249,6 +253,9 @@ class SsoController extends Controller
 
             if (! $user) {
                 $data['password'] = bcrypt(Str::random(40)); // tidak dipakai; user SSO login lewat Keycloak
+                // Belum didaftarkan admin → 'pending', hanya bisa melihat halaman tunggu
+                // (EnsureUserApproved) sampai admin menyetujui di Manajemen User.
+                $data['role'] = 'pending';
                 $user = User::create($data);
                 Log::info('New SSO user created', ['id' => $user->id, 'username' => $username]);
             } else {

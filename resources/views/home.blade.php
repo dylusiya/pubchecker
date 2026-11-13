@@ -17,9 +17,11 @@
     <a href="{{ route('checker.riwayat') }}" class="btn">
         <i class="ti ti-history"></i> Riwayat
     </a>
+    @can('periksa')
     <a href="{{ route('checker.index') }}" class="btn btn-primary">
         <i class="ti ti-plus"></i> Pemeriksaan Baru
     </a>
+    @endcan
 @endsection
 
 @section('content')
@@ -51,7 +53,7 @@
         <div class="card">
             <div class="card-header">
                 <div>
-                    <h3 class="card-title">Publikasi Bermasalah per Kab/Kota — SIPOTRET</h3>
+                    <h3 class="card-title">Publikasi Bermasalah per Kab/Kota (SIPOTRET)</h3>
                     <div class="card-subtitle">Sel: <b>sudah approve / bermasalah</b> (publikasi yang punya catatan Pasca Rilis pada periode tsb) · <i class="ti ti-clock"></i> = file perbaikan menunggu approve</div>
                 </div>
                 <div class="card-actions">
@@ -112,19 +114,19 @@
                                         <td class="text-center">
                                             @if($s)
                                                 <a href="{{ route('dashboard.sipotret', ['wilayah' => $kode, 'tahun' => $tahun, 'bulan' => $b]) }}" class="badge {{ $kelas($s) }}"
-                                                   title="{{ $s['masalah'] }} bermasalah · {{ $s['diperbaiki'] }} approve · {{ $s['menunggu'] }} menunggu approve — klik untuk daftar">{{ $s['diperbaiki'] }}/{{ $s['masalah'] }}@if($s['menunggu']) <i class="ti ti-clock"></i>{{ $s['menunggu'] }}@endif</a>
+                                                   title="{{ $s['masalah'] }} bermasalah · {{ $s['diperbaiki'] }} approve · {{ $s['menunggu'] }} menunggu approve. Klik untuk melihat daftar">{{ $s['diperbaiki'] }}/{{ $s['masalah'] }}@if($s['menunggu']) <i class="ti ti-clock"></i>{{ $s['menunggu'] }}@endif</a>
                                             @else
-                                                <span class="text-secondary">—</span>
+                                                <span class="text-secondary">-</span>
                                             @endif
                                         </td>
                                     @endforeach
-                                    <td class="text-center fw-medium">{{ $baris['masalah'] ? $baris['diperbaiki'] . '/' . $baris['masalah'] : '—' }}</td>
+                                    <td class="text-center fw-medium">{{ $baris['masalah'] ? $baris['diperbaiki'] . '/' . $baris['masalah'] : '-' }}</td>
                                     <td class="text-center">
                                         @if($baris['menunggu'])
                                             <a href="{{ route('dashboard.sipotret', ['wilayah' => $kode, 'tahun' => $tahun, 'status' => 'menunggu']) }}"
                                                class="badge bg-yellow text-white" title="Buka daftar perbaikan yang menunggu approve">{{ $baris['menunggu'] }}</a>
                                         @else
-                                            <span class="text-secondary">—</span>
+                                            <span class="text-secondary">-</span>
                                         @endif
                                     </td>
                                     @php $belum = $baris['masalah'] - $baris['diperbaiki'] - $baris['menunggu']; @endphp
@@ -132,7 +134,7 @@
                                         @if($belum > 0)
                                             <span class="badge bg-red text-white">{{ $belum }}</span>
                                         @else
-                                            <span class="text-secondary">—</span>
+                                            <span class="text-secondary">-</span>
                                         @endif
                                     </td>
                                 </tr>
@@ -142,11 +144,11 @@
                             <tr class="fw-medium">
                                 <td>Total</td>
                                 @foreach(range(1, 12) as $b)
-                                    <td class="text-center">{{ $perBulan[$b]['masalah'] ? $perBulan[$b]['diperbaiki'] . '/' . $perBulan[$b]['masalah'] : '—' }}</td>
+                                    <td class="text-center">{{ $perBulan[$b]['masalah'] ? $perBulan[$b]['diperbaiki'] . '/' . $perBulan[$b]['masalah'] : '-' }}</td>
                                 @endforeach
-                                <td class="text-center">{{ $total['masalah'] ? $total['diperbaiki'] . '/' . $total['masalah'] : '—' }}</td>
-                                <td class="text-center">{{ $total['menunggu'] ?: '—' }}</td>
-                                <td class="text-center">{{ ($total['masalah'] - $total['diperbaiki'] - $total['menunggu']) ?: '—' }}</td>
+                                <td class="text-center">{{ $total['masalah'] ? $total['diperbaiki'] . '/' . $total['masalah'] : '-' }}</td>
+                                <td class="text-center">{{ $total['menunggu'] ?: '-' }}</td>
+                                <td class="text-center">{{ ($total['masalah'] - $total['diperbaiki'] - $total['menunggu']) ?: '-' }}</td>
                             </tr>
                         </tfoot>
                     </table>
@@ -193,13 +195,13 @@
                             <td><span class="text-secondary">#{{ $sesi->id }}</span></td>
                             <td class="text-center">{{ $sesi->total_file }}</td>
                             <td class="text-center">
-                                @if($sesi->total_ok > 0) <span class="badge bg-green-lt">{{ $sesi->total_ok }}</span> @else <span class="text-secondary">—</span> @endif
+                                @if($sesi->total_ok > 0) <span class="badge bg-green-lt">{{ $sesi->total_ok }}</span> @else <span class="text-secondary">-</span> @endif
                             </td>
                             <td class="text-center">
-                                @if($sesi->total_warn > 0) <span class="badge bg-yellow-lt">{{ $sesi->total_warn }}</span> @else <span class="text-secondary">—</span> @endif
+                                @if($sesi->total_warn > 0) <span class="badge bg-yellow-lt">{{ $sesi->total_warn }}</span> @else <span class="text-secondary">-</span> @endif
                             </td>
                             <td class="text-center">
-                                @if($sesi->total_err > 0) <span class="badge bg-red-lt">{{ $sesi->total_err }}</span> @else <span class="text-secondary">—</span> @endif
+                                @if($sesi->total_err > 0) <span class="badge bg-red-lt">{{ $sesi->total_err }}</span> @else <span class="text-secondary">-</span> @endif
                             </td>
                             <td>
                                 <a href="{{ route('checker.riwayat.detail', $sesi) }}" class="btn btn-sm">Detail</a>
@@ -211,9 +213,11 @@
                                 <div class="empty py-4">
                                     <div class="empty-icon"><i class="ti ti-history fs-1"></i></div>
                                     <p class="empty-title">Belum ada sesi pemeriksaan</p>
+                                    @can('periksa')
                                     <div class="empty-action">
                                         <a href="{{ route('checker.index') }}" class="btn btn-primary">Mulai Pemeriksaan Pertama</a>
                                     </div>
+                                    @endcan
                                 </div>
                             </td>
                         </tr>
@@ -237,6 +241,9 @@
                         [route('checker.bps.index'), 'cloud-download', 'azure', 'Import dari API BPS','Cari publikasi di portal BPS'],
                         [route('checker.riwayat'),   'history',        'green', 'Riwayat Sesi',      'Lanjutkan tinjauan yang belum selesai'],
                     ];
+                    if (Gate::denies('periksa')) { // role 'user': hanya melihat
+                        $aksi = array_values(array_filter($aksi, fn ($a) => $a[0] !== route('checker.index')));
+                    }
                     if ($recentSesi->first()) {
                         $aksi[] = [route('checker.riwayat.export', $recentSesi->first()), 'file-spreadsheet', 'yellow', 'Export Sesi Terakhir', 'Download rekap Excel sesi terbaru'];
                     }

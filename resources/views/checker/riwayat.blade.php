@@ -5,12 +5,15 @@
 @section('page-title', 'Riwayat Pemeriksaan')
 @section('page-subtitle', 'Daftar semua sesi pemeriksaan yang pernah dilakukan')
 @section('page-actions')
+  @can('periksa')
   <a href="{{ route('checker.index') }}" class="btn btn-primary">
     <i class="ti ti-plus"></i> Pemeriksaan Baru
   </a>
+  @endcan
 @endsection
 
 @section('content')
+@php $bisaPeriksa = Gate::allows('periksa'); // role 'user': hanya melihat @endphp
 <div class="row">
   <div class="col-12">
 
@@ -22,7 +25,7 @@
     </form>
 
     <div class="card">
-      @if($sesiList->isNotEmpty())
+      @if($sesiList->isNotEmpty() && $bisaPeriksa)
       <div class="card-header" id="bulkBar">
         <div class="text-secondary small" id="bulkInfo">Centang sesi untuk menghapus beberapa sekaligus</div>
         <div class="card-actions">
@@ -37,17 +40,21 @@
           <div class="py-5 text-center text-muted">
             <i class="ti ti-history" style="font-size:48px; opacity:.3;"></i>
             <p class="mt-2">Belum ada riwayat pemeriksaan</p>
+            @can('periksa')
             <a href="{{ route('checker.index') }}" class="btn btn-primary btn-sm">Mulai Pemeriksaan</a>
+            @endcan
           </div>
         @else
           <div class="table-responsive">
             <table class="table table-hover mb-0" style="font-size:13px;">
               <thead style="background:#f8f8ff;">
                 <tr>
+                  @if($bisaPeriksa)
                   <th class="ps-3 w-1">
                     <input type="checkbox" class="form-check-input m-0 align-middle" id="checkAll"
                            title="Pilih semua di halaman ini" aria-label="Pilih semua">
                   </th>
+                  @endif
                   <th style="width:50px;">#</th>
                   <th>Tanggal</th>
                   <th style="min-width:280px;">Publikasi</th>
@@ -61,10 +68,12 @@
               <tbody>
                 @foreach($sesiList as $i => $sesi)
                 <tr>
+                  @if($bisaPeriksa)
                   <td class="ps-3">
                     <input type="checkbox" class="form-check-input m-0 align-middle check-sesi" form="bulkDeleteForm"
                            name="ids[]" value="{{ $sesi->id }}" aria-label="Pilih sesi #{{ $sesi->id }}">
                   </td>
+                  @endif
                   <td class="text-muted">{{ $sesiList->firstItem() + $i }}</td>
                   <td>
                     <div style="font-size:13px; color:#566a7f; font-weight:500;">
@@ -91,20 +100,20 @@
                             <small class="text-muted" title="Kriteria yang sudah ditinjau manual">
                               <i class="ti ti-clipboard-check"></i> {{ $hasil->ditinjau_count }}/{{ $hasil->detail_count }}
                             </small>
-                            @if($hasil->hasPdf())
+                            @if($hasil->hasPdf() && $bisaPeriksa)
                               <a href="{{ route('checker.hasil.tinjau', $hasil) }}"
                                  class="btn btn-sm {{ $selesai ? 'btn-outline-success' : 'btn-primary' }} py-0 px-2 text-nowrap">
                                 <i class="ti ti-{{ $selesai ? 'check' : 'player-play' }}"></i>
                                 {{ $selesai ? 'Selesai' : ($hasil->ditinjau_count ? 'Lanjutkan' : 'Mulai Tinjauan') }}
                               </a>
-                            @else
-                              <small class="text-muted fst-italic" title="Pemeriksaan lama — file PDF tidak disimpan">PDF tidak tersimpan</small>
+                            @elseif(!$hasil->hasPdf())
+                              <small class="text-muted fst-italic" title="Pemeriksaan lama, file PDF tidak disimpan">PDF tidak tersimpan</small>
                             @endif
                           @endif
                         </div>
                       </div>
                     @empty
-                      <span class="text-muted">—</span>
+                      <span class="text-muted">-</span>
                     @endforelse
                   </td>
                   <td class="text-center">
@@ -114,21 +123,21 @@
                     @if($sesi->total_ok > 0)
                       <span class="badge bg-green-lt">{{ $sesi->total_ok }}</span>
                     @else
-                      <span class="text-muted">—</span>
+                      <span class="text-muted">-</span>
                     @endif
                   </td>
                   <td class="text-center">
                     @if($sesi->total_warn > 0)
                       <span class="badge bg-yellow-lt">{{ $sesi->total_warn }}</span>
                     @else
-                      <span class="text-muted">—</span>
+                      <span class="text-muted">-</span>
                     @endif
                   </td>
                   <td class="text-center">
                     @if($sesi->total_err > 0)
                       <span class="badge bg-red-lt">{{ $sesi->total_err }}</span>
                     @else
-                      <span class="text-muted">—</span>
+                      <span class="text-muted">-</span>
                     @endif
                   </td>
                   <td class="text-center">
@@ -141,6 +150,7 @@
                          class="btn btn-sm btn-outline-success" title="Export Excel">
                         <i class="ti ti-file-spreadsheet"></i>
                       </a>
+                      @can('periksa')
                       <form action="{{ route('checker.riwayat.delete', $sesi) }}" method="POST"
                             onsubmit="return confirm('Hapus sesi ini beserta semua hasilnya?')">
                         @csrf @method('DELETE')
@@ -148,6 +158,7 @@
                           <i class="ti ti-trash"></i>
                         </button>
                       </form>
+                      @endcan
                     </div>
                   </td>
                 </tr>

@@ -21,7 +21,16 @@
                 <form action="{{ route('admin.users.update', $user->id) }}" method="POST" class="">
                     @csrf
                     @method('PUT')
-                    
+
+                    @if($errors->any())
+                        <div class="alert alert-danger">
+                            <i class="ti ti-alert-circle me-1"></i> Gagal menyimpan:
+                            <ul class="mb-0 mt-1">
+                                @foreach($errors->all() as $err)<li>{{ $err }}</li>@endforeach
+                            </ul>
+                        </div>
+                    @endif
+
                     <!-- Info User -->
                     <div class="alert alert-light border">
                         <div class="row">
@@ -65,9 +74,13 @@
                         <label for="role" class="fw-bold">Role <span class="text-danger">*</span></label>
                         <select class="form-control @error('role') is-invalid @enderror" id="role" name="role" required>
                             <option value="user" {{ $user->role == 'user' ? 'selected' : '' }}>User</option>
+                            <option value="pemeriksa" {{ $user->role == 'pemeriksa' ? 'selected' : '' }}>Pemeriksa</option>
                             <option value="admin" {{ $user->role == 'admin' ? 'selected' : '' }}>Admin</option>
                         </select>
-                        <small class="text-muted">Admin: akses penuh | User: akses terbatas</small>
+                        <small class="text-muted">Admin: akses penuh | Pemeriksa: memeriksa & meninjau publikasi | User: hanya melihat</small>
+                        @if($user->role === 'pending')
+                            <div class="small text-warning mt-1"><i class="ti ti-clock-hour-4"></i> User ini menunggu persetujuan. Menyimpan form ini akan menyetujuinya sesuai role yang dipilih.</div>
+                        @endif
                         @error('role')
                             <div class="invalid-feedback">{{ $message }}</div>
                         @enderror

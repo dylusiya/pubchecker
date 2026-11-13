@@ -117,6 +117,21 @@
                                 <p class="text-muted small" id="pubAbstract"></p>
                             </div>
 
+                            {{-- penugasan pemeriksaan publikasi ini (diisi renderTugas) --}}
+                            <div class="d-flex align-items-center flex-wrap gap-2 mb-3" id="tugasBox" hidden>
+                                <small class="text-muted">Pemeriksa</small>
+                                <span id="tugasBadge"></span>
+                                @if($pemeriksa)
+                                    <select id="tugasUser" class="form-select form-select-sm w-auto" aria-label="Tugaskan ke pemeriksa">
+                                        <option value="">Belum ditugaskan</option>
+                                        @foreach($pemeriksa as $u)
+                                            <option value="{{ $u['id'] }}">{{ $u['nama'] }}{{ $u['role'] === 'admin' ? ' (admin)' : '' }}</option>
+                                        @endforeach
+                                    </select>
+                                    <small class="text-secondary">pilih untuk menugaskan; hanya pemeriksa itu (dan admin) yang bisa memeriksa</small>
+                                @endif
+                            </div>
+
                             <div class="d-flex gap-2 flex-wrap">
                                 <button class="btn btn-primary" onclick="viewPDF()" id="btnViewPDF">
                                     <i class="ti ti-eye me-1"></i> Lihat PDF
@@ -127,9 +142,11 @@
                                 <a href="#" id="btnOpenNewTab" class="btn btn-outline-primary" target="_blank">
                                     <i class="ti ti-external-link me-1"></i> Buka di Tab Baru
                                 </a>
+                                @can('periksa')
                                 <button class="btn btn-outline-danger" onclick="checkQuality()" id="btnCheckQuality">
                                     <i class="ti ti-rosette-discount-check me-1"></i> Periksa Kualitas PDF
                                 </button>
+                                @endcan
                             </div>
                         </div>
                     </div>
@@ -196,6 +213,62 @@
             {{-- Step-by-step Review --}}
             @include('checker.partials.review-panel')
 
+            {{-- Pilihan saat Periksa Kualitas PDF bila publikasi punya catatan SIPOTRET (lihat pilihPeriksa) --}}
+            <div class="modal fade" id="modalPeriksa" tabindex="-1" aria-hidden="true">
+                <div class="modal-dialog modal-dialog-centered">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title"><i class="ti ti-rosette-discount-check me-1"></i> Periksa Kualitas PDF</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Tutup"></button>
+                        </div>
+                        <div class="modal-body">
+                            <p class="small text-secondary mb-2">Publikasi ini punya riwayat pemeriksaan di SIPOTRET. Mulai dari mana?</p>
+                            <div class="form-selectgroup form-selectgroup-boxes d-flex flex-column gap-2">
+                            <label class="form-selectgroup-item flex-fill">
+                                <input type="radio" name="caraPeriksa" value="lanjut" class="form-selectgroup-input" checked>
+                                <div class="form-selectgroup-label d-flex align-items-start p-3 text-start">
+                                    <span class="form-selectgroup-check me-3 mt-1"></span>
+                                    <span>
+                                        <strong>Lanjutkan dari catatan SIPOTRET</strong>
+                                        <span class="d-block small text-secondary mt-1">
+                                            Catatan periode acuan jadi isian awal tinjauan (Tidak Sesuai + keterangannya),
+                                            tinggal diperiksa ulang. Acuan disimpan di Riwayat. Setelah tinjauan selesai,
+                                            langsung lanjut ke Kirim ke SIPOTRET.
+                                        </span>
+                                        <span class="d-flex align-items-center flex-wrap gap-2 mt-2">
+                                            <span class="small fw-semibold">Acuan catatan</span>
+                                            <select id="mpAcuan" class="form-select form-select-sm w-auto"></select>
+                                        </span>
+                                        <span class="d-flex align-items-center flex-wrap gap-2 mt-2">
+                                            <span class="small fw-semibold">Periode pemeriksaan</span>
+                                            <select id="mpBulan" class="form-select form-select-sm w-auto"></select>
+                                            <input type="number" id="mpTahun" class="form-control form-control-sm" style="width:90px;" min="2000" max="2100">
+                                        </span>
+                                    </span>
+                                </div>
+                            </label>
+                            <label class="form-selectgroup-item flex-fill">
+                                <input type="radio" name="caraPeriksa" value="baru" class="form-selectgroup-input">
+                                <div class="form-selectgroup-label d-flex align-items-start p-3 text-start">
+                                    <span class="form-selectgroup-check me-3 mt-1"></span>
+                                    <span>
+                                        <strong>Periksa dari awal</strong>
+                                        <span class="d-block small text-secondary mt-1">Tanpa isian awal, semua kriteria dinilai dari nol.</span>
+                                    </span>
+                                </div>
+                            </label>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn" data-bs-dismiss="modal">Batal</button>
+                            <button type="button" class="btn btn-primary" id="mpMulai">
+                                <i class="ti ti-player-play me-1"></i> Mulai Periksa
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             {{-- Quality Check Result --}}
             <div id="qualitySection" style="display:none;">
                 <div class="card mb-3">
@@ -229,6 +302,17 @@
                 </div>
             </div>
 
+            {{-- Riwayat pemeriksaan per bulan di SIPOTRET (diisi renderSipotret; disembunyikan bila SIPOTRET tidak diatur) --}}
+            <div class="card mb-3" id="sipotretCard" style="display:none;">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="ti ti-history text-primary me-1"></i> Riwayat Pemeriksaan SIPOTRET
+                    </h5>
+                    <div class="card-actions"><span class="text-secondary small" id="sipotretRingkas"></span></div>
+                </div>
+                <div class="list-group list-group-flush" id="sipotretList"></div>
+            </div>
+
             {{-- Additional Info --}}
             <div class="card">
                 <div class="card-body">
@@ -254,6 +338,7 @@
 @push('scripts')
 <script src="{{ asset('pdfjs/build/pdf.mjs') }}" type="module"></script>
 <script src="{{ asset('js/checker-review.js') }}?v={{ filemtime(public_path('js/checker-review.js')) }}"></script>
+<script src="{{ asset('js/penugasan.js') }}?v={{ filemtime(public_path('js/penugasan.js')) }}"></script>
 <script src="{{ asset('js/pdf-extract.js') }}?v={{ filemtime(public_path('js/pdf-extract.js')) }}"></script>
 <script>
 const CSRF = document.querySelector('meta[name=csrf-token]')?.content ?? '';
@@ -297,6 +382,10 @@ async function loadPublication() {
         if (data.error || !res.ok) { showError(data.error || data.message || ('Server membalas ' + res.status)); return; }
         publicationData = data.publication;
         renderPublication(publicationData);
+        sipotretRiwayat = Array.isArray(data.sipotret) ? data.sipotret : null;
+        sipotretIsian   = data.sipotret_isian || null;
+        renderSipotret(data.sipotret);
+        renderTugas(data.tugas || null);
     } catch(e) {
         showError('Gagal memuat data: ' + e.message);
     }
@@ -338,7 +427,9 @@ function renderPublication(pub) {
     document.getElementById('btnDownloadPDF').href      = hasPdf ? unduhPdfUrl() : '#';
     document.getElementById('btnOpenNewTab').href       = hasPdf ? pdfUrl : '#';
     document.getElementById('btnViewPDF').disabled      = !hasPdf;
-    document.getElementById('btnCheckQuality').disabled = !hasPdf;
+    // tombol periksa tidak dirender untuk role 'user' (hanya melihat)
+    const btnCheck = document.getElementById('btnCheckQuality');
+    if (btnCheck) btnCheck.disabled = !hasPdf;
 
     document.getElementById('pubId').textContent = pub.pub_id || '-';
 
@@ -522,9 +613,103 @@ function toggleFullscreen() {
     }
 }
 
+// ── PENUGASAN PEMERIKSAAN ─────────────────────────────────────
+Penugasan.init({ url: '{{ route("checker.penugasan.simpan") }}', csrf: CSRF });
+let tugasPub = null;
+
+/** Badge pemeriksa yang ditugaskan; publikasi milik pemeriksa lain tidak bisa diperiksa (tombol dikunci). */
+function renderTugas(t) {
+    tugasPub = t;
+    const box = document.getElementById('tugasBox');
+    const sel = document.getElementById('tugasUser');
+    box.hidden = !t && !sel;
+    document.getElementById('tugasBadge').innerHTML = t ? Penugasan.badge(t) : '<span class="text-secondary small">belum ditugaskan</span>';
+    if (sel) sel.value = t ? String(t.user_id) : '';
+    const btn = document.getElementById('btnCheckQuality');
+    if (btn && !Penugasan.boleh(t)) {
+        btn.disabled = true;
+        btn.title = `Ditugaskan ke ${t.nama}. Hanya pemeriksa yang ditugaskan (dan admin) yang bisa memeriksa.`;
+    }
+}
+
+document.getElementById('tugasUser')?.addEventListener('change', async e => {
+    const sel = e.target;
+    const nama = sel.selectedOptions[0]?.textContent.trim();
+    if (!confirm(sel.value ? `Tugaskan publikasi ini ke ${nama}?` : 'Lepas penugasan publikasi ini?')) {
+        sel.value = tugasPub ? String(tugasPub.user_id) : '';
+        return;
+    }
+    try {
+        const r = await Penugasan.simpan([{ pub_id: String(publicationData.pub_id), judul: publicationData.title, domain: String(publicationData.domain || '') }], sel.value || null);
+        renderTugas(r.tugas[String(publicationData.pub_id)] ?? null);
+        showAlert('success', r.pesan);
+    } catch (err) {
+        sel.value = tugasPub ? String(tugasPub.user_id) : '';
+        showAlert('danger', 'Gagal menyimpan penugasan: ' + esc(err.message));
+    }
+});
+
 // ── CHECK QUALITY ─────────────────────────────────────────────
-async function checkQuality() {
+let sipotretRiwayat = null; // riwayat per bulan di SIPOTRET (null = SIPOTRET tidak diatur)
+let sipotretIsian   = null; // catatan periode terakhir (isianTerakhir): hanya untuk acuan bawaan di pilihan
+
+/** Publikasi punya catatan SIPOTRET → tawarkan lanjutkan dari catatan periode acuan (dipilih) atau periksa dari awal. */
+function checkQuality() {
+    if (!pdfUrl || !publicationData || !Penugasan.boleh(tugasPub)) return;
+    // periode SIPOTRET yang punya catatan, terbaru dulu
+    const pilihan = (sipotretRiwayat || []).filter(r => r.catatan.length);
+    if (!pilihan.length) { jalankanPeriksa({ lanjut: false }); return; }
+
+    const p = sipotretIsian?.periode || pilihan[0];
+    document.getElementById('mpAcuan').innerHTML = pilihan.map(r =>
+        `<option value="${r.bulan}-${r.tahun}" ${r.bulan === p.bulan && r.tahun === p.tahun ? 'selected' : ''}>${BULAN[r.bulan]} ${r.tahun} (${r.catatan.length} catatan)</option>`).join('');
+    // bawaan: sebulan setelah periode SIPOTRET terakhir publikasi ini (seperti Publikasi Bermasalah)
+    const akhir = sipotretRiwayat?.[0] || p;
+    const n = akhir.tahun * 12 + akhir.bulan; // bulan berikutnya, 0-based
+    const sel = document.getElementById('mpBulan');
+    sel.innerHTML = BULAN.slice(1).map((b, i) => `<option value="${i + 1}">${b}</option>`).join('');
+    sel.value = String(n % 12 + 1);
+    document.getElementById('mpTahun').value = Math.floor(n / 12);
+    document.querySelector('input[name=caraPeriksa][value=lanjut]').checked = true;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('modalPeriksa')).show();
+}
+
+document.getElementById('mpMulai')?.addEventListener('click', () => {
+    const lanjut = document.querySelector('input[name=caraPeriksa]:checked')?.value === 'lanjut';
+    const bulan  = parseInt(document.getElementById('mpBulan').value, 10);
+    const tahun  = parseInt(document.getElementById('mpTahun').value, 10);
+    if (lanjut && !(bulan >= 1 && bulan <= 12 && tahun >= 2000 && tahun <= 2100)) {
+        document.getElementById('mpTahun').focus();
+        return;
+    }
+    const [aBulan, aTahun] = (document.getElementById('mpAcuan').value || '').split('-').map(Number);
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('modalPeriksa')).hide();
+    jalankanPeriksa({ lanjut, periode: lanjut ? { bulan, tahun } : null, acuan: lanjut && aBulan ? { bulan: aBulan, tahun: aTahun } : null });
+});
+
+/** Isian awal dari catatan SIPOTRET periode acuan (null bila gagal / tidak ada catatan). */
+async function ambilIsian(acuan) {
+    try {
+        const res = await fetch('{{ route("checker.sipotret.isian") }}?' + new URLSearchParams({ pub_id: publicationData.pub_id, ...acuan }),
+            { headers: { 'Accept': 'application/json' } });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || ('Server membalas ' + res.status));
+        return data.isian;
+    } catch (e) {
+        showAlert('warning', 'Catatan SIPOTRET acuan tidak bisa dimuat (' + esc(e.message) + '), pemeriksaan dilanjutkan tanpa isian awal.');
+        return null;
+    }
+}
+
+/**
+ * opsi.lanjut: catatan SIPOTRET terakhir jadi isian awal, lalu setelah tinjauan langsung ke
+ * Kirim ke SIPOTRET pada opsi.periode ({ bulan, tahun }). Jangan tulis kurung kurawal ganda di
+ * komentar ini: Blade membacanya sebagai echo PHP.
+ */
+async function jalankanPeriksa({ lanjut, periode = null, acuan = null }) {
     if (!pdfUrl || !publicationData) return;
+    // catatan periode acuan yang dipilih (bukan otomatis periode terakhir); disimpan di hasil lewat acuan_bulan/tahun
+    const isianAcuan = lanjut && acuan ? await ambilIsian(acuan) : null;
 
     const btn = document.getElementById('btnCheckQuality');
     const ori = btn.innerHTML;
@@ -555,16 +740,28 @@ async function checkQuality() {
                     pdf:     pdfUrl,
                     domain:  publicationData.domain ? String(publicationData.domain) : null,
                     issn:    publicationData.issn || null,
+                    catalog: publicationData.catalog || null, // cadangan cek sama_api bila detail Web API gagal diambil server
+                    pub_no:  publicationData.pub_no || null,
                     rl_date: publicationData.rl_date || null,
+                    acuan_bulan: isianAcuan ? acuan.bulan : null,
+                    acuan_tahun: isianAcuan ? acuan.tahun : null,
+                    periode_bulan: periode ? periode.bulan : null,
+                    periode_tahun: periode ? periode.tahun : null,
                 }],
                 domain: publicationData.domain,
-                extracted: extracted ? JSON.stringify(extracted) : null,
+                extracted_b64: PdfExtract.kemas(extracted), // base64: lihat PdfExtract.kemas
             })
         });
         const data = await res.json();
         if (data.error || !res.ok) { showAlert('danger', data.error || data.message || ('Server membalas ' + res.status)); return; }
         const result = data.results?.[0];
         if (result) {
+            if (isianAcuan) CheckerReview.terapkanIsian(result, isianAcuan);
+            // lanjutan SIPOTRET: setelah tinjauan → Riwayat, modal Kirim ke SIPOTRET terbuka dengan periode terpilih
+            const keKirim = lanjut && data.sesi_id
+                ? '{{ route("checker.riwayat.detail", "__ID__") }}'.replace('__ID__', data.sesi_id)
+                    + '?' + new URLSearchParams({ sipotret: 1, ...periode })
+                : null;
             if (result.checks?.length) {
                 CheckerReview.start([{
                     filename: result.filename,
@@ -573,7 +770,13 @@ async function checkQuality() {
                     summary:  result.summary,
                     url:      getProxiedPdfUrl(),
                     ocrLines: extracted?.ocr_lines,
-                }], { onFinish: () => renderQualityResults(result) });
+                    usulanCatatan: result._usulanCatatan ?? null,
+                    isianInfo: result.isianInfo ?? null,
+                    pubId:     publicationData.pub_id,
+                    meta:      publicationData, // ISSN, revisi terakhir, dll. sudah dimuat di halaman ini
+                }], { onFinish: () => keKirim ? (window.location = keKirim) : renderQualityResults(result) });
+            } else if (keKirim) {
+                window.location = keKirim;
             } else {
                 renderQualityResults(result);
             }
@@ -584,6 +787,54 @@ async function checkQuality() {
         btn.disabled  = false;
         btn.innerHTML = ori;
     }
+}
+
+// ── RIWAYAT SIPOTRET ──────────────────────────────────────────
+// riwayat: null = SIPOTRET tidak diatur/tidak terjangkau (kartu disembunyikan), [] = belum pernah diperiksa
+const BULAN = ['', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+const TAHAP_SIPOTRET = {
+    bersih:   ['bg-green-lt',  'circle-check', 'Tidak ada temuan'],
+    belum:    ['bg-red-lt',    'alert-circle', 'Belum diperbaiki'],
+    menunggu: ['bg-yellow-lt', 'clock',        'Menunggu approve'],
+    approve:  ['bg-green-lt',  'check',        'Sudah approve'],
+};
+
+function renderSipotret(riwayat) {
+    const card = document.getElementById('sipotretCard');
+    if (!Array.isArray(riwayat)) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+
+    const list = document.getElementById('sipotretList');
+    document.getElementById('sipotretRingkas').textContent = riwayat.length ? `${riwayat.length} periode` : '';
+
+    if (!riwayat.length) {
+        list.innerHTML = `<div class="list-group-item text-secondary small">
+            <i class="ti ti-info-circle me-1"></i> Publikasi ini belum pernah tercatat di Pasca Rilis SIPOTRET.</div>`;
+        return;
+    }
+
+    list.innerHTML = riwayat.map((r, i) => {
+        const [cls, icon, label] = TAHAP_SIPOTRET[r.tahap] || TAHAP_SIPOTRET.belum;
+        const head = `
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <strong>${BULAN[r.bulan] || r.bulan} ${r.tahun}</strong>
+                <span class="badge ${cls}"><i class="ti ti-${icon} me-1"></i>${label}</span>
+                ${r.catatan.length ? `<span class="text-secondary small ms-auto">${r.catatan.length} catatan</span>` : ''}
+            </div>`;
+        if (!r.catatan.length) return `<div class="list-group-item">${head}</div>`;
+
+        // periode terbaru langsung terbuka, sisanya bisa dibuka
+        return `<details class="list-group-item" ${i === 0 ? 'open' : ''}>
+            <summary class="list-unstyled" style="cursor:pointer;">${head}</summary>
+            <ol class="small mt-2 mb-0 ps-3">
+                ${r.catatan.map(c => `<li class="mb-1">
+                    <div class="text-secondary">${c.kode ? `<span class="font-monospace">${esc(c.kode)}</span> · ` : ''}${esc(c.kategori || 'Item lainnya')}</div>
+                    <div>${esc(c.catatan)}</div>
+                    ${c.keterangan ? `<div class="text-danger">${esc(c.keterangan)}</div>` : ''}
+                </li>`).join('')}
+            </ol>
+        </details>`;
+    }).join('');
 }
 
 const statusBadge = CheckerReview.statusBadge;
@@ -610,7 +861,7 @@ function renderQualityResults(result) {
                 <td class="font-monospace text-muted small">${esc(ch.id)}</td>
                 <td class="text-muted">${esc(ch.kategori || '-')}</td>
                 <td>${esc(ch.deskripsi || '-')}</td>
-                <td class="text-danger">${esc(ch.keterangan || '—')}</td>
+                <td class="text-danger">${esc(ch.keterangan || '-')}</td>
             </tr>`).join('')
         : `<tr><td colspan="4" class="text-center text-secondary py-3">Tidak ada kriteria Tidak Sesuai.</td></tr>`;
 }

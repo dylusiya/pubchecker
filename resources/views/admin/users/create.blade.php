@@ -3,7 +3,7 @@
 @section('title', 'Tambah User')
 @section('pretitle', 'Manajemen User')
 @section('page-title', 'Tambah User Baru')
-@section('page-subtitle', 'Pegawai BPS cukup diisi username SSO — data lainnya diambil dari SSO')
+@section('page-subtitle', 'Pegawai BPS cukup diisi username SSO, data lainnya diambil dari SSO')
 @section('page-actions')
     <a href="{{ route('admin.users.index') }}" class="btn">
         <i class="ti ti-arrow-left"></i> Kembali
@@ -31,7 +31,7 @@
                                     <span class="me-3"><span class="form-selectgroup-check"></span></span>
                                     <span>
                                         <strong>Pegawai BPS (SSO)</strong>
-                                        <span class="d-block text-secondary small">Cukup username & role — nama, email, NIP, jabatan, satker terisi otomatis saat login SSO pertama</span>
+                                        <span class="d-block text-secondary small">Cukup username & role. Nama, email, NIP, jabatan, satker terisi otomatis saat login SSO pertama</span>
                                     </span>
                                 </div>
                             </label>
@@ -63,9 +63,10 @@
                         <label for="role" class="form-label required">Role</label>
                         <select class="form-select @error('role') is-invalid @enderror" id="role" name="role" required>
                             <option value="user" @selected(old('role', 'user') === 'user')>User</option>
+                            <option value="pemeriksa" @selected(old('role') === 'pemeriksa')>Pemeriksa</option>
                             <option value="admin" @selected(old('role') === 'admin')>Admin</option>
                         </select>
-                        <small class="text-secondary">Admin: akses penuh termasuk kelola kriteria & user | User: pemeriksaan & riwayat</small>
+                        <small class="text-secondary">Admin: akses penuh termasuk kelola kriteria & user | Pemeriksa: memeriksa & meninjau publikasi | User: hanya melihat dashboard & riwayat</small>
                         @error('role')
                             <div class="invalid-feedback">{{ $message }}</div>
                         @enderror
@@ -99,6 +100,7 @@
                             <label for="password" class="form-label" id="labelPassword">Password</label>
                             <input type="password" class="form-control @error('password') is-invalid @enderror"
                                    id="password" name="password" placeholder="Minimal 8 karakter" autocomplete="new-password">
+                            <small class="text-secondary">Minimal 8 karakter, mengandung huruf besar, huruf kecil, dan angka</small>
                             @error('password')
                                 <div class="invalid-feedback">{{ $message }}</div>
                             @enderror
@@ -110,7 +112,7 @@
                         </div>
                         <div class="col-12 mb-3 mt-n2" data-jenis="sso">
                             <small class="text-secondary">
-                                <i class="ti ti-shield-lock"></i> Opsional — password cadangan supaya pengguna tetap bisa masuk
+                                <i class="ti ti-shield-lock"></i> Opsional: password cadangan supaya pengguna tetap bisa masuk
                                 lewat <strong>Login Lokal</strong> bila SSO sedang bermasalah. Kosongkan bila hanya lewat SSO.
                             </small>
                         </div>

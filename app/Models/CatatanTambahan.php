@@ -11,13 +11,23 @@ class CatatanTambahan extends Model
 
     public const FLAG_LEVELS = ['minor', 'moderate', 'major'];
 
-    /** Batas panjang nama item = kolom item_periksa_custom SIPOTRET (varchar 50). */
+    /** Panjang nama item lama (sebelum kolom dilebarkan): penanda nama item master yang dulu terpotong. */
     public const MAX_ITEM = 50;
 
-    protected $fillable = ['hasil_id', 'kategori', 'item', 'keterangan', 'flag_level', 'halaman', 'pos_x', 'pos_y', 'dibuat_oleh'];
+    /**
+     * Panjang maksimal nama item (item master maupun custom). Di SIPOTRET nama lengkapnya tersimpan di kolom
+     * `catatan` (TEXT); item_periksa_custom hanya dipotong bila kolomnya lebih sempit (SipotretService::kirim).
+     */
+    public const MAX_NAMA = 2000;
 
-    /** pos_x/pos_y: posisi komentar di halaman (pecahan 0–1 dari lebar/tinggi), null = tanpa posisi. */
-    protected $casts = ['halaman' => 'integer', 'pos_x' => 'float', 'pos_y' => 'float'];
+    protected $fillable = ['hasil_id', 'kategori', 'item', 'item_periksa_id', 'keterangan', 'flag_level', 'halaman', 'pos_x', 'pos_y', 'dibuat_oleh'];
+
+    /**
+     * pos_x/pos_y: posisi komentar di halaman (pecahan 0–1 dari lebar/tinggi), null = tanpa posisi.
+     * item_periksa_id: item master SIPOTRET (tanpa kriteria di pubchecker), null = item custom.
+     * flag_level null = tidak perlu perbaikan (seperti flag kosong di SIPOTRET).
+     */
+    protected $casts = ['halaman' => 'integer', 'pos_x' => 'float', 'pos_y' => 'float', 'item_periksa_id' => 'integer'];
 
     public function hasil()
     {
@@ -30,6 +40,7 @@ class CatatanTambahan extends Model
             'id'         => $this->id,
             'kategori'   => $this->kategori,
             'item'       => $this->item,
+            'item_periksa_id' => $this->item_periksa_id,
             'keterangan' => $this->keterangan,
             'flag_level' => $this->flag_level,
             'halaman'    => $this->halaman,

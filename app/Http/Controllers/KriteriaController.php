@@ -326,6 +326,8 @@ class KriteriaController extends Controller
             'urutan'       => 'integer|min:0',
             'param_pattern'      => 'nullable|string',
             'param_flags'        => 'nullable|string|max:10',
+            'param_syarat'       => 'nullable|string|max:500',
+            'param_pesan_syarat' => 'nullable|string|max:200',
             'param_text'         => 'nullable|string',
             'param_case'         => 'nullable|boolean',
             'param_word'         => 'nullable|string|max:100',
@@ -336,14 +338,45 @@ class KriteriaController extends Controller
             'param_after'           => 'nullable|string',
             'param_item_pattern'    => 'nullable|string',
             'param_require_pattern' => 'nullable|string',
+            'param_abaikan'      => 'nullable|string|max:500',
+            'param_urutan'       => 'nullable|string|max:2000',
+            'param_pola_kover'   => 'nullable|string|max:500',
+            'param_flags_kover'  => 'nullable|string|max:10',
+            'param_pesan_kover'  => 'nullable|string|max:200',
+            'param_posisi'       => 'nullable|in:ganjil,genap',
+            'param_pola_hitung'  => 'nullable|string|max:500',
+            'param_flags_hitung' => 'nullable|string|max:10',
+            'param_min_hitung'   => 'nullable|integer|min:1',
+            'param_cek_bab'      => 'nullable|in:ganjil,berurutan',
         ]);
 
         $tipe  = $data['tipe_cek'];
         $param = match($tipe) {
             'regex', 'not_regex' => array_filter([
-                'pattern' => $request->input('param_pattern'),
-                'flags'   => $request->input('param_flags') ?: null,
+                'pattern'      => $request->input('param_pattern'),
+                'flags'        => $request->input('param_flags') ?: null,
+                'syarat'       => $tipe === 'not_regex' ? ($request->input('param_syarat') ?: null) : null,
+                'pesan_syarat' => $tipe === 'not_regex' ? ($request->input('param_pesan_syarat') ?: null) : null,
+                'abaikan'      => $request->input('param_abaikan') ?: null,
             ]),
+            // satu pola per baris
+            'urutan' => array_filter([
+                'label' => array_values(array_filter(array_map('trim', preg_split('/\R/', (string) $request->input('param_urutan'))))) ?: null,
+            ]),
+            'sama_kover' => array_filter([
+                'pattern'      => $request->input('param_pola_kover'),
+                'flags'        => $request->input('param_flags_kover') ?: null,
+                'pesan_syarat' => $request->input('param_pesan_kover') ?: null,
+            ]),
+            'paritas' => ['posisi' => $request->input('param_posisi', 'ganjil')],
+            'sama_api' => ['isian' => in_array($request->input('param_isian_api'), ['issn', 'katalog', 'nomor_publikasi'], true)
+                ? $request->input('param_isian_api') : 'issn'],
+            'jumlah_min', 'nomor_urut', 'abjad' => array_filter([
+                'pattern' => $request->input('param_pola_hitung'),
+                'flags'   => $request->input('param_flags_hitung') ?: null,
+                'min'     => $tipe === 'jumlah_min' ? (int) ($request->input('param_min_hitung') ?: 3) : null,
+            ]),
+            'bab' => ['cek' => $request->input('param_cek_bab', 'ganjil')],
             'contains', 'not_contains' => array_filter([
                 'text' => $request->input('param_text'),
                 'case' => $request->boolean('param_case'),
