@@ -348,6 +348,9 @@ class KriteriaController extends Controller
             'param_flags_hitung' => 'nullable|string|max:10',
             'param_min_hitung'   => 'nullable|integer|min:1',
             'param_cek_bab'      => 'nullable|in:ganjil,berurutan',
+            'param_cek_rt'       => 'nullable|in:arab,romawi,ganjil,genap',
+            'param_daftar'       => 'nullable|in:isi,tabel,gambar',
+            'param_halaman_font' => 'nullable|in:kover,judul,belakang',
         ]);
 
         $tipe  = $data['tipe_cek'];
@@ -377,6 +380,9 @@ class KriteriaController extends Controller
                 'min'     => $tipe === 'jumlah_min' ? (int) ($request->input('param_min_hitung') ?: 3) : null,
             ]),
             'bab' => ['cek' => $request->input('param_cek_bab', 'ganjil')],
+            'running_title'  => ['cek' => $request->input('param_cek_rt', 'arab')],
+            'daftar_halaman' => ['daftar' => $request->input('param_daftar', 'isi')],
+            'font_bps'       => ['halaman' => $request->input('param_halaman_font', 'kover')],
             'contains', 'not_contains' => array_filter([
                 'text' => $request->input('param_text'),
                 'case' => $request->boolean('param_case'),

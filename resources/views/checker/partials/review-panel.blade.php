@@ -12,6 +12,7 @@
      data-detail-url="{{ route('checker.bps.detail') }}"
      data-detail-show-url="{{ route('checker.bps.detail.show') }}"
      data-scan-url="{{ route('checker.hasil.scan_ulang', '__ID__') }}"
+     data-sipotret-draf-url="{{ route('checker.hasil.sipotret_draf', '__ID__') }}"
      {{-- panjang maksimal nama item catatan tambahan (kolom item pubchecker) --}}
      data-max-item="{{ \App\Models\CatatanTambahan::MAX_NAMA }}"
      {{-- kriteria bertipe manual ("Perlu diperiksa manual…"): tidak ikut daftar Konfirmasi temuan otomatis --}}
@@ -39,11 +40,11 @@
                                 title="Periksa ulang otomatis publikasi ini dengan kriteria terbaru. Kriteria yang sudah dinilai & disimpan tidak berubah.">
                             <i class="ti ti-refresh me-1"></i><span id="revScanUlangLabel">Scan ulang</span>
                         </button>
-                        {{-- publikasi sudah tidak bermasalah: semua kriteria Sesuai, catatan tambahan dihapus, langsung disimpan
-                             (Tugas Saya: "Sudah sesuai" untuk periode ini) — CheckerReview.semuaSesuai --}}
+                        {{-- semua kriteria Sesuai kecuali yang Tidak Sesuai (tidak ditimpa), langsung disimpan; catatan tambahan tetap
+                             (tanpa Tidak Sesuai & catatan → Tugas Saya: "Sudah sesuai" untuk periode ini) — CheckerReview.semuaSesuai --}}
                         <button type="button" class="btn btn-link btn-sm p-0 ms-2 text-success text-decoration-none" id="revSemuaSesuai" hidden
                                 onclick="CheckerReview.semuaSesuai()"
-                                title="Publikasi ini sudah tidak bermasalah: tandai SEMUA kriteria Sesuai, hapus catatan tambahan, lalu simpan">
+                                title="Tandai semua kriteria Sesuai lalu simpan; yang sudah Tidak Sesuai dan catatan tambahan tidak diubah">
                             <i class="ti ti-rosette-discount-check me-1"></i>Tandai semua sesuai
                         </button>
                     </small>
@@ -95,6 +96,10 @@
                 <div class="progress-bar bg-info" id="revProgressBar" style="width:0%; transition:width .2s;"></div>
             </div>
 
+            {{-- Progres "Tandai semua sesuai" publikasi yang sedang tampil (berjalan di latar; tab lain tetap bisa dibuka)
+                 — CheckerReview.renderProsesSemua --}}
+            <div id="revProsesSemua" class="alert alert-info py-2 mb-3" hidden></div>
+
             {{-- Detail publikasi lengkap dari API BPS (seperti halaman detail), dibuka lewat "Tampilkan Info Lain" --}}
             <div id="revInfoLain" class="border rounded p-3 mb-3 bg-light" hidden></div>
 
@@ -123,10 +128,10 @@
 
             <div class="row g-3">
                 {{-- LEFT: contoh yang benar (bila dibuka) di kiri, halaman yang diperiksa di sebelahnya --}}
-                <div class="col-lg-8" id="revLeftCol">
+                <div class="col-lg-7" id="revLeftCol">
                     {{-- tinggi = kolom kriteria di kanan dikurangi baris tombol di bawah PDF --}}
                     <div class="d-flex gap-2" style="height:calc(100vh - 190px); min-height:600px;">
-                        <div id="revCompare" class="border rounded flex-column overflow-hidden" style="display:none; flex:1 1 0; min-width:0;">
+                        <div id="revCompare" class="border rounded flex-column overflow-hidden" style="display:none; flex:2 1 0; min-width:0;">
                             <div class="d-flex align-items-center gap-1 px-2 py-1 border-bottom bg-green-lt">
                                 <i class="ti ti-rosette-discount-check fs-2 me-1"></i>
                                 <div class="flex-fill text-truncate small" style="min-width:0;">
@@ -141,7 +146,8 @@
                             <div id="revCompareBody" class="flex-fill d-flex align-items-center justify-content-center overflow-auto" style="min-height:0; background:#525659;"></div>
                         </div>
 
-                        <div class="border rounded overflow-hidden" style="flex:1 1 0; min-width:0; background:#525659;">
+                        {{-- PDF yang diperiksa lebih lebar dari panel contoh (3:2) --}}
+                        <div class="border rounded overflow-hidden" style="flex:3 1 0; min-width:0; background:#525659;">
                             <iframe id="revPdfFrame" style="width:100%;height:100%;border:none;" allowfullscreen></iframe>
                         </div>
                     </div>
@@ -161,17 +167,22 @@
                                     title="Unduh PDF dengan kriteria Tidak Sesuai & catatan tambahan tertanam sebagai komentar (sticky note) di halamannya">
                                 <i class="ti ti-download me-1"></i> Unduh PDF + Komentar
                             </button>
+                            {{-- draf upload PJK di SIPOTRET: PDF + komentar & temuan → feedback IPDS versi itu --}}
+                            <button type="button" class="btn btn-outline-purple btn-sm" id="revBtnKirimSipotret" hidden
+                                    title="Kirim PDF + komentar dan kriteria Tidak Sesuai ke SIPOTRET sebagai hasil pemeriksaan draf ini">
+                                <i class="ti ti-send me-1"></i> Kirim ke SIPOTRET
+                            </button>
                         </div>
                     </div>
                 </div>
 
                 {{-- RIGHT: semua kriteria dalam satu kategori --}}
-                <div class="col-lg-4" id="revRightCol">
+                <div class="col-lg-5" id="revRightCol">
                     <div class="border rounded p-2 d-flex flex-column" style="height:calc(100vh - 150px); min-height:640px;">
                         {{-- Cari kriteria di semua kategori publikasi aktif → lompat ke kategori & kriterianya --}}
                         <div class="position-relative mb-2">
-                            <div class="input-icon">
-                                <span class="input-icon-addon"><i class="ti ti-search"></i></span>
+                            <div class="input-group input-group-sm input-group-flat">
+                                <span class="input-group-text"><i class="ti ti-search"></i></span>
                                 <input type="search" class="form-control form-control-sm" id="revCari" autocomplete="off"
                                        placeholder="Cari kriteria di semua kategori (kode/kata)…">
                             </div>
@@ -186,16 +197,21 @@
                         {{-- Daftar kriteria Tidak Sesuai publikasi ini (semua kategori); klik untuk membuka --}}
                         <div id="revMasalah" class="mb-2"></div>
 
-                        <select class="form-select form-select-sm mb-2 rev-urut-only" id="revKategoriSelect" aria-label="Kategori"
+                        {{-- Judul bagian pemeriksaan (akordeon dengan Konfirmasi & Tidak Sesuai); isinya = elemen rev-sembunyi-fokus,
+                             disembunyikan bila bagian lain yang dibuka (CheckerReview.terapkanFokus) --}}
+                        {{-- align-self-start: di kolom flex tombol .btn (inline-flex, isi di tengah) melebar penuh → isinya jadi di tengah --}}
+                        <button type="button" class="btn btn-link btn-sm p-0 small fw-semibold text-primary text-decoration-none align-self-start"
+                                id="revPeriksaToggle"></button>
+                        <select class="form-select form-select-sm mb-2 rev-urut-only rev-sembunyi-fokus" id="revKategoriSelect" aria-label="Kategori"
                                 title="Kategori · ✓ = sudah disimpan, ○ = belum"></select>
 
                         {{-- Gambar contoh yang benar untuk kategori ini (diatur admin di Kelola Kriteria) --}}
-                        <div id="revContoh" class="mb-2" style="display:none;"></div>
+                        <div id="revContoh" class="mb-2 rev-sembunyi-fokus" style="display:none;"></div>
 
                         {{-- Filter kriteria menurut penilaian (jumlah = seluruh publikasi aktif) --}}
-                        <div id="revFilter" class="d-flex flex-wrap gap-1 mb-2 rev-urut-only"></div>
+                        <div id="revFilter" class="d-flex flex-wrap gap-1 mb-2 rev-urut-only rev-sembunyi-fokus"></div>
 
-                        <div class="d-flex justify-content-between align-items-center mb-2 rev-urut-only">
+                        <div class="d-flex justify-content-between align-items-center mb-2 rev-urut-only rev-sembunyi-fokus">
                             <small class="text-muted" id="revItemCount">-</small>
                             {{-- Sisanya Sesuai/Skip: kategori ini saja, atau semua kategori (langsung disimpan) --}}
                             <div class="d-flex gap-3">
@@ -231,13 +247,13 @@
                         </div>
 
                         {{-- Mode Pilih Kriteria Bermasalah, sebelum ada kriteria yang dibuka --}}
-                        <div id="revPilihHint" class="text-center text-secondary small border rounded border-dashed p-3 mb-2" hidden>
+                        <div id="revPilihHint" class="text-center text-secondary small border rounded border-dashed p-3 mb-2 rev-sembunyi-fokus" hidden>
                             <i class="ti ti-search d-block mb-1" style="font-size:28px; opacity:.5;"></i>
                             Cari kriteria yang bermasalah di kotak pencarian di atas, lalu tandai <strong>Tidak Sesuai</strong>
                             dan isi keterangannya. Kriteria yang tidak ditandai dianggap <strong>Sesuai</strong> saat klik Selesai.
                         </div>
 
-                        <div id="revItems" class="flex-grow-1 overflow-auto pe-1" style="min-height:0;"></div>
+                        <div id="revItems" class="flex-grow-1 overflow-auto pe-1 rev-sembunyi-fokus" style="min-height:0;"></div>
 
                         <div class="alert alert-danger py-2 small mt-2 mb-0" id="revSaveError" style="display:none;"></div>
 

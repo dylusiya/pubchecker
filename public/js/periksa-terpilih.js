@@ -212,28 +212,29 @@ const PeriksaTerpilih = (() => {
         const nPeriksa = [...selected.values()].filter(bisaDiperiksa).length;
         const nApprove = historyMenunggu().length;
         const nKunci   = [...selected.values()].filter(p => !Penugasan.boleh(p.tugas)).length;
-        $('selectionInfo').innerHTML = n
-            ? `<strong>${n}</strong> publikasi dipilih: ${[...selected.values()].map(p => esc(p.title)).join(' · ')}`
-              + (nKunci ? ` <span class="text-danger">· ${nKunci} ditugaskan ke pemeriksa lain, tidak ikut diperiksa</span>` : '')
-            : `Centang publikasi untuk diperiksa ulang (maks. ${cfg.maxPubs} ber-PDF sekali periksa)`
-              + (cfg.bisaApprove ? ' atau untuk di-approve' : '')
-              + (detailSelesai ? '.' : ', data PDF masih dimuat dari API BPS…');
+        // info singkat (judul yang dipilih cukup di tooltip) supaya tombol di kanan tidak bergeser
+        const info = $('selectionInfo');
+        info.innerHTML = n
+            ? `<strong>${n}</strong> dipilih` + (nKunci ? ` <span class="text-danger">· ${nKunci} milik pemeriksa lain</span>` : '')
+            : (detailSelesai ? 'Centang publikasi' : 'Memuat data PDF…');
+        info.title = [...selected.values()].map(p => p.title).join('\n');
+        // tombol selalu di tempatnya: hanya aktif / nonaktif (tidak disembunyikan)
         $('btnCheckSel').disabled = !nPeriksa;
-        $('btnCheckSelLabel').textContent = nPeriksa ? `Periksa (${nPeriksa})` : 'Periksa Terpilih';
-        $('btnClearSel').hidden = !n;
+        $('btnCheckSelLabel').textContent = nPeriksa ? `Periksa (${nPeriksa})` : 'Periksa';
+        $('btnClearSel').disabled = !n;
         const btnApprove = $('btnApproveSel');
         if (btnApprove) {
-            btnApprove.hidden = !nApprove;
-            $('btnApproveSelLabel').textContent = `Approve (${nApprove})`;
+            btnApprove.disabled = !nApprove;
+            $('btnApproveSelLabel').textContent = nApprove ? `Approve (${nApprove})` : 'Approve';
         }
         // salin bulan lalu: publikasi ber-pub_id yang boleh diperiksa (server memilah belum upload/approve)
         const nSalin = pubSalin().length;
         if ($('btnSalinSel')) {
-            $('btnSalinSel').hidden = !nSalin;
-            $('btnSalinSelLabel').textContent = `Salin bulan lalu (${nSalin})`;
+            $('btnSalinSel').disabled = !nSalin;
+            $('btnSalinSelLabel').textContent = nSalin ? `Salin bulan lalu (${nSalin})` : 'Salin bulan lalu';
         }
         if (cfg.adminTugas && $('tugasBar')) {
-            $('tugasBar').hidden = !n;
+            $('tugasBar').querySelectorAll('select, button').forEach(el => { el.disabled = !n; });
             $('btnTugasLabel').textContent = n ? `Tugaskan (${n})` : 'Tugaskan';
         }
     }
@@ -303,10 +304,11 @@ const PeriksaTerpilih = (() => {
         }
     }
 
-    function approveTerpilih() {
+    async function approveTerpilih() {
         const ids = historyMenunggu();
         if (!ids.length) return;
-        if (!confirm(`Approve perbaikan ${ids.length} publikasi di SIPOTRET?\n\nPerbaikan kab/kota diunggah ke portal publikasi BPS. Pastikan PDF terbarunya sudah diperiksa ulang.`)) return;
+        if (!(await Dialog.confirm('Perbaikan kab/kota diunggah ke portal publikasi BPS. Pastikan PDF terbarunya sudah diperiksa ulang.',
+            { title: `Approve perbaikan ${ids.length} publikasi di SIPOTRET?`, okText: 'Approve', warning: true }))) return;
         const form = $('formApprove');
         ids.forEach(id => form.insertAdjacentHTML('beforeend', `<input type="hidden" name="history_ids[]" value="${id}">`));
         form.submit();
@@ -326,7 +328,10 @@ const PeriksaTerpilih = (() => {
         const sel = $('tugasUser');
         if (!lepas && !sel.value) { sel.focus(); showAlert('warning', 'Pilih pemeriksa dulu.'); return; }
         const nama = sel.selectedOptions[0]?.textContent.trim();
-        if (!confirm(lepas ? `Lepas penugasan ${pubs.length} publikasi?` : `Tugaskan ${pubs.length} publikasi ke ${nama}?\n\nSelama ditugaskan, hanya pemeriksa itu (dan admin) yang bisa memeriksa, meninjau, dan mengirim ke SIPOTRET.`)) return;
+        if (!(await Dialog.confirm(lepas ? 'Publikasi ini bisa diperiksa lagi oleh pemeriksa mana pun.'
+            : 'Selama ditugaskan, hanya pemeriksa itu (dan admin) yang bisa memeriksa, meninjau, dan mengirim ke SIPOTRET.',
+            { title: lepas ? `Lepas penugasan ${pubs.length} publikasi?` : `Tugaskan ${pubs.length} publikasi ke ${nama}?`,
+              okText: lepas ? 'Lepas' : 'Tugaskan', warning: lepas }))) return;
         try {
             const r = await Penugasan.simpan(pubs.map(p => ({ pub_id: String(p.pub_id), judul: p.title, domain: p.domain || null })), lepas ? null : sel.value);
             if (cfg.ulangSetelahTugaskan) { location.reload(); return; }
@@ -419,7 +424,7 @@ const PeriksaTerpilih = (() => {
                                 periode_bulan: periodeKirim.bulan,
                                 periode_tahun: periodeKirim.tahun,
                             }],
-                            extracted_b64: PdfExtract.kemas(extracted), // base64: lihat PdfExtract.kemas
+                            extracted_b64: await PdfExtract.kemas(extracted), // base64 (+gzip): lihat PdfExtract.kemas
                             sesi_id: sesiId,
                         }),
                     });
@@ -457,7 +462,12 @@ const PeriksaTerpilih = (() => {
         clearSelection();
 
         if (selesaiMenunggu) { finishReview(); return; } // tinjauan sudah diselesaikan selama menunggu
-        if (total === 1 && allResults.length === 1 && !tinjauanTerbuka) beginReview();
+        // langsung ke Riwayat untuk melanjutkan (sedang meninjau → pindah setelah tinjauan selesai lewat finishReview)
+        if (allResults.length && !tinjauanTerbuka && sesiId) {
+            const url = cfg.url.riwayat.replace('__ID__', sesiId);
+            if (!gagal) { window.location = url; return; }
+            $('batchTitle').innerHTML += ` <a href="${url}" class="btn btn-sm btn-primary ms-2">Lanjut ke Riwayat <i class="ti ti-arrow-right ms-1"></i></a>`;
+        }
     }
 
     /** POST draf hasil (semua kriteria "menunggu"); null bila gagal — pemeriksaan tetap jalan seperti biasa. */

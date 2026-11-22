@@ -44,7 +44,16 @@ class HasilPemeriksaan extends Model
         // periode pemeriksaan SIPOTRET yang dituju (dicatat saat Periksa ditekan)
         'periode_bulan',
         'periode_tahun',
+        // versi draf upload PJK di SIPOTRET (transaksi.tr_id) yang diperiksa
+        'sipotret_tr_id',
     ];
+
+    /** Kolom sipotret_tr_id sudah ada (migrasi 2026_11_19_090000 sudah dijalankan). */
+    public static function punyaKolomDraf(): bool
+    {
+        static $ada = null;
+        return $ada ??= \Illuminate\Support\Facades\Schema::hasColumn('hasil_pemeriksaan', 'sipotret_tr_id');
+    }
 
     /** Kolom periode_bulan/periode_tahun sudah ada (migrasi 2026_11_10_110000 sudah dijalankan). */
     public static function punyaKolomPeriode(): bool
@@ -94,10 +103,11 @@ class HasilPemeriksaan extends Model
         return trim(str_replace('_', ' ', $judul));
     }
 
-    /** Sumber PDF: 'BPS' (import web BPS) atau 'Upload'. */
+    /** Sumber PDF: 'BPS' (import web BPS), 'SIPOTRET' (draf upload PJK) atau 'Upload'. */
     public function getSumberAttribute(): ?string
     {
         if ($this->pdf_url)  return 'BPS';
+        if ($this->sipotret_tr_id ?? null) return 'SIPOTRET';
         if ($this->pdf_path) return 'Upload';
         return null;
     }

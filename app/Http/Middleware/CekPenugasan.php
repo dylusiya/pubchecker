@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use App\Models\CatatanTambahan;
 use App\Models\HasilPemeriksaan;
 use App\Models\PenugasanPemeriksaan;
+use App\Models\PenugasanPraRilis;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -30,6 +31,22 @@ class CekPenugasan
                 return response()->json(['message' => $pesan, 'error' => $pesan], 403);
             }
             return redirect()->back(fallback: route('checker.riwayat'))->with('error', $pesan);
+        }
+
+        // hasil draf pra rilis (SIPOTRET): penugasan per publikasi SIPOTRET
+        if ($hasil?->sipotret_tr_id && PenugasanPraRilis::aktif()) {
+            try {
+                $pubId = app(\App\Services\SipotretDrafService::class)->pubDariTr((int) $hasil->sipotret_tr_id);
+            } catch (\Throwable $e) {
+                report($e);
+                $pubId = null; // SIPOTRET tidak terbaca → jangan kunci pemeriksa
+            }
+            if ($pesan = PenugasanPraRilis::tolak($request->user(), $pubId)) {
+                if ($request->expectsJson()) {
+                    return response()->json(['message' => $pesan, 'error' => $pesan], 403);
+                }
+                return redirect()->back(fallback: route('checker.riwayat'))->with('error', $pesan);
+            }
         }
 
         return $next($request);

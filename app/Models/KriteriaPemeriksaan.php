@@ -49,6 +49,11 @@ class KriteriaPemeriksaan extends Model
             'abjad'        => 'Urut Abjad (entri, mis. daftar pustaka, tersusun menurut abjad)',
             'judul_kover'  => 'Judul seperti Kover (judul & tahun judul sama dengan kover)',
             'sama_api'     => 'Sama dengan Web API (ISSN / nomor katalog / nomor publikasi sama dengan website BPS, Import BPS)',
+            'rata_angka'   => 'Perataan Angka Tabel (angka rata kanan & di tengah kolom, diukur dari posisi teks PDF)',
+            'nomor_halaman'  => 'Nomor Halaman Berurutan (nomor romawi & arab tanpa loncat/ganda, dari footer/header)',
+            'running_title'  => 'Running Title (ada di halaman arab, tidak di romawi, ganjil = judul bab, genap = judul buku)',
+            'daftar_halaman' => 'Daftar ↔ Halaman (entri daftar isi/tabel/gambar ada di halaman yang disebut, judul sama)',
+            'font_bps'       => 'Huruf Nama BPS (nama BPS penerbit Arial Bold Italic UPPERCASE)',
             'manual'       => 'Manual (selalu PERLU DICEK, dicek manusia)',
         ];
     }

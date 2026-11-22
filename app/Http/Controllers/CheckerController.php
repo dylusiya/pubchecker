@@ -53,6 +53,8 @@ class CheckerController extends Controller
                 // teks hasil ekstraksi di browser (js/pdf-extract.js), JSON
                 'extracted' => 'nullable|string',
                 'extracted_b64' => 'nullable|string', // base64 dari PdfExtract.kemas
+                // draf upload PJK di SIPOTRET (transaksi.tr_id) — halaman Draf SIPOTRET
+                'sipotret_tr_id' => 'nullable|integer|min:1',
             ]);
         } catch (\Throwable $e) {
             return response()->json([
@@ -61,14 +63,31 @@ class CheckerController extends Controller
             ], 200);
         }
 
+        // draf pra rilis yang ditugaskan ke pemeriksa lain: tolak sebelum sesi dibuat
+        if ($tr = (int) $request->input('sipotret_tr_id')) {
+            try {
+                $pesan = \App\Models\PenugasanPraRilis::tolak($request->user(), app(\App\Services\SipotretDrafService::class)->pubDariTr($tr));
+            } catch (\Throwable $e) {
+                report($e);
+                $pesan = null;
+            }
+            if ($pesan) return response()->json(['error' => $pesan, 'results' => []], 403);
+        }
+
         $sesiId = $request->input('sesi_id');
         $sesi   = $sesiId
             ? SesiPemeriksaan::findOrFail($sesiId)
             : SesiPemeriksaan::create([
                 'dibuat_oleh' => auth()->user()?->name ?? session('user_name', 'guest'),
             ]);
+        abort_unless($sesi->boleh(auth()->user()), 403, 'Sesi pemeriksaan ini milik pemeriksa lain.');
 
         $results = [];
+        [$draf, $pembanding] = $this->identitasDraf($request->input('sipotret_tr_id'));
+        // rencana tanggal rilis di SIPOTRET: cek bulan penandatanganan kata pengantar/sambutan
+        $this->checker->setTanggalRilis($draf['pub_tanggal_rilis'] ?? null);
+        // ISSN, nomor katalog & nomor publikasi yang tercatat di SIPOTRET: dibandingkan dengan isian publikasi
+        $this->checker->setDataApi($pembanding, 'SIPOTRET');
 
         DB::beginTransaction();
         try {
@@ -82,7 +101,7 @@ class CheckerController extends Controller
                     $hasil  = $this->saveResult($sesi->id, $result, [
                         'pdf_path'  => $file->store('pdf-hasil', HasilPemeriksaan::DISK) ?: null,
                         'ocr_lines' => is_array($extracted) ? PdfCheckerService::ocrLinesFrom($extracted) : null,
-                    ]);
+                    ] + $draf);
                     $result['hasil_id'] = $hasil->id;
                     $results[] = $result;
                 } catch (\Throwable $e) {
@@ -122,6 +141,28 @@ class CheckerController extends Controller
                 'results' => [],
             ], 200);
         }
+    }
+
+    /**
+     * Identitas draf SIPOTRET yang diperiksa (dari database SIPOTRET, bukan dari isian halaman):
+     * [kolom hasil_pemeriksaan yang diisi, isian pembanding cek sama_api], atau [[], null] bila bukan draf /
+     * SIPOTRET tidak bisa dibaca.
+     */
+    private function identitasDraf($trId): array
+    {
+        if (!$trId) return [[], null];
+        try {
+            $d = app(\App\Services\SipotretDrafService::class)->draf((int) $trId);
+        } catch (\Throwable $e) {
+            report($e);
+            $d = null;
+        }
+        if (!$d) return [[], null];
+        return [array_filter([
+            'sipotret_tr_id'    => HasilPemeriksaan::punyaKolomDraf() ? (int) $d->tr_id : null,
+            'pub_issn'          => trim((string) $d->pub_issn) ?: null,
+            'pub_tanggal_rilis' => $d->tgl_rilis,
+        ]), app(\App\Services\SipotretDrafService::class)->dataPembanding($d)];
     }
 
     // ── GET /checker/bps/stream ───────────────────────────────
@@ -279,11 +320,28 @@ class CheckerController extends Controller
             'items.*.pin_halaman' => 'nullable|integer|min:1|max:65000',
             'items.*.pin_x'       => 'nullable|numeric|between:0,1',
             'items.*.pin_y'       => 'nullable|numeric|between:0,1',
+            // beberapa penanda per kriteria (menggantikan pin_*; tidak dikirim = tidak diubah)
+            'items.*.pins'        => 'nullable|array|max:' . DetailPemeriksaan::MAKS_PIN,
+            'items.*.pins.*.hal'  => 'required|integer|min:1|max:65000',
+            'items.*.pins.*.x'    => 'required|numeric|between:0,1',
+            'items.*.pins.*.y'    => 'required|numeric|between:0,1',
         ], $this->pesanVerifikasi('items.*.'));
 
         DB::transaction(function () use ($hasil, $data) {
+            // kriteria dengan isian yang sama (mis. "Tandai semua sesuai": semuanya OK) diperbarui dalam satu
+            // query whereIn, bukan satu UPDATE per kriteria
+            $waktu = now();
+            $kelompok = [];
             foreach ($data['items'] as $item) {
-                $hasil->detail()->where('kriteria_id', $item['kriteria_id'])->update($this->dataVerifikasi($item));
+                $isi = ['ditinjau_at' => $waktu] + $this->dataVerifikasi($item);
+                $kunci = json_encode($isi);
+                $kelompok[$kunci]['isi'] = $isi;
+                $kelompok[$kunci]['kode'][] = $item['kriteria_id'];
+            }
+            foreach ($kelompok as $k) {
+                foreach (array_chunk($k['kode'], 500) as $kode) {
+                    $hasil->detail()->whereIn('kriteria_id', $kode)->update($k['isi']);
+                }
             }
             $hasil->recalcFromDetail();
             $hasil->sesi->recalcSummary();
@@ -294,22 +352,24 @@ class CheckerController extends Controller
 
     // ── PATCH /checker/hasil/{hasil}/pin ──────────────────────
     // Penanda kriteria di halaman PDF disimpan langsung saat diklik (tidak menunggu Simpan Kategori),
-    // supaya tidak hilang bila halaman dimuat ulang. pin_halaman null = hapus penanda.
+    // supaya tidak hilang bila halaman dimuat ulang. pins = semua penanda kriteria itu ([] = hapus semua);
+    // pin_halaman/pin_x/pin_y (satu penanda) tetap diterima dari halaman yang belum dimuat ulang.
     public function simpanPin(Request $request, HasilPemeriksaan $hasil): JsonResponse
     {
         $data = $request->validate([
             'kriteria_id' => 'required|string',
+            'pins'        => 'nullable|array|max:' . DetailPemeriksaan::MAKS_PIN,
+            'pins.*.hal'  => 'required|integer|min:1|max:65000',
+            'pins.*.x'    => 'required|numeric|between:0,1',
+            'pins.*.y'    => 'required|numeric|between:0,1',
             'pin_halaman' => 'nullable|integer|min:1|max:65000',
             'pin_x'       => 'nullable|required_with:pin_halaman|numeric|between:0,1',
             'pin_y'       => 'nullable|required_with:pin_halaman|numeric|between:0,1',
         ]);
-        $ada = !empty($data['pin_halaman']);
+        $pins = $request->has('pins') ? ($data['pins'] ?? [])
+            : (!empty($data['pin_halaman']) ? [['hal' => $data['pin_halaman'], 'x' => $data['pin_x'], 'y' => $data['pin_y']]] : []);
 
-        $hasil->detail()->where('kriteria_id', $data['kriteria_id'])->update([
-            'pin_halaman' => $ada ? $data['pin_halaman'] : null,
-            'pin_x'       => $ada ? $data['pin_x'] : null,
-            'pin_y'       => $ada ? $data['pin_y'] : null,
-        ]);
+        $hasil->detail()->where('kriteria_id', $data['kriteria_id'])->update(DetailPemeriksaan::isianPin($pins));
 
         return response()->json(['ok' => true]);
     }
@@ -360,6 +420,8 @@ class CheckerController extends Controller
             // data publikasi (ISSN, revisi terakhir, dll.) diambil CheckerReview dari API BPS lewat pub_id
             'pubId'     => $hasil->pub_id_api,
             'pubDomain' => $hasil->pub_domain,
+            // draf upload PJK di SIPOTRET → tombol "Kirim ke SIPOTRET" di panel tinjauan
+            'sipotretTr' => $hasil->sipotret_tr_id ?? null,
             // catatan SIPOTRET periode acuan (tersimpan di hasil) → isian awal kriteria yang belum ditinjau;
             // acuanPilihan: periode yang bisa dipilih sebagai acuan (CheckerReview, kotak isian awal)
             'isianSipotret' => $isian[$hasil->id]['isian'] ?? null,
@@ -384,6 +446,7 @@ class CheckerController extends Controller
                     'reviewed'  => $d->ditinjau_at !== null,
                     'lokasi'    => $d->lokasi ?? [],
                     'pin'       => $d->pinArray(),
+                    'pins'      => $d->daftarPin(), // semua penanda (pin = yang pertama, untuk kode lama)
                 ];
             })->values(),
         ])->values();
@@ -497,14 +560,12 @@ class CheckerController extends Controller
 
         // Penanda di PDF hanya untuk Tidak Sesuai; bila tidak dikirim (mis. "salin ke semua publikasi") dibiarkan
         if (!$tidakSesuai) {
-            $data += ['pin_halaman' => null, 'pin_x' => null, 'pin_y' => null];
+            $data += DetailPemeriksaan::isianPin([]);
+        } elseif (array_key_exists('pins', $item)) {
+            $data += DetailPemeriksaan::isianPin((array) ($item['pins'] ?? []));
         } elseif (array_key_exists('pin_halaman', $item)) {
             $ada   = !empty($item['pin_halaman']) && isset($item['pin_x'], $item['pin_y']);
-            $data += [
-                'pin_halaman' => $ada ? $item['pin_halaman'] : null,
-                'pin_x'       => $ada ? $item['pin_x'] : null,
-                'pin_y'       => $ada ? $item['pin_y'] : null,
-            ];
+            $data += DetailPemeriksaan::isianPin($ada ? [['hal' => $item['pin_halaman'], 'x' => $item['pin_x'], 'y' => $item['pin_y']]] : []);
         }
 
         return $data;
@@ -532,7 +593,8 @@ class CheckerController extends Controller
     // ── GET /checker/riwayat ──────────────────────────────────
     public function riwayat(Request $request)
     {
-        $sesiList = SesiPemeriksaan::with(['hasilPemeriksaan' => fn($q) => $q->withCount([
+        // hanya sesi milik sendiri, kecuali admin
+        $sesiList = SesiPemeriksaan::milik($request->user())->with(['hasilPemeriksaan' => fn($q) => $q->withCount([
                 'detail',
                 'detail as ditinjau_count' => fn($d) => $d->whereNotNull('ditinjau_at'),
             ])])
@@ -576,7 +638,7 @@ class CheckerController extends Controller
             'ids.required' => 'Pilih minimal satu sesi untuk dihapus.',
         ]);
 
-        $sesiList = SesiPemeriksaan::whereIn('id', $data['ids'])->get();
+        $sesiList = SesiPemeriksaan::milik($request->user())->whereIn('id', $data['ids'])->get(); // sesi orang lain dilewati
         foreach ($sesiList as $sesi) {
             $this->hapusSesi($sesi);
         }

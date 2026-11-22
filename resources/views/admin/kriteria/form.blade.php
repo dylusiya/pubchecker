@@ -288,6 +288,70 @@
                             </p>
                         </div>
 
+                        {{-- RATA_ANGKA --}}
+                        <div id="panel_rata_angka" class="param-panel border rounded p-3 bg-light" style="display:none;">
+                            <p class="small text-muted mb-0">
+                                <i class="ti ti-info-circle me-1"></i>
+                                Tidak butuh parameter. Untuk tabel yang punya baris nomor kolom <code>(1) (2) (3)</code>, posisi
+                                tiap angka di kolom 2 dst. diukur dari lapisan teks PDF: tepi kanan harus sejajar (rata kanan) dan
+                                blok angka berada di tengah kolom (pusat label nomor kolom). Halaman hasil OCR tidak diukur.
+                            </p>
+                        </div>
+
+                        {{-- NOMOR_HALAMAN --}}
+                        <div id="panel_nomor_halaman" class="param-panel border rounded p-3 bg-light" style="display:none;">
+                            <p class="small text-muted mb-0">
+                                <i class="ti ti-info-circle me-1"></i>
+                                Tidak butuh parameter. Nomor halaman dibaca dari footer/header tiap halaman (lapisan teks PDF), lalu
+                                dicek berurutan: romawi dan arab tanpa loncat atau ganda.
+                            </p>
+                        </div>
+
+                        {{-- RUNNING_TITLE --}}
+                        <div id="panel_running_title" class="param-panel border rounded p-3 bg-light" style="display:none;">
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-5">
+                                    <label class="form-label small mb-1">Yang dicek</label>
+                                    <select name="param_cek_rt" class="form-select form-select-sm">
+                                        @foreach(['arab' => 'Ada di halaman arab', 'romawi' => 'Tidak ada di halaman romawi', 'ganjil' => 'Halaman ganjil = judul bab', 'genap' => 'Halaman genap = judul buku'] as $val => $label)
+                                        <option value="{{ $val }}" @selected(old('param_cek_rt', $kriteria->parameter['cek'] ?? 'arab') === $val)>{{ $label }}</option>
+                                        @endforeach
+                                    </select>
+                                </div>
+                                <div class="col-md-7"><small class="text-muted">Running title = teks sebaris dengan nomor halaman di footer/header.</small></div>
+                            </div>
+                        </div>
+
+                        {{-- DAFTAR_HALAMAN --}}
+                        <div id="panel_daftar_halaman" class="param-panel border rounded p-3 bg-light" style="display:none;">
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-4">
+                                    <label class="form-label small mb-1">Daftar</label>
+                                    <select name="param_daftar" class="form-select form-select-sm">
+                                        @foreach(['isi' => 'Daftar Isi', 'tabel' => 'Daftar Tabel', 'gambar' => 'Daftar Gambar'] as $val => $label)
+                                        <option value="{{ $val }}" @selected(old('param_daftar', $kriteria->parameter['daftar'] ?? 'isi') === $val)>{{ $label }}</option>
+                                        @endforeach
+                                    </select>
+                                </div>
+                                <div class="col-md-8"><small class="text-muted">Setiap entri harus ada di halaman yang disebut. Tabel/gambar: judulnya juga harus sama, dan yang ada di isi harus tercantum di daftar.</small></div>
+                            </div>
+                        </div>
+
+                        {{-- FONT_BPS --}}
+                        <div id="panel_font_bps" class="param-panel border rounded p-3 bg-light" style="display:none;">
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-4">
+                                    <label class="form-label small mb-1">Halaman</label>
+                                    <select name="param_halaman_font" class="form-select form-select-sm">
+                                        @foreach(['kover' => 'Kover depan', 'judul' => 'Halaman judul utama', 'belakang' => 'Kover belakang'] as $val => $label)
+                                        <option value="{{ $val }}" @selected(old('param_halaman_font', $kriteria->parameter['halaman'] ?? 'kover') === $val)>{{ $label }}</option>
+                                        @endforeach
+                                    </select>
+                                </div>
+                                <div class="col-md-8"><small class="text-muted">Nama BPS penerbit ("BADAN PUSAT STATISTIK" + baris wilayahnya) harus Arial Bold Italic, huruf kapital semua. Nama BPS berupa gambar/kurva tidak bisa dicek.</small></div>
+                            </div>
+                        </div>
+
                         {{-- CONTAINS / NOT_CONTAINS --}}
                         <div id="panel_contains" class="param-panel border rounded p-3 bg-light" style="display:none;">
                             <p class="small fw-semibold mb-2"><i class="ti ti-text-scan-2 me-1 text-primary"></i>Parameter Contains</p>
@@ -517,6 +581,11 @@ function showParamPanel() {
         abjad:        'panel_pola_hitung',
         judul_kover:  'panel_judul_kover',
         sama_api:     'panel_sama_api',
+        rata_angka:   'panel_rata_angka',
+        nomor_halaman:  'panel_nomor_halaman',
+        running_title:  'panel_running_title',
+        daftar_halaman: 'panel_daftar_halaman',
+        font_bps:       'panel_font_bps',
     };
     const target = map[tipe];
     if (target) {

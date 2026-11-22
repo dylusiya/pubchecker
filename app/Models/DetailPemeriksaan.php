@@ -38,6 +38,51 @@ class DetailPemeriksaan extends Model
         return $this->pin_halaman ? ['hal' => $this->pin_halaman, 'x' => $this->pin_x, 'y' => $this->pin_y] : null;
     }
 
+    /** Maks. penanda per kriteria. */
+    public const MAKS_PIN = 30;
+
+    /** Kolom pins sudah ada (migrasi 2026_11_23_100000); belum → hanya satu penanda (pin_halaman/x/y). */
+    public static function adaKolomPins(): bool
+    {
+        static $ada = null;
+        return $ada ??= \Illuminate\Support\Facades\Schema::hasColumn('detail_pemeriksaan', 'pins');
+    }
+
+    /** Semua penanda kriteria ini: [{hal, x, y}, …] (kolom pins, atau penanda tunggal lama). */
+    public function daftarPin(): array
+    {
+        $pins = self::adaKolomPins() ? json_decode((string) ($this->attributes['pins'] ?? ''), true) : null;
+        if (is_array($pins)) return self::rapikanPin($pins);
+        return ($p = $this->pinArray()) ? [$p] : [];
+    }
+
+    /** Penanda valid saja ({hal ≥ 1, x & y 0–1}), maks. MAKS_PIN. */
+    public static function rapikanPin(array $pins): array
+    {
+        $hasil = [];
+        foreach ($pins as $p) {
+            if (!is_array($p) || !is_numeric($p['hal'] ?? null) || !is_numeric($p['x'] ?? null) || !is_numeric($p['y'] ?? null)) continue;
+            if ((int) $p['hal'] < 1 || $p['x'] < 0 || $p['x'] > 1 || $p['y'] < 0 || $p['y'] > 1) continue;
+            $hasil[] = ['hal' => (int) $p['hal'], 'x' => round((float) $p['x'], 4), 'y' => round((float) $p['y'], 4)];
+        }
+        return array_slice($hasil, 0, self::MAKS_PIN);
+    }
+
+    /**
+     * Kolom yang diisi untuk menyimpan penanda (query builder: pins sebagai teks JSON). Penanda pertama juga
+     * disimpan di pin_halaman/x/y supaya data & kode lama tetap terbaca.
+     */
+    public static function isianPin(array $pins): array
+    {
+        $pins = self::rapikanPin($pins);
+        $awal = $pins[0] ?? null;
+        return [
+            'pin_halaman' => $awal['hal'] ?? null,
+            'pin_x'       => $awal['x'] ?? null,
+            'pin_y'       => $awal['y'] ?? null,
+        ] + (self::adaKolomPins() ? ['pins' => $pins ? json_encode($pins) : null] : []);
+    }
+
     /**
      * Lokasi temuan [{hal, teks}] sebagai array. Teks JSON yang ter-encode dua kali (draf "tinjau sambil diproses"
      * sebelum diperbaiki, 11 Nov 2026) ikut dibaca benar; isian berupa array/teks JSON keduanya diterima.

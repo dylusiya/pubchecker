@@ -66,5 +66,7 @@ class Kernel extends HttpKernel
         'approved' => \App\Http\Middleware\EnsureUserApproved::class,
         // hanya pemeriksa yang ditugaskan ke publikasi {hasil}/{catatan} (atau admin)
         'tugas'    => \App\Http\Middleware\CekPenugasan::class,
+        // Riwayat: sesi {sesi} hanya untuk pemiliknya (atau admin)
+        'sesi.milik' => \App\Http\Middleware\PemilikSesi::class,
     ];
 }

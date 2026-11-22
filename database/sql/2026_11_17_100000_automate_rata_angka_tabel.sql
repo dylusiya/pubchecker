@@ -1,0 +1,5 @@
+-- Migration: 2026_11_17_100000_automate_rata_angka_tabel
+-- Jalankan HANYA bila baris 2026_11_17_100000_automate_rata_angka_tabel belum ada di tabel `migrations`.
+ALTER TABLE kriteria_pemeriksaan MODIFY tipe_cek ENUM('regex','not_regex','contains','not_contains','posisi_area','min_pages','manual','urutan','sama_kover','paritas','romawi_genap','jumlah_min','nomor_urut','bab','bulan_rilis','abjad','judul_kover','sama_api','rata_angka') NOT NULL DEFAULT 'manual';
+update `kriteria_pemeriksaan` set `tipe_cek` = 'rata_angka', `parameter` = null, `status_gagal` = 'PERLU DICEK', `pesan_ok` = 'Angka dalam tabel rata kanan dan di tengah kolom', `pesan_gagal` = 'Angka dalam tabel belum rata kanan / belum di tengah kolom', `updated_at` = '2026-11-17 12:13:26' where (`kode` = 'P-264' and `tipe_cek` = 'manual');
+INSERT INTO `migrations` (`migration`, `batch`) SELECT m.migration, m.batch FROM (SELECT '2026_11_17_100000_automate_rata_angka_tabel' AS migration, IFNULL(MAX(`batch`), 0) + 1 AS batch FROM `migrations`) AS m WHERE NOT EXISTS (SELECT 1 FROM `migrations` WHERE `migration` = '2026_11_17_100000_automate_rata_angka_tabel');

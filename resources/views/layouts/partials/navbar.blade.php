@@ -1,26 +1,16 @@
 @php
     $user     = auth()->user();
     $namaUser = $user->first_name ?? $user->name;
-    $lastSesi = \App\Models\SesiPemeriksaan::latest()->first();
+    // sesi sendiri (admin: semua); model lama tanpa scope milik() → sesi terakhir siapa pun, bukan error 500
+    $lastSesi = (method_exists(\App\Models\SesiPemeriksaan::class, 'scopeMilik')
+        ? \App\Models\SesiPemeriksaan::milik($user) : \App\Models\SesiPemeriksaan::query())->latest()->first();
     $hasError = $lastSesi && $lastSesi->total_err > 0;
 @endphp
 
-{{-- Header atas: logo + mode gelap, sesi terakhir, akun --}}
+{{-- Header atas (di kanan sidebar): mode gelap, sesi terakhir, akun. Logo & menu ada di sidebar. --}}
 <header class="navbar navbar-expand-md d-print-none">
     <div class="container-xl">
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar-menu"
-                aria-controls="navbar-menu" aria-expanded="false" aria-label="Buka menu">
-            <span class="navbar-toggler-icon"></span>
-        </button>
-
-        <div class="navbar-brand navbar-brand-autodark d-none-navbar-horizontal pe-0 pe-md-3">
-            <a href="{{ route('dashboard') }}" class="d-flex align-items-center gap-2 text-decoration-none">
-                <span class="avatar avatar-sm bg-primary text-white"><i class="ti ti-file-search fs-2"></i></span>
-                <span class="fw-bold text-body fs-3">Pub Checker</span>
-            </a>
-        </div>
-
-        <div class="navbar-nav flex-row order-md-last">
+        <div class="navbar-nav flex-row order-md-last ms-auto">
             {{-- Mode gelap/terang --}}
             <div class="d-none d-md-flex">
                 <a href="#" class="nav-link px-0 hide-theme-dark" onclick="toggleTheme(event)" title="Mode gelap" data-bs-toggle="tooltip" data-bs-placement="bottom">

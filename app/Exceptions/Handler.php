@@ -3,6 +3,8 @@
 namespace App\Exceptions;
 
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
+use Illuminate\Support\Facades\Auth;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 use Throwable;
 
 class Handler extends ExceptionHandler
@@ -43,6 +45,22 @@ class Handler extends ExceptionHandler
     {
         $this->reportable(function (Throwable $e) {
             //
+        });
+
+        // Token CSRF kedaluwarsa saat login lokal (419): form terkirim dua kali (login pertama sudah berhasil &
+        // memperbarui token), atau halaman login sudah basi (dibuka lama / tombol Back setelah logout).
+        // Jangan tampilkan halaman 419: sudah login → lanjut ke dashboard; belum → kembali ke form login.
+        $this->renderable(function (HttpException $e, $request) {
+            if ($e->getStatusCode() !== 419 || ! $request->routeIs('login.local')) {
+                return null;
+            }
+            if (Auth::check()) {
+                return redirect()->intended(route('dashboard'));
+            }
+
+            return redirect()->route('login')
+                ->withInput($request->only('username'))
+                ->with('error', 'Halaman login sudah kedaluwarsa. Silakan login lagi.');
         });
     }
 }

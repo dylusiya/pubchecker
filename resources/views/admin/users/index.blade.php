@@ -188,7 +188,7 @@
                                             <i class="ti ti-pencil"></i>
                                         </a>
                                         @if($user->id !== auth()->id())
-                                        <form action="{{ route('admin.users.destroy', $user->id) }}" method="POST" class="d-inline" onsubmit="return confirm('Yakin ingin menghapus user ini?')">
+                                        <form action="{{ route('admin.users.destroy', $user->id) }}" method="POST" class="d-inline" data-confirm="Yakin ingin menghapus user ini?" data-confirm-ok="Hapus" data-confirm-danger>
                                             @csrf
                                             @method('DELETE')
                                             <button type="submit" class="btn btn-outline-danger btn-sm btn-icon" title="Hapus">

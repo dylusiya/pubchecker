@@ -6,7 +6,8 @@
               $periodeInfo  teks penjelasan periode (opsional, HTML aman dari Blade pemanggil)
 --}}
 @php $bulanNama ??= ['', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember']; @endphp
-<div class="alert alert-info d-flex align-items-center flex-wrap gap-2 py-2 mb-3">
+{{-- sticky-top: bar tetap terlihat saat menggulir; tombol tidak pernah disembunyikan (hanya nonaktif) supaya tidak bergeser --}}
+<div class="alert alert-info d-flex align-items-center flex-wrap gap-2 py-2 mb-3 sticky-top">
     @isset($periodePilih)
         {{-- Periode pemeriksaan ulang — hasilnya nanti dikirim ke SIPOTRET pada periode ini --}}
         <div class="d-flex align-items-center flex-wrap gap-2 w-100 pb-2 mb-1 border-bottom">
@@ -34,49 +35,51 @@
         <small class="text-secondary" id="urutInfo"></small>
     </div>
     <i class="ti ti-checkbox"></i>
-    <span class="flex-fill small" id="selectionInfo"></span>
+    <span class="small text-nowrap" id="selectionInfo"></span>
+    <div class="btn-list ms-auto">
     <button type="button" class="btn btn-sm btn-ghost-primary" onclick="pilihSemua()">
         <i class="ti ti-checks"></i> <span>Pilih Semua</span>
     </button>
-    <button type="button" class="btn btn-sm btn-ghost-secondary" id="btnClearSel" onclick="clearSelection()" hidden>
-        <i class="ti ti-x"></i> <span>Batal Pilih</span>
+    <button type="button" class="btn btn-sm btn-ghost-secondary" id="btnClearSel" onclick="clearSelection()" disabled>
+        <i class="ti ti-x"></i> <span>Batal</span>
     </button>
     @if($bisaApprove)
         {{-- Approve beberapa sekaligus: yang dicentang & statusnya menunggu approve --}}
         <form method="post" action="{{ route('dashboard.sipotret.approve') }}" id="formApprove" class="m-0">
             @csrf
-            <button type="button" class="btn btn-sm btn-success" id="btnApproveSel" onclick="approveTerpilih()" hidden>
+            <button type="button" class="btn btn-sm btn-success" id="btnApproveSel" onclick="approveTerpilih()" disabled>
                 <i class="ti ti-circle-check"></i> <span id="btnApproveSelLabel">Approve</span>
             </button>
         </form>
     @endif
     @if($pemeriksa)
         {{-- admin: tugaskan publikasi yang dicentang ke satu pemeriksa --}}
-        <div class="d-flex align-items-center gap-1" id="tugasBar" hidden>
-            <select id="tugasUser" class="form-select form-select-sm w-auto" aria-label="Pemeriksa">
+        <div class="input-group input-group-sm w-auto" id="tugasBar">
+            <select id="tugasUser" class="form-select form-select-sm w-auto" aria-label="Pemeriksa" disabled>
                 <option value="">Pilih pemeriksa…</option>
                 @foreach($pemeriksa as $u)
                     <option value="{{ $u['id'] }}">{{ $u['nama'] }}{{ $u['role'] === 'admin' ? ' (admin)' : '' }}</option>
                 @endforeach
             </select>
-            <button type="button" class="btn btn-sm btn-purple" onclick="tugaskanTerpilih()" title="Tugaskan publikasi yang dicentang ke pemeriksa ini">
+            <button type="button" class="btn btn-sm btn-purple" onclick="tugaskanTerpilih()" title="Tugaskan publikasi yang dicentang ke pemeriksa ini" disabled>
                 <i class="ti ti-user-check"></i> <span id="btnTugasLabel">Tugaskan</span>
             </button>
-            <button type="button" class="btn btn-sm btn-ghost-secondary" onclick="tugaskanTerpilih(true)" title="Lepas penugasan publikasi yang dicentang">
+            <button type="button" class="btn btn-sm" onclick="tugaskanTerpilih(true)" title="Lepas penugasan publikasi yang dicentang" disabled>
                 <i class="ti ti-user-off"></i>
             </button>
         </div>
     @endif
     @can('periksa')
         {{-- belum upload / belum approve: ketidaksesuaian bulan lalu langsung disalin ke periode pemeriksaan di SIPOTRET --}}
-        <button type="button" class="btn btn-sm btn-outline-danger" id="btnSalinSel" onclick="salinTerpilih()" hidden
+        <button type="button" class="btn btn-sm btn-outline-danger" id="btnSalinSel" onclick="salinTerpilih()" disabled
                 title="Salin catatan SIPOTRET bulan sebelumnya ke periode pemeriksaan, untuk publikasi yang belum upload perbaikan atau belum di-approve (tanpa memeriksa PDF)">
             <i class="ti ti-copy"></i> <span id="btnSalinSelLabel">Salin bulan lalu</span>
         </button>
     @endcan
     <button type="button" class="btn btn-sm btn-primary" id="btnCheckSel" onclick="startCheck()" disabled @cannot('periksa') hidden @endcannot>
-        <i class="ti ti-rosette-discount-check"></i> <span id="btnCheckSelLabel">Periksa Terpilih</span>
+        <i class="ti ti-rosette-discount-check"></i> <span id="btnCheckSelLabel">Periksa</span>
     </button>
+    </div>
 </div>
 
 @can('periksa')

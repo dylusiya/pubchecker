@@ -15,6 +15,7 @@
  *     summary:  object|null,   // referensi ke result.summary, di-update di tempat setelah tiap simpan
  *     url:      string,        // URL PDF untuk viewer (blob: lokal, proxied remote, atau /checker/hasil/{id}/pdf)
  *     cleanup:  function|null, // dipanggil saat pindah/selesai (mis. revoke blob URL)
+ *     sipotretTr: number|null, // opsional: versi draf SIPOTRET (transaksi.tr_id) → tombol "Kirim ke SIPOTRET"
  *     usulanCatatan: array|null, // opsional: { item, keterangan, flag_level } — usulan catatan tambahan
  *                                // (mis. item lainnya dari SIPOTRET periode lalu), dipakai lewat tombol "Pakai"
  *   }
@@ -84,6 +85,7 @@ const CheckerReview = (() => {
         pageHint:     'revPageHint',
         btnPin:       'revBtnPin',
         btnUnduhPdf:  'revBtnUnduhPdf',
+        btnKirimSipotret: 'revBtnKirimSipotret',
         btnIsiKomentar: 'revBtnIsiKomentar',
         kategoriSel:  'revKategoriSelect',
         itemCount:    'revItemCount',
@@ -108,6 +110,7 @@ const CheckerReview = (() => {
         infoLain:     'revInfoLain',
         pilihHint:    'revPilihHint',
         toggleDetail: 'revToggleDetail',
+        periksaToggle:'revPeriksaToggle',
         modeToggle:   'revModeToggle',
         modeTab:      'revModeTab',
         modeJejer:    'revModeJejer',
@@ -133,6 +136,7 @@ const CheckerReview = (() => {
     let entries         = [];
     let fileIndex       = 0;
     let groupIndex      = 0;
+    const SEMUA         = -1; // groupIndex: "Semua kategori" (mode Berurutan) — semua kriteria dalam satu daftar
     let saving          = false;
     let filter          = 'all'; // filter kriteria aktif (FILTERS) — bertahan saat pindah kategori/tab
     let onFinishCb      = null;
@@ -144,12 +148,13 @@ const CheckerReview = (() => {
     const CARA_KEY = 'pubchecker.caraTinjau';
     let cara    = (() => { try { return localStorage.getItem(CARA_KEY) === 'urut' ? 'urut' : 'pilih'; } catch { return 'pilih'; } })();
     let fokusId = null; // mode 'pilih': kode kriteria yang sedang dibuka
-    // Daftar "Kriteria Tidak Sesuai" bisa dilipat. null = bawaan per cara: terbuka di mode pilih,
-    // terlipat di mode urut (supaya daftar kriteria per kategori tetap lega).
-    let masalahBuka = null;
-    // panel Konfirmasi temuan otomatis: null = bawaan per cara meninjau (Pilih: terbuka; Berurutan: terlipat supaya
-    // daftar kriteria di bawahnya tetap lega), true/false = pilihan petugas lewat klik judulnya
-    let konfirmasiBuka = null;
+    // Akordeon panel kanan, satu yang terbuka: 'konf' (Konfirmasi temuan otomatis), 'mas' (Kriteria Tidak Sesuai),
+    // 'periksa' (pemeriksaan per kategori / kriteria yang dibuka), 'tutup' (semua terlipat).
+    // null = bawaan per cara meninjau: Pilih → 'mas', Berurutan → 'periksa'.
+    let daftarAktif = null;
+    // item lainnya (catatan tambahan / usulan acuan) yang sedang diedit di daftar Tidak Sesuai:
+    // { entry, kunci: 'c:<id>' | 'u:<index>', draf: { item, flag_level, halaman, keterangan } }
+    let lainEdit = null;
     let kodeManualSet = null;
     let lihatCatatan = false; // mode pilih: kotak catatan tambahan dibuka dari daftar "Item lainnya"
 
@@ -367,11 +372,6 @@ const CheckerReview = (() => {
         el('isianInfo')?.addEventListener('change', e => {
             if (e.target.matches('[data-acuan]')) gantiAcuan(e.target.value);
         });
-        el('isianInfo')?.addEventListener('click', e => {
-            if (e.target.closest('[data-acuan-simpan]')) simpanSemuaAcuan();
-            if (e.target.closest('[data-acuan-cek]')) cekOtomatisAcuan();
-            if (e.target.closest('[data-acuan-beda]')) terapkanBedaAcuan();
-        });
 
         // Cara meninjau: Berurutan / Pilih Kriteria Bermasalah
         el('caraToggle')?.addEventListener('click', e => {
@@ -383,13 +383,36 @@ const CheckerReview = (() => {
         el('konfirmasi')?.addEventListener('click', klikKonfirmasi);
         el('konfirmasi')?.addEventListener('input', ketikBarisNilai);
         el('masalah')?.addEventListener('input', ketikBarisNilai);
+        // isian form item lainnya disimpan sementara supaya tidak hilang bila daftar digambar ulang
+        el('masalah')?.addEventListener('input', e => {
+            const f = e.target.closest('[data-lain-field]');
+            if (f && lainEdit) lainEdit.draf[f.dataset.lainField] = f.value;
+        });
+        el('masalah')?.addEventListener('change', e => {
+            const f = e.target.closest('[data-lain-field]');
+            if (f && lainEdit) lainEdit.draf[f.dataset.lainField] = f.value;
+        });
+
+        // Judul bagian pemeriksaan (akordeon): buka/lipat kategori & kartu kriteria
+        el('periksaToggle')?.addEventListener('click', () => {
+            bukaDaftar('periksa', el('masalah')?.parentElement?.classList.contains('rev-periksa-tutup'));
+        });
 
         // Daftar kriteria Tidak Sesuai → buka kriterianya
         el('masalah')?.addEventListener('click', e => {
-            if (e.target.closest('[data-masalah-toggle]')) { masalahBuka = !(masalahBuka ?? cara === 'pilih'); renderMasalah(); return; }
+            if (e.target.closest('[data-masalah-toggle]')) { bukaDaftar('mas', !masBuka()); return; }
             if (e.target.closest('[data-mas-simpan]')) { simpanMasalah(); return; }
+            if (e.target.closest('[data-mas-cek]')) { cekOtomatisAcuan(); return; }
+            // item lainnya: edit langsung di barisnya (tidak pindah ke form catatan tambahan di bawah)
+            if (e.target.closest('[data-lain-batal]')) { lainEdit = null; renderMasalah(); return; }
+            const hapusLain = e.target.closest('[data-lain-hapus]');
+            if (hapusLain) { hapusItemLain(hapusLain.dataset.lainHapus); return; }
+            if (e.target.closest('[data-lain-simpan]')) { simpanLain(); return; }
+            const formLengkap = e.target.closest('[data-lain-lengkap]');
+            if (formLengkap) { lainEdit = null; renderMasalah(); bukaMasalahLain(formLengkap.dataset.lainLengkap); return; }
+            if (e.target.closest('[data-lain-form]')) return;
             const lain = e.target.closest('[data-masalah-lain]');
-            if (lain) { bukaMasalahLain(lain.dataset.masalahLain); return; }
+            if (lain) { bukaLainDiTempat(lain.dataset.masalahLain); return; }
             // baris kriteria: Sesuai / Tidak Sesuai / Skip, buka kriteria, halaman temuan (sama dengan Konfirmasi temuan otomatis)
             klikBarisNilai(e, 'mas');
         });
@@ -420,6 +443,7 @@ const CheckerReview = (() => {
 
         el('btnPin')?.addEventListener('click', () => setPinMode(!pinMode));
         el('btnUnduhPdf')?.addEventListener('click', unduhPdfKomentar);
+        el('btnKirimSipotret')?.addEventListener('click', kirimSipotret);
         el('btnIsiKomentar')?.addEventListener('click', () => {
             isiKomentar = !isiKomentar;
             el('btnIsiKomentar').classList.toggle('active', isiKomentar);
@@ -429,7 +453,8 @@ const CheckerReview = (() => {
 
         el('kategoriSel')?.addEventListener('change', e => {
             collectGroup();
-            groupIndex = parseInt(e.target.value, 10) || 0;
+            const v = parseInt(e.target.value, 10);
+            groupIndex = Number.isInteger(v) ? v : 0;
             renderGroup();
         });
 
@@ -537,12 +562,14 @@ const CheckerReview = (() => {
             setPinMode(false);
             if (el('btnPin')) el('btnPin').hidden = !(entry.hasilId && catUrl('catatanUrl'));
             if (el('btnUnduhPdf')) el('btnUnduhPdf').hidden = !(entry.hasilId && catUrl('catatanUrl'));
+            if (el('btnKirimSipotret')) el('btnKirimSipotret').hidden = !(entry.hasilId && entry.sipotretTr && catUrl('sipotretDrafUrl'));
             if (el('btnIsiKomentar')) el('btnIsiKomentar').hidden = !(entry.hasilId && catUrl('catatanUrl'));
             // scan ulang: hasil tersimpan & cek otomatis awalnya sudah selesai (draf yang masih diproses menunggu dulu)
             const scan = document.getElementById('revScanUlang');
             if (scan) scan.hidden = !(entry.hasilId && catUrl('scanUrl')) || !!entry.menunggu;
             const semua = document.getElementById('revSemuaSesuai');
             if (semua) semua.hidden = !entry.hasilId;
+            renderProsesSemua(); // progres "Tandai semua sesuai" publikasi ini (bila masih berjalan)
         } catch (e) {
             // data satu publikasi bermasalah jangan sampai PDF-nya ikut tidak terbuka
             console.error('Panel tinjauan gagal digambar', e);
@@ -619,8 +646,10 @@ const CheckerReview = (() => {
         const entry = entries[fileIndex];
         const url = catUrl('scanUrl');
         if (!entry?.hasilId || !url || sedangScan) return;
-        if (!confirm('Periksa ulang otomatis publikasi ini dengan kriteria terbaru?\n\nKriteria yang sudah dinilai & disimpan tidak berubah; yang belum dinilai mendapat hasil cek otomatis baru.')) return;
+        if (!(await Dialog.confirm('Kriteria yang sudah dinilai & disimpan tidak berubah; yang belum dinilai mendapat hasil cek otomatis baru.',
+            { title: 'Periksa ulang otomatis dengan kriteria terbaru?', okText: 'Scan ulang' }))) return;
         const btn = document.getElementById('revScanUlang');
+        const judulAsli = btn?.title || '';
         const label = document.getElementById('revScanUlangLabel');
         const tulis = t => { if (label) label.textContent = t; };
         sedangScan = true;
@@ -636,10 +665,18 @@ const CheckerReview = (() => {
                     const res = await fetch(asalSama(entry.url));
                     if (!res.ok) throw new Error('PDF ' + res.status);
                     const data = await res.arrayBuffer();
+                    // label per tahap (baca teks → OCR), supaya tidak tampak membaca ulang dari 0% di tiap tahap
+                    const TAHAP = { download: 'Mengunduh PDF', text: 'Membaca teks', 'ocr-wait': 'Menunggu giliran OCR', ocr: 'OCR halaman gambar' };
                     extracted = await PdfExtract.extract(data, {
-                        onProgress: (msg, frac) => tulis(frac ? `Membaca PDF… ${Math.round(frac * 100)}%` : 'Membaca PDF…'),
+                        nama: entry.filename,
+                        selaluTanya: true, // scan ulang satu publikasi: dialog PDF secured selalu ditampilkan
+                        onProgress: (msg, frac, tahap) => {
+                            tulis(`${TAHAP[tahap] || 'Membaca PDF'}… ${frac ? Math.round(frac * 100) + '%' : ''}`);
+                            if (btn) btn.title = msg; // rincian, mis. "Membaca teks gambar (halaman 12, 5/30)… 40%"
+                        },
                     });
                 } catch (e) {
+                    if (e?.dibatalkan) throw e; // PDF secured, petugas membatalkan: tidak dibaca server
                     console.warn('Teks PDF gagal dibaca di browser, dibaca di server', e);
                     alasanBrowser = e.message;
                     extracted = null;
@@ -651,7 +688,7 @@ const CheckerReview = (() => {
             const res = await fetch(url.replace('__ID__', entry.hasilId), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
-                body: JSON.stringify(extracted ? { extracted_b64: PdfExtract.kemas(extracted) } : {}),
+                body: JSON.stringify(extracted ? { extracted_b64: await PdfExtract.kemas(extracted) } : {}),
             });
             const json = await res.json().catch(() => { throw new Error(res.status === 403 ? 'Ditolak server (403)' : 'Server membalas ' + res.status); });
             if (!res.ok || json.error) {
@@ -664,57 +701,101 @@ const CheckerReview = (() => {
             renderGroupTetap();
             pesanSimpan('alert-success', `Scan ulang selesai: hasil cek otomatis ${berubah} kriteria yang belum dinilai berubah. Penilaian yang sudah disimpan tidak diubah.`);
         } catch (e) {
-            pesanSimpan('alert-danger', 'Scan ulang gagal: ' + e.message);
+            if (e?.dibatalkan) pesanSimpan('alert-secondary', 'Scan ulang dibatalkan. Hasil sebelumnya tidak diubah.');
+            else pesanSimpan('alert-danger', 'Scan ulang gagal: ' + e.message);
         } finally {
             sedangScan = false;
-            if (btn) btn.disabled = false;
+            if (btn) { btn.disabled = false; btn.title = judulAsli; }
             tulis('Scan ulang');
         }
     }
 
     /**
-     * Publikasi sudah tidak bermasalah: semua kriteria Sesuai (termasuk yang Tidak Sesuai, mis. dari acuan),
-     * catatan tambahan dihapus & usulan item lainnya diabaikan, lalu langsung disimpan. Di Tugas Saya publikasi ini
-     * jadi "Sudah sesuai" untuk periode pemeriksaannya (tidak ada yang perlu dikirim ke SIPOTRET).
+     * Tandai semua kriteria Sesuai lalu langsung simpan, KECUALI yang dipilih/tersimpan Tidak Sesuai (tidak ditimpa;
+     * yang belum disimpan ikut disimpan apa adanya bila keterangannya terisi). Catatan tambahan & usulan item lainnya
+     * tidak diubah. Bila tidak ada Tidak Sesuai & catatan tambahan, di Tugas Saya publikasi ini jadi "Sudah sesuai".
      */
     async function semuaSesuai() {
         const entry = entries[fileIndex];
-        if (!entry?.hasilId || saving) return;
+        if (!entry?.hasilId || entry.prosesSemua) return;
         collectGroup();
         await loadCatatan(entry); // catatan tambahan dimuat bila belum
-        const nTs  = entry.checks.filter(c => pilihanAwal(c) === TIDAK_SESUAI).length;
-        const nCat = (entry.catatan || []).length;
-        const nUsul = (entry.usulanCatatan || []).filter(u => usulanBelumDipakai(entry, u)).length;
-        const hilang = [nTs ? `${nTs} kriteria Tidak Sesuai jadi Sesuai` : '', nCat ? `${nCat} catatan tambahan DIHAPUS` : '',
-                        nUsul ? `${nUsul} usulan item lainnya dari acuan diabaikan` : ''].filter(Boolean);
-        if (!confirm(`Tandai SEMUA ${entry.checks.length} kriteria "${entry.filename}" Sesuai lalu simpan?\n\n`
-            + (hilang.length ? hilang.map(t => '• ' + t).join('\n') + '\n\n' : '')
-            + 'Publikasi ini dianggap sudah sesuai untuk periode pemeriksaan ini (tidak ada yang dikirim ke SIPOTRET).')) return;
+        const ts      = entry.checks.filter(c => pilihanAwal(c) === TIDAK_SESUAI);
+        const tsKet   = ts.filter(c => (c.selKet ?? c.keterangan ?? '').trim());
+        const tsKosong = ts.filter(c => !tsKet.includes(c));
+        const lain    = entry.checks.filter(c => pilihanAwal(c) !== TIDAK_SESUAI);
+        const nCat    = (entry.catatan || []).length;
+        if (!(await Dialog.confirm(`${lain.length} kriteria "${entry.filename}" ditandai Sesuai lalu disimpan.\n\n`
+            + (ts.length ? `• ${ts.length} kriteria Tidak Sesuai TIDAK diubah (${ts.map(c => c.id).join(', ')})\n` : '')
+            + (nCat ? `• ${nCat} catatan tambahan tetap\n` : '')
+            + (ts.length || nCat ? '\nPublikasi ini tetap tercatat bermasalah.' : 'Publikasi ini dianggap sudah sesuai untuk periode pemeriksaan ini (tidak ada yang dikirim ke SIPOTRET).'),
+            { title: 'Tandai semua sesuai?', okText: 'Tandai & simpan' }))) return;
 
-        saving = true;
-        const btn = document.getElementById('revSemuaSesuai');
-        if (btn) btn.disabled = true;
+        // Berjalan di latar per publikasi (bukan kunci global `saving`): petugas tetap bisa membuka tab publikasi
+        // lain selama menyimpan. Dikirim bertahap supaya progresnya terlihat (renderProsesSemua & tab publikasi).
+        lain.forEach(c => { c.selStatus = 'OK'; c.selKet = ''; c.dipilih = true; delete c.konfirmasi; });
+        // Tidak Sesuai yang belum tersimpan ikut disimpan apa adanya (yang tanpa keterangan dibiarkan)
+        tsKet.forEach(c => { c.selStatus = TIDAK_SESUAI; c.selKet = (c.selKet ?? c.keterangan ?? '').trim(); });
+        const semua = [...lain, ...tsKet];
+        const BATCH = 60;
+        entry.prosesSemua = { selesai: 0, total: semua.length };
+        renderProsesSemua();
+        renderFileTabs();
+        const judul = entries.length > 1 ? `"${entry.filename}": ` : '';
         try {
-            for (const c of [...(entry.catatan || [])]) {
-                const res = await fetch(catUrl('catatanHapusUrl').replace('__ID__', c.id), {
-                    method: 'DELETE', headers: { 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
-                });
-                if (!res.ok) throw new Error(`catatan "${c.item}" gagal dihapus (${res.status})`);
-                entry.catatan = entry.catatan.filter(x => x.id !== c.id);
+            for (let i = 0; i < semua.length; i += BATCH) {
+                const potong = semua.slice(i, i + BATCH);
+                await simpanItems(entry, potong);
+                entry.prosesSemua.selesai += potong.length;
+                renderProsesSemua();
+                renderFileTabs();
             }
-            entry.checks.forEach(c => { c.selStatus = 'OK'; c.selKet = ''; c.dipilih = true; delete c.konfirmasi; });
-            await simpanItems(entry, entry.checks);
-            (entry.usulanCatatan || []).forEach(u => { u.dipakai = true; });
-            renderGroupTetap();
-            renderCatatanList();
-            gambarSemuaPin();
-            pesanSimpan('alert-success', `Semua ${entry.checks.length} kriteria tersimpan Sesuai${nCat ? `, ${nCat} catatan tambahan dihapus` : ''}. Publikasi ini tercatat sudah sesuai untuk periode ini.`);
+            entry.prosesSemua = null;
+            if (entry === entries[fileIndex]) renderGroupTetap();
+            renderProsesSemua();
+            renderFileTabs();
+            pesanSimpan(tsKosong.length ? 'alert-warning' : 'alert-success', judul
+                + `${lain.length} kriteria disimpan Sesuai`
+                + (ts.length ? `, ${ts.length} kriteria Tidak Sesuai tidak diubah` : '')
+                + (tsKosong.length ? ` (${tsKosong.map(c => c.id).join(', ')} belum berketerangan, belum tersimpan)` : '')
+                + (!ts.length && !nCat ? '. Publikasi ini tercatat sudah sesuai untuk periode ini.' : '.'));
         } catch (e) {
-            pesanSimpan('alert-danger', 'Gagal menandai semua sesuai: ' + e.message);
-        } finally {
-            saving = false;
-            if (btn) btn.disabled = false;
+            const n = entry.prosesSemua?.selesai ?? 0;
+            entry.prosesSemua = null;
+            if (entry === entries[fileIndex]) renderGroupTetap();
+            renderProsesSemua();
+            renderFileTabs();
+            pesanSimpan('alert-danger', `${judul}Gagal menandai semua sesuai setelah ${n} dari ${semua.length} kriteria tersimpan: ${e.message}. `
+                + 'Klik "Tandai semua sesuai" lagi untuk melanjutkan sisanya.');
         }
+    }
+
+    // halaman ditutup/dimuat ulang saat "Tandai semua sesuai" masih berjalan → sebagian kriteria belum tersimpan
+    window.addEventListener('beforeunload', e => {
+        if (entries.some(x => x.prosesSemua)) { e.preventDefault(); e.returnValue = ''; }
+    });
+
+    /** Kotak progres "Tandai semua sesuai" untuk publikasi yang sedang tampil (+ tombolnya dikunci selama berjalan). */
+    function renderProsesSemua() {
+        const entry = entries[fileIndex];
+        const p = entry?.prosesSemua;
+        const btn = document.getElementById('revSemuaSesuai');
+        if (btn) btn.disabled = !!p;
+        const box = document.getElementById('revProsesSemua');
+        if (!box) return;
+        box.hidden = !p;
+        if (!p) return;
+        const persen = p.total ? Math.round(p.selesai / p.total * 100) : 0;
+        box.innerHTML = `
+            <div class="d-flex align-items-center gap-2 small mb-1">
+                <span class="spinner-border spinner-border-sm text-info"></span>
+                <strong>Menandai semua sesuai…</strong>
+                <span class="text-secondary">${p.selesai}/${p.total} kriteria tersimpan (${persen}%)</span>
+                ${entries.length > 1 ? '<span class="text-secondary ms-auto">Tab publikasi lain tetap bisa dibuka.</span>' : ''}
+            </div>
+            <div class="progress" style="height:6px;">
+                <div class="progress-bar progress-bar-striped progress-bar-animated bg-info" style="width:${Math.max(persen, 3)}%;"></div>
+            </div>`;
     }
 
     /** Proses pemeriksaan selesai mengunduh PDF entry (url blob; null = gagal → buka dari sumbernya). */
@@ -842,7 +923,9 @@ const CheckerReview = (() => {
 
     function currentGroupItems() {
         const entry = entries[fileIndex];
-        return entry.groups[groupIndex].idx.map(i => entry.checks[i]);
+        // SEMUA (-1): semua kriteria, urut per kategori
+        const groups = groupIndex === SEMUA ? entry.groups : [entry.groups[groupIndex]];
+        return groups.flatMap(g => g.idx.map(i => entry.checks[i]));
     }
 
     function goToPage() {
@@ -907,12 +990,15 @@ const CheckerReview = (() => {
     /** Buka kategori `g` lalu sorot kriteria ke-`n` di kategori itu. */
     function lompatKeKriteria(g, n) {
         const entry = entries[fileIndex];
+        tutupDaftar(); // kartu kriteria harus terlihat
         if (cara === 'pilih') {
             // hanya kriteria ini yang ditampilkan (lihat applyFilter)
             collectGroup();
             fokusId = entry.checks[entry.groups[g].idx[n]]?.id ?? null;
         }
-        if (g !== groupIndex) {
+        const kriteria = entry.checks[entry.groups[g].idx[n]];
+        // "Semua kategori" tetap dipakai: kriterianya sudah ada di daftar
+        if (g !== groupIndex && groupIndex !== SEMUA) {
             if (cara !== 'pilih') collectGroup();
             groupIndex = g;
             renderGroup();
@@ -920,9 +1006,10 @@ const CheckerReview = (() => {
             applyFilter();
         }
         // PDF langsung ke halaman kriteria ini (perkiraan bila tidak ada temuan berposisi)
-        keHalamanKriteria(entry.checks[entry.groups[g].idx[n]]);
-        let card = el('items').querySelector(`[data-idx="${n}"]`);
-        if (card?.hidden) { filter = 'all'; applyFilter(); card = el('items').querySelector(`[data-idx="${n}"]`); }
+        keHalamanKriteria(kriteria);
+        const pos = currentGroupItems().indexOf(kriteria);
+        let card = el('items').querySelector(`[data-idx="${pos}"]`);
+        if (card?.hidden) { filter = 'all'; applyFilter(); card = el('items').querySelector(`[data-idx="${pos}"]`); }
         if (!card) return;
         card.scrollIntoView({ behavior: 'smooth', block: 'center' });
         card.classList.add('border-primary');
@@ -941,6 +1028,7 @@ const CheckerReview = (() => {
     /** Kategori berikutnya (berputar) di publikasi aktif yang punya kriteria cocok dengan filter. */
     function nextFilterGroup() {
         const entry = entries[fileIndex];
+        if (groupIndex === SEMUA) return null; // semua kategori sudah tampil
         for (let k = 1; k < entry.groups.length; k++) {
             const j = (groupIndex + k) % entry.groups.length;
             if (entry.groups[j].idx.some(i => cocokFilter(entry.checks[i]))) return j;
@@ -997,7 +1085,10 @@ const CheckerReview = (() => {
     function renderKategoriSelect(entry) {
         const sel = el('kategoriSel');
         if (!sel) return;
-        sel.innerHTML = entry.groups.map((g, i) => {
+        const semuaDone = entry.groups.every(g => isGroupReviewed(entry, g));
+        const semuaCocok = filter === 'all' ? null : entry.checks.filter(c => cocokFilter(c)).length;
+        sel.innerHTML = `<option value="${SEMUA}" ${groupIndex === SEMUA ? 'selected' : ''}>${semuaDone ? '✓' : '○'} Semua kategori (${entry.checks.length})${semuaCocok ? ` · ${semuaCocok} cocok` : ''}</option>`
+            + entry.groups.map((g, i) => {
             const done = isGroupReviewed(entry, g);
             // dengan filter aktif: jumlah kriteria yang cocok di kategori itu
             const cocok = filter === 'all' ? null : g.idx.filter(j => cocokFilter(entry.checks[j])).length;
@@ -1012,19 +1103,25 @@ const CheckerReview = (() => {
         const items  = currentGroupItems();
         const doneGroups = groups.filter(g => isGroupReviewed(entry, g)).length;
 
-        el('stepBadge').textContent   = `Kategori ${groupIndex + 1}/${groups.length} · ${doneGroups} selesai`;
+        const semua = groupIndex === SEMUA;
+        el('stepBadge').textContent   = semua
+            ? `Semua kategori · ${doneGroups}/${groups.length} selesai`
+            : `Kategori ${groupIndex + 1}/${groups.length} · ${doneGroups} selesai`;
         el('progressBar').style.width = Math.round((doneGroups / groups.length) * 100) + '%';
         el('itemCount').textContent   = `${items.length} kriteria`;
         el('pageHint').textContent    = 'Menampilkan: ' + (PAGE_LABEL[items[0]?.target] ?? PAGE_LABEL.all);
         el('saveError').style.display = 'none';
         renderKategoriSelect(entry);
         renderFileTabs();
-        renderContoh(groups[groupIndex].kategori);
+        renderContoh(kategoriAktif()); // semua kategori: tanpa contoh
 
         el('items').innerHTML = items.map((c, n) => {
             const sel = pilihanAwal(c);
             const ket = c.selKet ?? c.keterangan ?? '';
-            return `
+            // semua kategori: judul kategori sebelum kriteria pertamanya
+            const judulKat = semua && (n === 0 || items[n - 1].kategori !== c.kategori)
+                ? `<div class="small fw-semibold text-secondary text-uppercase mt-2 mb-1">${esc(c.kategori || 'Lainnya')}</div>` : '';
+            return `${judulKat}
             <div class="border rounded p-2 mb-2 ${c.reviewed ? 'border-success' : ''}" data-idx="${n}" ${c.reviewed || c.dipilih ? 'data-dipilih="1"' : ''}>
                 <div class="d-flex justify-content-between align-items-center gap-2 mb-1">
                     <span class="badge bg-light text-dark border font-monospace">${esc(c.id)}</span>
@@ -1049,14 +1146,7 @@ const CheckerReview = (() => {
                     <textarea class="form-control form-control-sm rev-ket" rows="2"
                               placeholder="Jelaskan apa yang tidak sesuai (wajib)">${esc(ket)}</textarea>
                     <div class="invalid-feedback">Keterangan wajib diisi untuk kriteria yang Tidak Sesuai.</div>
-                    ${entry.hasilId ? `
-                    <div class="d-flex align-items-center flex-wrap gap-2 mt-1">
-                        <button type="button" class="btn btn-sm btn-outline-warning py-0" data-pin-kriteria
-                                title="Klik tombol ini, lalu klik area yang tidak sesuai di halaman PDF">
-                            <i class="ti ti-map-pin"></i> Tandai di PDF
-                        </button>
-                        <small class="rev-pin-info text-secondary">${pinInfoHtml(c)}</small>
-                    </div>` : ''}
+                    ${entry.hasilId ? pinKontrolHtml(c) : ''}
                     ${entries.length > 1 ? `
                     <div class="d-flex align-items-center flex-wrap gap-2 mt-1">
                         <button type="button" class="btn btn-sm btn-outline-danger py-0" data-apply-all
@@ -1072,9 +1162,9 @@ const CheckerReview = (() => {
         el('items').scrollTop = 0;
         applyFilter();
 
-        el('btnPrev').disabled = (fileIndex === 0 && groupIndex === 0);
-        // Terakhir = kategori terakhir publikasi ini dan tidak ada publikasi lain yang belum selesai
-        const isLast = (groupIndex === groups.length - 1) && nextUnfinishedFile() === null;
+        el('btnPrev').disabled = (fileIndex === 0 && groupIndex <= 0);
+        // Terakhir = kategori terakhir (atau semua kategori) publikasi ini dan tidak ada publikasi lain yang belum selesai
+        const isLast = (semua || groupIndex === groups.length - 1) && nextUnfinishedFile() === null;
         el('btnNext').innerHTML = cara === 'pilih'
             ? 'Selesai: sisanya Sesuai <i class="ti ti-check"></i>'
             : isLast
@@ -1094,7 +1184,7 @@ const CheckerReview = (() => {
         cara = c;
         try { localStorage.setItem(CARA_KEY, c); } catch { /* penyimpanan browser tidak tersedia */ }
         fokusId = null;
-        konfirmasiBuka = null; // panel Konfirmasi temuan otomatis kembali ke bawaan cara ini (Berurutan: terlipat)
+        daftarAktif = null; // akordeon panel kanan kembali ke bawaan cara ini
         if (entries[fileIndex]) renderGroup(); else applyCaraUi();
         if (c === 'pilih') document.getElementById('revCari')?.focus();
     }
@@ -1173,6 +1263,7 @@ const CheckerReview = (() => {
                         </div>
                         ${o.pil === TIDAK_SESUAI ? `<textarea class="form-control form-control-sm mt-1" rows="2" data-nilai-ket
                             placeholder="Keterangan (wajib)">${esc(c.selKet ?? c.keterangan ?? '')}</textarea>` : ''}
+                        ${o.pil === TIDAK_SESUAI && entries[fileIndex]?.hasilId ? pinKontrolHtml(c) : ''}
                     </div>`;
     }
 
@@ -1193,7 +1284,7 @@ const CheckerReview = (() => {
         if (!semua.length) { box.innerHTML = ''; return; }
         const belum = semua.filter(c => !c.reviewed);
         const dipilih = semua.filter(c => c.konfirmasi && pilihanAwal(c) && !nilaiTersimpan(c));
-        const buka = konfirmasiBuka ?? cara === 'pilih';
+        const buka = konfBuka();
         const selesai = semua.length - belum.length;
         const total = jumlahHalamanPdf();
         isiDaftar(box, `
@@ -1234,7 +1325,7 @@ const CheckerReview = (() => {
 
     /** Klik di panel Konfirmasi temuan otomatis. */
     function klikKonfirmasi(e) {
-        if (e.target.closest('[data-konf-toggle]')) { konfirmasiBuka = !(konfirmasiBuka ?? cara === 'pilih'); renderKonfirmasi(); return; }
+        if (e.target.closest('[data-konf-toggle]')) { bukaDaftar('konf', !konfBuka()); return; }
         if (e.target.closest('[data-konf-simpan]')) { simpanKonfirmasi(); return; }
         klikBarisNilai(e, 'konf');
     }
@@ -1245,6 +1336,7 @@ const CheckerReview = (() => {
      * @returns true bila ditangani
      */
     function klikBarisNilai(e, jenis) {
+        if (klikPinKriteria(e)) return true; // Tandai di PDF / lihat / hapus penanda di baris ini
         const entry = entries[fileIndex];
         const row = e.target.closest('[data-nilai]');
         const c = row && entry?.checks.find(x => x.id === row.dataset.nilai);
@@ -1313,7 +1405,57 @@ const CheckerReview = (() => {
         }
     }
 
+    // ── Akordeon panel kanan: Konfirmasi temuan otomatis / Kriteria Tidak Sesuai / daftar kriteria ──
+    // Hanya satu yang terbuka (daftarAktif); daftar yang dibuka mengisi tinggi kolom. Bagian pemeriksaan
+    // (kategori, contoh, filter, kartu kriteria) punya judul toggle sendiri dan disembunyikan bila tidak aktif.
+    const aktifDaftar = () => daftarAktif ?? (cara === 'pilih' ? 'mas' : 'periksa');
+    const konfBuka = () => aktifDaftar() === 'konf';
+    const masBuka  = () => aktifDaftar() === 'mas';
+
+    /** Buka/tutup salah satu bagian ('konf' | 'mas' | 'periksa'); membuka satu menutup yang lain. */
+    function bukaDaftar(jenis, buka) {
+        daftarAktif = buka ? jenis : 'tutup';
+        renderMasalah();
+    }
+
+    /** Buka bagian pemeriksaan supaya kartu kriteria / catatan tambahan terlihat (daftar lain terlipat). */
+    function tutupDaftar() {
+        if (el('masalah')?.parentElement?.classList.contains('rev-periksa-tutup') === false && aktifDaftar() === 'periksa') return;
+        daftarAktif = 'periksa';
+        renderMasalah();
+    }
+
+    /** Pasang penanda di kolom kanan sesuai bagian yang sedang terbuka. */
+    function terapkanFokus() {
+        const konf = el('konfirmasi'), mas = el('masalah');
+        const wadah = mas?.parentElement;
+        if (!wadah) return;
+        const terbuka = box => !!box?.querySelector('[data-nilai-list]:not([hidden])');
+        const k = terbuka(konf), m = terbuka(mas);
+        // daftar yang dipilih kosong (tidak tampil) → bagian pemeriksaan yang terbuka
+        const p = !k && !m && aktifDaftar() !== 'tutup';
+        wadah.classList.toggle('rev-fokus', k || m);
+        wadah.classList.toggle('rev-periksa-tutup', !p);
+        konf?.classList.toggle('rev-daftar-buka', k);
+        mas?.classList.toggle('rev-daftar-buka', m);
+
+        const tgl = el('periksaToggle');
+        if (tgl) {
+            const entry = entries[fileIndex];
+            const judul = cara === 'pilih' ? 'Kriteria yang dibuka & catatan tambahan' : 'Pemeriksaan per kategori';
+            const info = cara === 'pilih' || !entry ? ''
+                : `<span class="badge bg-secondary-lt ms-1">${entry.groups.filter(g => isGroupReviewed(entry, g)).length}/${entry.groups.length} kategori</span>`;
+            tgl.innerHTML = `<i class="ti ti-chevron-${p ? 'down' : 'right'} me-1"></i><i class="ti ti-list-check me-1"></i>${judul}${info}`;
+            tgl.title = `${p ? 'Lipat' : 'Tampilkan'} ${judul.toLowerCase()}`;
+            tgl.classList.toggle('mb-2', p);
+        }
+    }
+
     function renderMasalah() {
+        try { renderMasalahIsi(); } finally { terapkanFokus(); }
+    }
+
+    function renderMasalahIsi() {
         renderKonfirmasi();
         const box = el('masalah');
         const entry = entries[fileIndex];
@@ -1330,6 +1472,16 @@ const CheckerReview = (() => {
         const lainTersimpan = entry.catatan || [];
         const lainUsulan = (entry.usulanCatatan || []).map((u, i) => [u, i]).filter(([u]) => usulanBelumDipakai(entry, u));
         const nLain = lainTersimpan.length + lainUsulan.length;
+        // urutan tetap: usulan acuan yang sudah disimpan (jadiId) tampil di posisi usulannya, tidak pindah
+        const dariUsulan = new Map((entry.usulanCatatan || []).filter(u => u.jadiId).map(u => [u.jadiId, u]));
+        const urutLain = [
+            ...lainTersimpan.filter(c => !dariUsulan.has(c.id)).map(c => ['c', c]),
+            ...(entry.usulanCatatan || []).flatMap((u, i) => {
+                const jadi = u.jadiId ? lainTersimpan.find(c => c.id === u.jadiId) : null;
+                if (jadi) return [['c', jadi]];
+                return usulanBelumDipakai(entry, u) ? [['u', u, i]] : [];
+            }),
+        ];
 
         if (!list.length && !nLain) {
             box.innerHTML = pilih
@@ -1337,34 +1489,47 @@ const CheckerReview = (() => {
                 : '';
             return;
         }
-        const buka = masalahBuka ?? pilih;
+        const buka = masBuka();
         // tersimpan = pilihan di layar sama dengan yang tersimpan
         const tersimpan = nilaiTersimpan;
         const perluSimpan = list.filter(c => !tersimpan(c) && pilihanAwal(c));
         const belumSimpan = list.filter(c => !tersimpan(c)).length + lainUsulan.length;
+        // tombol Simpan: kriteria yang berubah + usulan item lainnya dari acuan (dulu "Simpan semua dari acuan")
+        const nSimpan = perluSimpan.length + (entry.hasilId ? lainUsulan.length : 0);
+        const nCek = acuanBelumDicek(entry).length;
+        // item lainnya yang sedang diedit langsung di barisnya (lihat lainEdit)
+        const sedangEdit = kunci => lainEdit && lainEdit.entry === entry && lainEdit.kunci === kunci;
         const htmlLain = nLain ? `
                 <div class="list-group-item py-1 px-2 small fw-semibold bg-light">Item lainnya (di luar daftar kriteria) · ${nLain}</div>
-                ${lainTersimpan.map(c => `
-                <button type="button" class="list-group-item list-group-item-action py-1 px-2 small" data-masalah-lain="c:${c.id}"
-                        title="Buka catatan tambahan ini">
-                    <div class="d-flex justify-content-between gap-2">
+                ${urutLain.map(([jenis, c, i]) => jenis === 'u' ? htmlUsulanLain(c, i) : sedangEdit(`c:${c.id}`) ? htmlFormLain(`c:${c.id}`) : `
+                <div role="button" tabindex="0" class="list-group-item list-group-item-action py-1 px-2 small" data-masalah-lain="c:${c.id}"
+                        title="Edit catatan tambahan ini di sini">
+                    <div class="d-flex justify-content-between align-items-center gap-2">
                         <span class="text-truncate fw-semibold">${esc(c.item)}</span>
-                        <span class="d-flex gap-1 flex-shrink-0">
+                        <span class="d-flex align-items-center gap-1 flex-shrink-0">
                             ${c.halaman ? `<span class="badge bg-secondary-lt"><i class="ti ti-file"></i> hal. ${c.halaman}</span>` : ''}
                             <span class="badge ${LEVEL_BADGE[c.flag_level] || 'bg-secondary-lt'}">${esc(labelLevel(c.flag_level))}</span>
+                            <button type="button" class="btn btn-sm btn-ghost-danger btn-icon p-0" style="width:22px;height:22px;"
+                                    data-lain-hapus="c:${c.id}" title="Hapus catatan tambahan ini"><i class="ti ti-trash"></i></button>
                         </span>
                     </div>
                     <div class="text-wrap text-break text-danger">${esc(c.keterangan)}</div>
-                </button>`).join('')}
-                ${lainUsulan.map(([u, i]) => `
-                <button type="button" class="list-group-item list-group-item-action py-1 px-2 small" data-masalah-lain="u:${i}"
-                        title="Isi form catatan tambahan dengan item ini (periksa dulu, lalu Simpan)">
-                    <div class="d-flex justify-content-between gap-2">
+                </div>`).join('')}` : '';
+        function htmlUsulanLain(u, i) {
+            return sedangEdit(`u:${i}`) ? htmlFormLain(`u:${i}`) : `
+                <div role="button" tabindex="0" class="list-group-item list-group-item-action py-1 px-2 small" data-masalah-lain="u:${i}"
+                        title="Periksa & edit item ini di sini, lalu Simpan">
+                    <div class="d-flex justify-content-between align-items-center gap-2">
                         <span class="text-truncate fw-semibold">${esc(u.item)}</span>
-                        <span class="badge bg-yellow-lt flex-shrink-0">dari acuan, belum disimpan</span>
+                        <span class="d-flex align-items-center gap-1 flex-shrink-0">
+                            <span class="badge bg-yellow-lt">dari acuan, belum disimpan</span>
+                            <button type="button" class="btn btn-sm btn-ghost-danger btn-icon p-0" style="width:22px;height:22px;"
+                                    data-lain-hapus="u:${i}" title="Abaikan usulan ini (tidak disimpan)"><i class="ti ti-trash"></i></button>
+                        </span>
                     </div>
                     <div class="text-wrap text-break text-danger">${esc(u.keterangan || '')}</div>
-                </button>`).join('')}` : '';
+                </div>`;
+        }
         const total = jumlahHalamanPdf();
         isiDaftar(box, `
             <div class="d-flex align-items-center gap-1 flex-wrap ${buka ? 'mb-1' : ''}">
@@ -1376,9 +1541,14 @@ const CheckerReview = (() => {
                     ${nLain ? `<span class="badge bg-orange-lt ms-1">+${nLain} item lainnya</span>` : ''}
                     ${belumSimpan ? `<span class="badge bg-yellow-lt ms-1">${belumSimpan} belum disimpan</span>` : ''}
                 </button>
-                ${perluSimpan.length ? `<button type="button" class="btn btn-sm btn-primary py-0 ms-auto" data-mas-simpan
-                        title="Simpan penilaian kriteria di daftar ini saja">
-                    <i class="ti ti-device-floppy me-1"></i>Simpan ${perluSimpan.length}</button>` : ''}
+                <span class="d-flex gap-1 ms-auto">
+                ${nCek ? `<button type="button" class="btn btn-sm btn-outline-azure py-0" data-mas-cek
+                        title="Bandingkan ${nCek} kriteria dari acuan dengan cek otomatis: yang sudah lolos dipilihkan Sesuai (belum disimpan, periksa dulu di PDF)">
+                    <i class="ti ti-robot me-1"></i>Cek otomatis ${nCek}</button>` : ''}
+                ${nSimpan ? `<button type="button" class="btn btn-sm btn-primary py-0" data-mas-simpan
+                        title="Simpan penilaian kriteria di daftar ini${lainUsulan.length ? ` dan ${lainUsulan.length} item lainnya dari acuan` : ''}">
+                    <i class="ti ti-device-floppy me-1"></i>Simpan ${nSimpan}</button>` : ''}
+                </span>
             </div>
             <div class="list-group list-group-flush border rounded overflow-auto" style="max-height:${pilih ? '30vh' : '18vh'};" data-nilai-list ${buka ? '' : 'hidden'}>
                 ${list.map(c => {
@@ -1408,7 +1578,8 @@ const CheckerReview = (() => {
         const tersimpan = nilaiTersimpan;
         const items = entry.checks.filter(c => (pilihanAwal(c) === TIDAK_SESUAI || c.isianSipotret || c.bedaAcuan || c.diMasalah)
             && pilihanAwal(c) && !tersimpan(c));
-        if (!items.length) return;
+        const usulan = entry.hasilId ? (entry.usulanCatatan || []).filter(u => usulanBelumDipakai(entry, u)) : [];
+        if (!items.length && !usulan.length) return;
         items.forEach(c => { if (c.selStatus === undefined) c.selStatus = pilihanAwal(c); });
         const kosong = items.filter(c => c.selStatus === TIDAK_SESUAI && !(c.selKet ?? c.keterangan ?? '').trim());
         if (kosong.length) {
@@ -1417,16 +1588,53 @@ const CheckerReview = (() => {
         }
         items.forEach(c => { if (c.selStatus === TIDAK_SESUAI) c.selKet = (c.selKet ?? c.keterangan ?? '').trim(); });
         saving = true;
+        const gagal = [];
         try {
-            await simpanItems(entry, items);
-            renderGroupTetap();
-            renderFileTabs();
-            pesanSimpan('alert-success', `${items.length} kriteria di daftar Tidak Sesuai disimpan.`);
+            if (items.length) await simpanItems(entry, items);
         } catch (err) {
-            pesanSimpan('alert-danger', 'Gagal menyimpan: ' + err.message);
-        } finally {
-            saving = false;
+            gagal.push(`kriteria: ${err.message}`);
         }
+        const nUsulan = await simpanUsulan(entry, usulan, gagal);
+        saving = false;
+        renderGroupTetap();
+        renderFileTabs();
+        renderCatatanList();
+        const jadi = [items.length && !gagal.some(g => g.startsWith('kriteria:')) ? `${items.length} kriteria` : '',
+                      nUsulan ? `${nUsulan} item lainnya dari acuan` : ''].filter(Boolean).join(' dan ');
+        pesanSimpan(gagal.length ? 'alert-warning' : 'alert-success',
+            (jadi ? `${jadi} disimpan.` : '') + (gagal.length ? ` Gagal: ${gagal.join('; ')}.` : ''));
+    }
+
+    /**
+     * Simpan usulan item lainnya dari acuan SIPOTRET sebagai catatan tambahan (apa adanya: item master tetap
+     * item master, flag kosong tetap kosong). @returns jumlah yang tersimpan; pesan gagal ditambahkan ke `gagal`
+     */
+    async function simpanUsulan(entry, usulan, gagal) {
+        let n = 0;
+        for (const u of usulan) {
+            try {
+                const res = await fetch(catUrl('catatanUrl').replace('__ID__', entry.hasilId), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+                    body: JSON.stringify({
+                        kategori: u.kategori || null, // item lainnya SIPOTRET tidak berkategori
+                        item: String(u.item || '').slice(0, maxItem()),
+                        keterangan: u.keterangan || '-',
+                        flag_level: ['minor', 'moderate', 'major'].includes(u.flag_level) ? u.flag_level : null,
+                        item_periksa_id: u.item_periksa_id || null,
+                    }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.message || `Server membalas ${res.status}`);
+                (entry.catatan ??= []).push(data.catatan);
+                u.dipakai = true;
+                u.jadiId = data.catatan.id; // daftar Tidak Sesuai: tetap di posisi usulannya
+                n++;
+            } catch (e) {
+                gagal.push(`${u.item}: ${e.message}`);
+            }
+        }
+        return n;
     }
 
     /** Item lainnya di daftar Tidak Sesuai diklik: tampilkan kotak catatan tambahan (edit / isi dari usulan). */
@@ -1435,6 +1643,7 @@ const CheckerReview = (() => {
         if (!entry) return;
         const [jenis, id] = kunci.split(':');
         collectGroup();
+        tutupDaftar(); // kotak catatan tambahan ada di bawah daftar kriteria
         lihatCatatan = true;
         if (cara === 'pilih') fokusId = null;
         applyFilter();
@@ -1448,6 +1657,160 @@ const CheckerReview = (() => {
             box.querySelector(`[data-cat-usulan="${id}"]`)?.click();
         }
         box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    /** Sumber data item lainnya: catatan tersimpan ('c:<id>') atau usulan acuan ('u:<index>'). */
+    function sumberLain(entry, kunci) {
+        const [jenis, id] = kunci.split(':');
+        return jenis === 'c'
+            ? { jenis, c: (entry.catatan || []).find(x => x.id === +id) }
+            : { jenis, u: entry.usulanCatatan?.[+id] };
+    }
+
+    /** Item lainnya diklik: edit langsung di barisnya pada daftar Tidak Sesuai. */
+    function bukaLainDiTempat(kunci) {
+        const entry = entries[fileIndex];
+        if (!entry) return;
+        if (lainEdit?.entry === entry && lainEdit.kunci === kunci) { lainEdit = null; renderMasalah(); return; }
+        const { jenis, c, u } = sumberLain(entry, kunci);
+        const asal = jenis === 'c' ? c : u;
+        if (!asal) return;
+        lainEdit = {
+            entry, kunci,
+            draf: {
+                item: String(asal.item || '').slice(0, maxItem()),
+                // usulan: flag kosong di SIPOTRET = tidak perlu perbaikan
+                flag_level: ['minor', 'moderate', 'major'].includes(asal.flag_level) ? asal.flag_level : '',
+                halaman: asal.halaman || '',
+                keterangan: asal.keterangan && asal.keterangan !== '-' ? asal.keterangan : (jenis === 'c' ? asal.keterangan || '' : ''),
+            },
+        };
+        renderMasalah();
+        if (jenis === 'c' && c?.halaman) keArea(c.halaman, c.pos_x, c.pos_y, `c:${c.id}`);
+        el('masalah')?.querySelector('[data-lain-field="keterangan"]')?.focus();
+    }
+
+    /** Form edit item lainnya di dalam daftar Tidak Sesuai. */
+    function htmlFormLain(kunci) {
+        const d = lainEdit.draf;
+        const baru = kunci.startsWith('u:');
+        const level = [['', 'Tanpa level'], ['minor', 'Minor'], ['moderate', 'Moderate'], ['major', 'Major']];
+        return `
+                <div class="list-group-item py-1 px-2 small bg-primary-lt" data-lain-form="${esc(kunci)}">
+                    <div class="d-flex justify-content-between align-items-center gap-2 mb-1">
+                        <span class="fw-semibold">${baru ? 'Item lainnya dari acuan' : 'Edit item lainnya'}</span>
+                        <a href="#" class="small" data-lain-lengkap="${esc(kunci)}" title="Buka di form catatan tambahan (mis. untuk menandai posisi di PDF)">form lengkap</a>
+                    </div>
+                    <input type="text" class="form-control form-control-sm mb-1" data-lain-field="item" maxlength="${maxItem()}"
+                           placeholder="Nama item" value="${esc(d.item)}">
+                    <div class="d-flex gap-1 mb-1">
+                        <select class="form-select form-select-sm" data-lain-field="flag_level" title="Level">
+                            ${level.map(([v, l]) => `<option value="${v}" ${d.flag_level === v ? 'selected' : ''}>${l}</option>`).join('')}
+                        </select>
+                        <input type="number" class="form-control form-control-sm" data-lain-field="halaman" min="1" placeholder="Hal."
+                               title="Halaman (opsional)" style="max-width:80px;" value="${esc(String(d.halaman || ''))}">
+                    </div>
+                    <textarea class="form-control form-control-sm mb-1" rows="2" data-lain-field="keterangan"
+                              placeholder="Keterangan (wajib)">${esc(d.keterangan)}</textarea>
+                    <div class="d-flex gap-1 justify-content-end">
+                        <button type="button" class="btn btn-sm btn-outline-danger py-0 me-auto" data-lain-hapus="${esc(kunci)}"
+                                title="${baru ? 'Abaikan usulan ini (tidak disimpan)' : 'Hapus catatan tambahan ini'}">
+                            <i class="ti ti-trash me-1"></i>${baru ? 'Abaikan' : 'Hapus'}</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary py-0" data-lain-batal>Batal</button>
+                        <button type="button" class="btn btn-sm btn-primary py-0" data-lain-simpan>
+                            <i class="ti ti-device-floppy me-1"></i>${baru ? 'Simpan' : 'Simpan Perubahan'}</button>
+                    </div>
+                    <div class="small mt-1" data-lain-info hidden></div>
+                </div>`;
+    }
+
+    /**
+     * Hapus item lainnya dari daftar Tidak Sesuai: catatan tersimpan dihapus dari server (hapusCatatan, dengan konfirmasi);
+     * usulan acuan yang belum disimpan cukup diabaikan (tidak ada yang tersimpan di server).
+     */
+    async function hapusItemLain(kunci) {
+        const entry = entries[fileIndex];
+        if (!entry) return;
+        const { jenis, c, u } = sumberLain(entry, kunci);
+        if (jenis === 'c') {
+            if (!c) return;
+            const sebelum = (entry.catatan || []).length;
+            await hapusCatatan(c.id); // konfirmasi + DELETE
+            if ((entry.catatan || []).length < sebelum) {
+                if (lainEdit?.kunci === kunci) lainEdit = null;
+                renderMasalah(); // kotak catatan bisa tidak ada di layar, jadi daftar ini digambar ulang sendiri
+            }
+            return;
+        }
+        if (!u) return;
+        if (!(await Dialog.confirm(`"${u.item}" tidak akan disimpan sebagai catatan tambahan untuk publikasi ini.`,
+            { title: 'Abaikan usulan dari acuan?', okText: 'Abaikan', warning: true }))) return;
+        u.dipakai = true; // keluar dari daftar usulan (lihat usulanBelumDipakai)
+        if (lainEdit?.kunci === kunci) lainEdit = null;
+        renderCatatanList(); // daftar usulan di kotak catatan
+        renderMasalah();
+    }
+
+    /** Simpan item lainnya yang diedit di tempat: PATCH catatan tersimpan, atau POST usulan acuan sebagai catatan baru. */
+    async function simpanLain() {
+        const entry = entries[fileIndex];
+        if (!lainEdit || lainEdit.entry !== entry || saving) return;
+        const form = el('masalah')?.querySelector('[data-lain-form]');
+        const info = form?.querySelector('[data-lain-info]');
+        const tampil = (cls, text) => { if (info) { info.hidden = false; info.className = 'small mt-1 ' + cls; info.textContent = text; } };
+        const d = lainEdit.draf;
+        const item = String(d.item || '').trim(), ket = String(d.keterangan || '').trim();
+        if (!item || !ket) { tampil('text-danger', 'Nama item dan keterangan wajib diisi.'); return; }
+
+        const { jenis, c, u } = sumberLain(entry, lainEdit.kunci);
+        const halaman = parseInt(d.halaman, 10) || null;
+        const payload = { item, keterangan: ket, flag_level: d.flag_level || null, halaman };
+        if (jenis === 'c') {
+            if (!c) return;
+            // item master SIPOTRET & penanda posisi tetap selama nama item / halamannya tidak diubah
+            payload.item_periksa_id = c.item_periksa_id && c.item === item ? c.item_periksa_id : null;
+            const posTetap = c.halaman === halaman;
+            payload.pos_x = posTetap ? c.pos_x ?? null : null;
+            payload.pos_y = posTetap ? c.pos_y ?? null : null;
+        } else {
+            if (!u) return;
+            payload.kategori = u.kategori || null; // item lainnya SIPOTRET tidak berkategori
+            payload.item_periksa_id = u.item_periksa_id && String(u.item || '').slice(0, maxItem()) === item ? u.item_periksa_id : null;
+        }
+
+        saving = true;
+        form?.querySelector('[data-lain-simpan]')?.setAttribute('disabled', '');
+        tampil('text-secondary', 'Menyimpan…');
+        try {
+            const url = jenis === 'c'
+                ? catUrl('catatanHapusUrl').replace('__ID__', c.id)
+                : catUrl('catatanUrl').replace('__ID__', entry.hasilId);
+            const res = await fetch(url, {
+                method: jenis === 'c' ? 'PATCH' : 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.message || `Server membalas ${res.status}`);
+            if (jenis === 'c') {
+                entry.catatan = (entry.catatan || []).map(x => x.id === data.catatan.id ? data.catatan : x);
+            } else {
+                (entry.catatan ??= []).push(data.catatan);
+                u.dipakai = true;
+                u.jadiId = data.catatan.id; // tetap tampil di posisi usulannya
+            }
+        } catch (err) {
+            saving = false;
+            form?.querySelector('[data-lain-simpan]')?.removeAttribute('disabled');
+            tampil('text-danger', 'Gagal menyimpan: ' + err.message);
+            return;
+        }
+        saving = false;
+        lainEdit = null;
+        renderMasalah();
+        renderCatatanList();
+        gambarSemuaPin();
+        pesanSimpan('alert-success', jenis === 'c' ? 'Perubahan item lainnya tersimpan.' : 'Item lainnya dari acuan disimpan.');
     }
 
     /** Kartu kriteria yang sedang dibuka (mode pilih) beserta datanya. */
@@ -1521,8 +1884,9 @@ const CheckerReview = (() => {
             pesanSimpan('alert-danger', `Keterangan belum diisi untuk: ${tanpaKet.map(c => c.id).join(', ')}.`);
             return;
         }
-        if (!confirm(`Selesaikan tinjauan publikasi ini?\n\n${ts.length} kriteria Tidak Sesuai. ` +
-            'Kriteria lain yang belum dinilai ditandai Sesuai lalu semuanya disimpan (Skip tidak diubah).')) return;
+        if (!(await Dialog.confirm(`${ts.length} kriteria Tidak Sesuai. ` +
+            'Kriteria lain yang belum dinilai ditandai Sesuai lalu semuanya disimpan (Skip tidak diubah).',
+            { title: 'Selesaikan tinjauan publikasi ini?', okText: 'Selesai & simpan' }))) return;
 
         const r = await setAllSemuaKategori('OK', { tanpaTanya: true });
         if (!r || r.dilewati.length) return; // pesan sudah ditampilkan
@@ -1539,7 +1903,7 @@ const CheckerReview = (() => {
             .then(data => {
                 contohMap = data || {};
                 // render ulang kategori yang sedang terbuka begitu data tiba
-                if (entries[fileIndex]) renderContoh(entries[fileIndex].groups[groupIndex].kategori);
+                if (entries[fileIndex]) renderContoh(kategoriAktif());
             })
             .catch(() => { contohMap = {}; });
     }
@@ -1560,27 +1924,25 @@ const CheckerReview = (() => {
         if (!list.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
 
         box.style.display = '';
+        // satu baris ringkas: label, thumbnail kecil, tombol tampilkan/sembunyikan
         box.innerHTML = `
-            <div class="border rounded p-2 bg-green-lt">
-                <div class="d-flex align-items-start justify-content-between gap-2 mb-1">
-                    <small class="fw-semibold">
-                        <i class="ti ti-rosette-discount-check me-1"></i>Contoh yang benar (${list.length})
-                        <span class="text-secondary fw-normal">(klik gambar untuk membandingkan)</span>
-                    </small>
-                    <button type="button" class="btn btn-sm py-0 px-2 flex-shrink-0" data-contoh-toggle></button>
-                </div>
-                <div class="d-flex gap-2 overflow-auto pb-1">
+            <div class="border rounded px-2 py-1 bg-green-lt d-flex align-items-center gap-2">
+                <small class="fw-semibold text-nowrap" title="Klik gambar untuk membandingkan di samping PDF">
+                    <i class="ti ti-rosette-discount-check me-1"></i>Contoh benar (${list.length})
+                </small>
+                <div class="d-flex gap-1 overflow-auto flex-fill" style="min-width:0;">
                     ${list.map((c, i) => {
                         const attrs = `data-kategori="${esc(kategori)}" data-contoh-idx="${i}"
                             title="${esc(c.keterangan || 'Contoh ' + (i + 1))}"`;
-                        const box = 'height:44px;width:auto;max-width:80px;cursor:zoom-in;';
+                        const box = 'height:26px;width:auto;max-width:48px;cursor:zoom-in;';
                         return c.tipe === 'pdf'
-                            ? `<div ${attrs} class="contoh-thumb contoh-thumb-pdf border flex-shrink-0 px-2" style="${box}">
-                                   <i class="ti ti-file-type-pdf" style="font-size:1.25rem;"></i><span class="small">PDF</span>
+                            ? `<div ${attrs} class="contoh-thumb contoh-thumb-pdf border flex-shrink-0 px-1" style="${box}">
+                                   <i class="ti ti-file-type-pdf"></i>
                                </div>`
                             : `<img src="${esc(c.url)}" alt="contoh" ${attrs} class="contoh-thumb border flex-shrink-0" style="${box}">`;
                     }).join('')}
                 </div>
+                <button type="button" class="btn btn-sm py-0 px-2 flex-shrink-0" data-contoh-toggle></button>
             </div>`;
         syncContohUi();
     }
@@ -1673,9 +2035,8 @@ const CheckerReview = (() => {
         const same = compare && compare.kategori === kategori && compare.idx === idx;
         compare = { kategori, idx };
 
+        // kolom kriteria tetap selebar biasa walau contoh dibuka (contoh mengambil sebagian lebar PDF saja)
         el('compare').style.display = 'flex';
-        el('leftCol').className  = 'col-lg-9';
-        el('rightCol').className = 'col-lg-3';
         el('compareInfo').textContent = `· ${idx + 1}/${list.length}` + (c.keterangan ? ` · ${c.keterangan}` : '');
         el('compare').querySelectorAll('[data-cmp="-1"], [data-cmp="1"]').forEach(b => { b.disabled = list.length < 2; });
 
@@ -1694,8 +2055,6 @@ const CheckerReview = (() => {
         if (!el('compare')) return;
         el('compare').style.display = 'none';
         el('compareBody').innerHTML = '';
-        el('leftCol').className  = 'col-lg-8';
-        el('rightCol').className = 'col-lg-4';
     }
 
     /** Label tombol Tampilkan/Sembunyikan & penanda gambar contoh yang sedang dibandingkan. */
@@ -1782,9 +2141,12 @@ const CheckerReview = (() => {
      * @returns {{hal: number, teks: string}|null}
      */
     function halamanDari(c, total) {
-        if (c.pin?.hal) return { hal: c.pin.hal, teks: '' };
+        const p0 = pinsOf(c)[0];
+        if (p0) return { hal: p0.hal, teks: '' };
         if (c.lokasi?.[0]?.hal) return { hal: c.lokasi[0].hal, teks: c.lokasi[0].teks || '' };
-        const hal = c.target === 'cover' ? 1 : c.target === 'page2' ? 2 : c.target === 'last' ? total : null;
+        const belakang = /belakang|back\s*cover/i.test(`${c.kategori || ''} ${c.deskripsi || ''}`);
+        const hal = c.target === 'last' || (c.target === 'cover' && belakang) ? total
+                  : c.target === 'cover' ? 1 : c.target === 'page2' ? 2 : null;
         return hal ? { hal, teks: '' } : null;
     }
 
@@ -1792,7 +2154,8 @@ const CheckerReview = (() => {
     function keHalamanKriteria(c) {
         const app = el('frame')?.contentWindow?.PDFViewerApplication;
         if (!c || !app?.pdfDocument) return;
-        if (c.pin?.hal) { keArea(c.pin.hal, c.pin.x, c.pin.y, `k:${c.id}`); return; }
+        const p0 = pinsOf(c)[0];
+        if (p0) { keArea(p0.hal, p0.x, p0.y, `k:${c.id}:0`); return; }
         const h = halamanDari(c, app.pagesCount || 1);
         if (h) goToLokasi(h.hal, h.teks);
     }
@@ -1873,8 +2236,9 @@ const CheckerReview = (() => {
         const entry = entries[fileIndex];
         if (!entry || saving) return null;
         const label = status === 'OK' ? 'Sesuai' : 'Skip';
-        if (!tanpaTanya && !confirm(`Tandai sisanya "${label}" di SEMUA ${entry.groups.length} kategori publikasi ini lalu simpan?\n\n` +
-            `Tidak Sesuai${status === 'OK' ? ' dan Skip' : ' dan pilihan yang sudah diklik/disimpan petugas'} tidak diubah.`)) return null;
+        if (!tanpaTanya && !(await Dialog.confirm(`Kriteria yang belum dinilai di SEMUA ${entry.groups.length} kategori publikasi ini ditandai "${label}" lalu disimpan.\n\n` +
+            `Tidak Sesuai${status === 'OK' ? ' dan Skip' : ' dan pilihan yang sudah diklik/disimpan petugas'} tidak diubah.`,
+            { title: `Tandai sisanya ${label}?`, okText: 'Tandai & simpan' }))) return null;
 
         collectGroup();
         entry.groups.forEach(g => g.idx.forEach(i => aturSisa(entry.checks[i], status)));
@@ -1977,9 +2341,7 @@ const CheckerReview = (() => {
                         kriteria_id: c.id,
                         status:      c.selStatus,
                         keterangan:  c.selStatus === TIDAK_SESUAI ? c.selKet : null,
-                        pin_halaman: c.selStatus === TIDAK_SESUAI ? (c.pin?.hal ?? null) : null,
-                        pin_x:       c.selStatus === TIDAK_SESUAI ? (c.pin?.x ?? null) : null,
-                        pin_y:       c.selStatus === TIDAK_SESUAI ? (c.pin?.y ?? null) : null,
+                        pins:        c.selStatus === TIDAK_SESUAI ? pinsOf(c) : [], // semua penanda di PDF
                     })),
                 }),
             });
@@ -1993,7 +2355,7 @@ const CheckerReview = (() => {
         items.forEach(c => {
             c.status     = c.selStatus;
             c.keterangan = c.selStatus === TIDAK_SESUAI ? c.selKet : null;
-            if (c.selStatus !== TIDAK_SESUAI) c.pin = null;
+            if (c.selStatus !== TIDAK_SESUAI) c.pins = [];
             c.reviewed   = true;
             delete c.selStatus;
             delete c.selKet;
@@ -2028,7 +2390,7 @@ const CheckerReview = (() => {
         }).length;
         const tanya = `Tandai kriteria ${c.id} "Tidak Sesuai" dengan keterangan ini di ${targets.length} publikasi dan langsung simpan?`
             + (timpa ? `\n\n${timpa} publikasi lain sudah punya penilaian untuk kriteria ini dan akan ditimpa.` : '');
-        if (!confirm(tanya)) return;
+        if (!(await Dialog.confirm(tanya, { title: 'Salin ke semua publikasi?', okText: 'Salin & simpan', warning: !!timpa }))) return;
 
         btn.disabled = true;
         msg.className = 'rev-apply-msg text-secondary';
@@ -2518,7 +2880,8 @@ const CheckerReview = (() => {
 
     function kategoriAktif() {
         const entry = entries[fileIndex];
-        return entry ? entry.groups[groupIndex].kategori : '';
+        // semua kategori: null (catatan baru tanpa kategori, daftar catatan menampilkan semuanya)
+        return entry ? (groupIndex === SEMUA ? null : entry.groups[groupIndex].kategori) : '';
     }
 
     /** Kotak catatan tambahan di bawah kriteria kategori aktif (dibuat ulang setiap renderGroup). */
@@ -2587,7 +2950,7 @@ const CheckerReview = (() => {
         if (!box || !entry) return;
         const kat  = kategoriAktif();
         // catatan tanpa kategori (mis. item lainnya dari acuan SIPOTRET) tampil di semua kategori
-        const list = (entry.catatan || []).filter(c => !c.kategori || c.kategori === kat);
+        const list = (entry.catatan || []).filter(c => kat === null || !c.kategori || c.kategori === kat);
         const pins = pinCatatan(entry);
         catById('revCatCount').textContent = list.length ? `(${list.length})` : '';
         box.innerHTML = list.length
@@ -2764,7 +3127,7 @@ const CheckerReview = (() => {
     }
 
     async function hapusCatatan(id) {
-        if (!confirm('Hapus catatan tambahan ini?')) return;
+        if (!(await Dialog.confirm('Catatan tambahan ini akan dihapus.', { title: 'Hapus catatan tambahan?', okText: 'Hapus', danger: true }))) return;
         const entry = entries[fileIndex];
         const res = await fetch(catUrl('catatanHapusUrl').replace('__ID__', id), {
             method: 'DELETE', headers: { 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
@@ -2855,16 +3218,38 @@ const CheckerReview = (() => {
         return c.selStatus !== undefined ? c.selStatus : c.status;
     }
 
-    /** Kriteria Tidak Sesuai yang punya penanda di PDF. */
-    function pinKriteria(entry) {
-        return (entry?.checks || []).filter(c => c.pin?.hal && statusEfektif(c) === TIDAK_SESUAI);
+    /**
+     * Semua penanda kriteria di PDF: [{hal, x, y}, …]. Dari server sebagai `pins`; data lama (satu penanda `pin`)
+     * diubah sekali ke bentuk daftar.
+     */
+    function pinsOf(c) {
+        if (!Array.isArray(c.pins)) c.pins = c.pin?.hal ? [{ hal: c.pin.hal, x: c.pin.x, y: c.pin.y }] : [];
+        return c.pins;
     }
 
+    /** Kriteria Tidak Sesuai yang punya penanda di PDF. */
+    function pinKriteria(entry) {
+        return (entry?.checks || []).filter(c => pinsOf(c).length && statusEfektif(c) === TIDAK_SESUAI);
+    }
+
+    /** Daftar penanda kriteria (nomor · halaman · lihat · hapus) untuk kartu kriteria & baris penilaian. */
     function pinInfoHtml(c) {
-        return c.pin?.hal
-            ? `<i class="ti ti-map-pin-filled text-danger"></i> Hal. ${c.pin.hal} ·
-               <a href="#" data-pin-lihat>lihat</a> · <a href="#" class="text-danger" data-pin-hapus>hapus</a>`
-            : 'Belum ada penanda di PDF';
+        const pins = pinsOf(c);
+        if (!pins.length) return 'Belum ada penanda di PDF';
+        return pins.map((p, k) => `<span class="text-nowrap me-2"><i class="ti ti-map-pin-filled text-danger"></i>${pins.length > 1 ? `${k + 1}. ` : ''}Hal. ${p.hal}
+               <a href="#" data-pin-lihat="${k}">lihat</a> · <a href="#" class="text-danger" data-pin-hapus="${k}" title="Hapus penanda ini">hapus</a></span>`).join('');
+    }
+
+    /** Tombol "Tandai di PDF" + daftar penandanya (kartu kriteria & baris Konfirmasi / Kriteria Tidak Sesuai). */
+    function pinKontrolHtml(c) {
+        const ada = pinsOf(c).length;
+        return `<div class="d-flex align-items-center flex-wrap gap-2 mt-1">
+                    <button type="button" class="btn btn-sm btn-outline-warning py-0 ${pinMode && pinTarget === c ? 'active' : ''}" data-pin-kriteria
+                            title="Klik tombol ini, lalu klik area yang tidak sesuai di halaman PDF. Bisa lebih dari satu penanda.">
+                        <i class="ti ti-map-pin"></i> ${ada ? 'Tambah penanda' : 'Tandai di PDF'}
+                    </button>
+                    <small class="rev-pin-info text-secondary">${pinInfoHtml(c)}</small>
+                </div>`;
     }
 
     /** @param {object|null} target kriteria yang akan diberi penanda; null = catatan tambahan */
@@ -2882,45 +3267,68 @@ const CheckerReview = (() => {
         el('items')?.querySelectorAll('[data-idx]').forEach(card => {
             card.querySelector('[data-pin-kriteria]')?.classList.toggle('active', !!pinTarget && items[+card.dataset.idx] === pinTarget);
         });
+        // baris Konfirmasi temuan otomatis / Kriteria Tidak Sesuai
+        [el('konfirmasi'), el('masalah')].forEach(box => box?.querySelectorAll('[data-nilai]').forEach(row => {
+            row.querySelector('[data-pin-kriteria]')?.classList.toggle('active', !!pinTarget && pinTarget.id === row.dataset.nilai);
+        }));
         catById('revCatForm')?.querySelector('[data-cat-pin]')?.classList.toggle('active', pinTarget === PIN_CATATAN);
         try { el('frame').contentWindow.document.body.classList.toggle('pc-pin-mode', on); } catch { /* viewer belum siap */ }
     }
 
-    /** Tombol penanda di kartu kriteria Tidak Sesuai. @returns true bila ditangani */
+    /**
+     * Tombol penanda kriteria (Tandai/Tambah penanda, lihat, hapus) di kartu kriteria atau di baris penilaian
+     * (Konfirmasi temuan otomatis / Kriteria Tidak Sesuai). @returns true bila ditangani
+     */
     function klikPinKriteria(e) {
         const t = e.target.closest('[data-pin-kriteria], [data-pin-lihat], [data-pin-hapus]');
-        const card = t?.closest('[data-idx]');
-        if (!card) return false;
+        if (!t) return false;
+        const card = t.closest('[data-idx]');
+        const row  = t.closest('[data-nilai]');
+        const c = card ? currentGroupItems()[+card.dataset.idx]
+                : row ? entries[fileIndex]?.checks.find(x => x.id === row.dataset.nilai) : null;
+        if (!c) return false;
         e.preventDefault();
-        const c = currentGroupItems()[+card.dataset.idx];
-        if (!c) return true;
         if (t.matches('[data-pin-kriteria]')) {
             setPinMode(!(pinMode && pinTarget === c), c);
         } else if (t.matches('[data-pin-lihat]')) {
-            keArea(c.pin.hal, c.pin.x, c.pin.y, `k:${c.id}`);
+            const k = +t.dataset.pinLihat || 0;
+            const p = pinsOf(c)[k];
+            if (p) keArea(p.hal, p.x, p.y, `k:${c.id}:${k}`);
         } else {
-            c.pin = null;
-            card.querySelector('.rev-pin-info').innerHTML = pinInfoHtml(c);
-            gambarSemuaPin();
-            simpanPinKriteria(c, card);
+            pinsOf(c).splice(+t.dataset.pinHapus || 0, 1);
+            perbaruiPinUi(c);
+            simpanPinKriteria(c);
         }
         return true;
     }
 
-    /** Simpan penanda kriteria langsung ke server (tidak menunggu Simpan Kategori). */
-    async function simpanPinKriteria(c, card) {
+    /** Daftar penanda kriteria di semua tempat ia tampil (kartu & baris penilaian) + gambar ulang penanda di PDF. */
+    function perbaruiPinUi(c, pesan = '') {
+        const items = currentGroupItems();
+        const tempat = [...(el('items')?.querySelectorAll('[data-idx]') || [])].filter(k => items[+k.dataset.idx] === c)
+            .concat([el('konfirmasi'), el('masalah')].flatMap(box => [...(box?.querySelectorAll(`[data-nilai="${CSS.escape(c.id)}"]`) || [])]));
+        tempat.forEach(t => {
+            const info = t.querySelector('.rev-pin-info');
+            if (info) info.innerHTML = pinInfoHtml(c) + pesan;
+            const btn = t.querySelector('[data-pin-kriteria]');
+            if (btn) btn.innerHTML = `<i class="ti ti-map-pin"></i> ${pinsOf(c).length ? 'Tambah penanda' : 'Tandai di PDF'}`;
+        });
+        gambarSemuaPin();
+    }
+
+    /** Simpan semua penanda kriteria langsung ke server (tidak menunggu Simpan Kategori). */
+    async function simpanPinKriteria(c) {
         const entry = entries[fileIndex];
-        const info  = card?.querySelector('.rev-pin-info');
         if (!entry?.hasilId || !catUrl('pinUrl')) return;
         try {
             const res = await fetch(catUrl('pinUrl').replace('__ID__', entry.hasilId), {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
-                body: JSON.stringify({ kriteria_id: c.id, pin_halaman: c.pin?.hal ?? null, pin_x: c.pin?.x ?? null, pin_y: c.pin?.y ?? null }),
+                body: JSON.stringify({ kriteria_id: c.id, pins: pinsOf(c) }),
             });
             if (!res.ok) throw new Error(`Server membalas ${res.status}`);
         } catch (err) {
-            if (info) info.innerHTML = pinInfoHtml(c) + ` <span class="text-danger">(gagal disimpan: ${esc(err.message)})</span>`;
+            perbaruiPinUi(c, ` <span class="text-danger">(gagal disimpan: ${esc(err.message)})</span>`);
         }
     }
 
@@ -2959,19 +3367,20 @@ const CheckerReview = (() => {
     }
 
     /** Penanda kriteria di PDF diklik: buka kategorinya dan sorot kartunya. */
-    function bukaPinKriteria(c) {
+    function bukaPinKriteria(c, k = 0) {
         const entry = entries[fileIndex];
         const i = entry.checks.indexOf(c);
         const g = entry.groups.findIndex(gr => gr.idx.includes(i));
         if (g < 0) return;
         setPinMode(false);
-        if (g !== groupIndex) {
+        tutupDaftar();
+        if (g !== groupIndex && groupIndex !== SEMUA) {
             collectGroup();
             groupIndex = g;
             renderGroup();
-            try { el('frame').contentWindow.PDFViewerApplication.page = c.pin.hal; } catch { /* abaikan */ }
+            try { el('frame').contentWindow.PDFViewerApplication.page = pinsOf(c)[k]?.hal; } catch { /* abaikan */ }
         }
-        const card = el('items').querySelector(`[data-idx="${entry.groups[g].idx.indexOf(i)}"]`);
+        const card = el('items').querySelector(`[data-idx="${currentGroupItems().indexOf(c)}"]`);
         if (!card) return;
         card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         card.classList.add('border-danger');
@@ -3063,13 +3472,18 @@ const CheckerReview = (() => {
             balon(c.pos_x, c.pos_y, warna, c.item, c.keterangan, () => bukaPin(c.id));
         });
         pinKriteria(entries[fileIndex]).forEach(c => {
-            if (+c.pin.hal !== halaman) return;
             const ket = c.selKet ?? c.keterangan ?? '';
-            const pin = tambah(c.pin.x, c.pin.y, '', '!', `${c.deskripsi}\nTidak sesuai: ${ket}`, () => bukaPinKriteria(c), `k:${c.id}`);
-            pin.style.background = PIN_TIDAK_SESUAI;
-            pin.style.borderRadius = '4px';
-            pageDiv.appendChild(pin);
-            balon(c.pin.x, c.pin.y, PIN_TIDAK_SESUAI, c.deskripsi, ket ? `Tidak sesuai: ${ket}` : '', () => bukaPinKriteria(c));
+            const pins = pinsOf(c);
+            pins.forEach((p, k) => {
+                if (+p.hal !== halaman) return;
+                const label = pins.length > 1 ? `!${k + 1}` : '!'; // beberapa penanda: !1, !2, …
+                const pin = tambah(p.x, p.y, '', label, `${c.deskripsi}\nTidak sesuai: ${ket}`, () => bukaPinKriteria(c, k), `k:${c.id}:${k}`);
+                pin.style.background = PIN_TIDAK_SESUAI;
+                pin.style.borderRadius = '4px';
+                if (label.length > 1) Object.assign(pin.style, { width: 'auto', minWidth: '24px', padding: '0 3px' });
+                pageDiv.appendChild(pin);
+                balon(p.x, p.y, PIN_TIDAK_SESUAI, c.deskripsi, ket ? `Tidak sesuai: ${ket}` : '', () => bukaPinKriteria(c, k));
+            });
         });
         if (catPos?.halaman === halaman) {
             pageDiv.appendChild(tambah(catPos.x, catPos.y, 'pc-baru', '+', 'Komentar yang sedang ditulis'));
@@ -3088,6 +3502,9 @@ const CheckerReview = (() => {
     function klikHalaman(pos) {
         const target = pinTarget;
         setPinMode(false);
+        // form catatan ada di bawah daftar; penanda kriteria (dari kartu atau baris Konfirmasi / Tidak Sesuai) tidak
+        // menutup daftar yang sedang dipakai
+        if (!target || target === PIN_CATATAN) tutupDaftar();
         if (target === PIN_CATATAN) {
             // penanda untuk form catatan yang sedang dibuka (baru maupun edit); tersimpan saat catatan disimpan
             if (catById('revCatForm')?.hidden !== false) bukaFormCatatan(true, null, pos);
@@ -3099,13 +3516,12 @@ const CheckerReview = (() => {
             return;
         }
         if (target) {
-            target.pin = { hal: pos.halaman, x: pos.x, y: pos.y };
-            const items = currentGroupItems();
-            const card = [...el('items').querySelectorAll('[data-idx]')].find(k => items[+k.dataset.idx] === target);
-            const info = card?.querySelector('.rev-pin-info');
-            if (info) info.innerHTML = pinInfoHtml(target);
-            gambarSemuaPin();
-            simpanPinKriteria(target, card);
+            // penanda baru ditambahkan (satu kriteria bisa punya beberapa penanda)
+            const pins = pinsOf(target);
+            if (pins.length >= 30) { pesanSimpan('alert-warning', 'Maksimal 30 penanda per kriteria.'); return; }
+            pins.push({ hal: pos.halaman, x: pos.x, y: pos.y });
+            perbaruiPinUi(target);
+            simpanPinKriteria(target);
             return;
         }
         if (!catById('revCatForm')) return;
@@ -3126,8 +3542,9 @@ const CheckerReview = (() => {
         const c = (entry.catatan || []).find(x => x.id === id);
         if (!c) return;
         setPinMode(false);
+        tutupDaftar();
         const g = entry.groups.findIndex(gr => gr.kategori === (c.kategori || ''));
-        if (g >= 0 && g !== groupIndex) {
+        if (g >= 0 && g !== groupIndex && groupIndex !== SEMUA) {
             collectGroup();
             groupIndex = g;
             renderGroup();
@@ -3191,17 +3608,32 @@ const CheckerReview = (() => {
     /** Halaman untuk kriteria Tidak Sesuai: lokasi temuan, atau halaman target kriteria. */
     function halamanKriteria(c, total) {
         if (c.lokasi?.[0]?.hal) return Math.min(c.lokasi[0].hal, total);
-        return c.target === 'page2' ? Math.min(2, total) : c.target === 'last' ? total : 1;
+        if (c.target === 'page2') return Math.min(2, total);
+        // kriteria kover belakang yang target-nya umum (kover/semua): halaman terakhir, bukan kover depan
+        if (c.target === 'last' || /belakang|back\s*cover/i.test(`${c.kategori || ''} ${c.deskripsi || ''}`)) return total;
+        return 1;
     }
 
-    async function unduhPdfKomentar() {
-        const entry = entries[fileIndex];
-        const btn = el('btnUnduhPdf');
-        if (!entry || btn.disabled) return;
-        const label = btn.innerHTML;
-        btn.disabled = true;
-        btn.innerHTML = '<i class="ti ti-loader-2 icon-spin me-1"></i> Menyiapkan…';
-        try {
+    /** Keterangan dinormalkan untuk mencocokkan temuan yang sama (huruf kecil, tanpa tanda baca/spasi ganda). */
+    function normKet(s) {
+        return String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+    }
+
+    /**
+     * Komentar catatan tambahan yang memuat temuan yang sama dengan kriteria: keterangan sama, atau salah satu memuat
+     * yang lain (min. 8 huruf); yang sekategori didahulukan. null bila tidak ada.
+     */
+    function cariKomentarSama(daftar, ket, kategori) {
+        if (ket.length < 8) return null;
+        const cocok = daftar.filter(k => k._ket && (k._ket === ket || k._ket.includes(ket) || (k._ket.length >= 8 && ket.includes(k._ket))));
+        return cocok.find(k => k._kat === kategori) || cocok[0] || null;
+    }
+
+    /**
+     * PDF publikasi dengan kriteria Tidak Sesuai & catatan tambahan tertanam sebagai komentar (sticky note).
+     * @returns {Promise<{blob: Blob, jumlah: number}>}
+     */
+    async function buatPdfKomentar(entry) {
             collectGroup(); // pilihan di layar yang belum disimpan ikut
             await loadCatatan(entry);
             const { PDFDocument, PDFString, PDFHexString } = await muatPdfLib();
@@ -3221,24 +3653,11 @@ const CheckerReview = (() => {
             // komentar: { hal, xy (koordinat PDF) | uv (pecahan halaman), judul, isi, oleh, warna, nm }
             const komentar = [];
 
-            for (const c of entry.checks) {
-                if (statusEfektif(c) !== TIDAK_SESUAI) continue;
-                // penanda petugas → lokasi temuan cek otomatis → pojok halaman target kriteria
-                const pin = c.pin?.hal && c.pin.hal <= pages.length ? c.pin : null;
-                const hal = pin ? pin.hal : halamanKriteria(c, pages.length);
-                const xy  = !pin && c.lokasi?.[0] ? await posisiTeks(entry, hal, c.lokasi[0].teks) : null;
-                komentar.push({
-                    hal, xy, uv: pin ? [pin.x, pin.y] : xy ? null : sudut('kanan', hal),
-                    judul: 'Tidak sesuai',
-                    isi:   `${c.deskripsi}\nTidak sesuai: ${c.selKet || c.keterangan || '-'}`,
-                    warna: rgb(PIN_TIDAK_SESUAI),
-                    nm:    `pubchecker-kriteria-${c.id}`,
-                });
-            }
-
+            // catatan tambahan berhalaman lebih dulu: kriteria tanpa penanda yang temuannya sama ikut komentar ini
+            const komentarCatatan = [];
             for (const c of (entry.catatan || []).filter(c => c.halaman && c.halaman <= pages.length)) {
                 const n = pins.indexOf(c) + 1;
-                komentar.push({
+                const k = {
                     hal: c.halaman, xy: null,
                     uv: n ? [c.pos_x, c.pos_y] : sudut('kiri', c.halaman),
                     judul: c.item,
@@ -3246,6 +3665,40 @@ const CheckerReview = (() => {
                     oleh:  c.oleh,
                     warna: rgb(PIN_WARNA[c.flag_level] || '#667382'),
                     nm:    `pubchecker-catatan-${c.id}`,
+                    _ket:  normKet(c.keterangan),
+                    _kat:  c.kategori || '',
+                };
+                komentar.push(k);
+                komentarCatatan.push(k);
+            }
+
+            for (const c of entry.checks) {
+                if (statusEfektif(c) !== TIDAK_SESUAI) continue;
+                const ket = c.selKet || c.keterangan || '';
+                // penanda petugas (satu komentar per penanda) → lokasi temuan cek otomatis → pojok halaman target kriteria
+                const pins = pinsOf(c).filter(p => p.hal <= pages.length);
+                if (pins.length) {
+                    pins.forEach((p, k) => komentar.push({
+                        hal: p.hal, xy: null, uv: [p.x, p.y],
+                        judul: 'Tidak sesuai',
+                        isi:   `${c.deskripsi}\nTidak sesuai: ${ket || '-'}` + (pins.length > 1 ? `\n(penanda ${k + 1} dari ${pins.length})` : ''),
+                        warna: rgb(PIN_TIDAK_SESUAI),
+                        nm:    `pubchecker-kriteria-${c.id}` + (pins.length > 1 ? `-${k + 1}` : ''),
+                    }));
+                    continue;
+                }
+                // temuan yang sama sudah diberi komentar berhalaman (mis. di kover belakang): jangan dibuat lagi
+                // di halaman perkiraan (kover depan) — kriterianya ditulis di komentar itu
+                const sama = cariKomentarSama(komentarCatatan, normKet(ket), c.kategori || '');
+                if (sama) { sama.isi += `\n\nKriteria: ${c.deskripsi}`; continue; }
+                const hal = halamanKriteria(c, pages.length);
+                const xy  = c.lokasi?.[0] ? await posisiTeks(entry, hal, c.lokasi[0].teks) : null;
+                komentar.push({
+                    hal, xy, uv: xy ? null : sudut('kanan', hal),
+                    judul: 'Tidak sesuai',
+                    isi:   `${c.deskripsi}\nTidak sesuai: ${ket || '-'}`,
+                    warna: rgb(PIN_TIDAK_SESUAI),
+                    nm:    `pubchecker-kriteria-${c.id}`,
                 });
             }
 
@@ -3267,17 +3720,63 @@ const CheckerReview = (() => {
                 page.node.addAnnot(pdf.context.register(annot));
             }
 
-            const blob = new Blob([await pdf.save()], { type: 'application/pdf' });
+            return { blob: new Blob([await pdf.save()], { type: 'application/pdf' }), jumlah: komentar.length };
+    }
+
+    async function unduhPdfKomentar() {
+        const entry = entries[fileIndex];
+        const btn = el('btnUnduhPdf');
+        if (!entry || btn.disabled) return;
+        const label = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="ti ti-loader-2 icon-spin me-1"></i> Menyiapkan…';
+        try {
+            const { blob, jumlah } = await buatPdfKomentar(entry);
             const url  = URL.createObjectURL(blob);
             const a    = document.createElement('a');
             a.href = url;
             a.download = entry.filename.replace(/\.pdf$/i, '') + ' - komentar.pdf';
             a.click();
             setTimeout(() => URL.revokeObjectURL(url), 1000);
-            if (!komentar.length) alert('Belum ada kriteria Tidak Sesuai atau catatan berhalaman, PDF diunduh tanpa komentar.');
+            if (!jumlah) Dialog.alert('Belum ada kriteria Tidak Sesuai atau catatan berhalaman, PDF diunduh tanpa komentar.', { title: 'PDF diunduh' });
         } catch (err) {
             console.error(err);
-            alert('Gagal membuat PDF dengan komentar: ' + err.message);
+            Dialog.alert('Gagal membuat PDF dengan komentar: ' + err.message, { title: 'Gagal', danger: true });
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = label;
+        }
+    }
+
+    /**
+     * Kirim hasil pemeriksaan draf ke SIPOTRET (feedback IPDS versi upload PJK): kategori di layar disimpan dulu,
+     * lalu PDF + komentar diupload bersama temuan (kriteria Tidak Sesuai & catatan tambahan, dibaca server dari DB).
+     */
+    async function kirimSipotret() {
+        const entry = entries[fileIndex];
+        const btn = el('btnKirimSipotret');
+        if (!entry?.hasilId || !entry.sipotretTr || btn.disabled) return;
+        if (!(await Dialog.confirm('PDF + komentar dan semua temuan publikasi ini dikirim ke SIPOTRET sebagai hasil pemeriksaan '
+            + 'IPDS untuk versi draf ini. Temuan IPDS yang sudah ada di versi itu akan diganti, dan PJK mendapat notifikasi. Lanjutkan?',
+            { title: 'Kirim ke SIPOTRET', okText: 'Kirim' }))) return;
+        const label = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="ti ti-loader-2 icon-spin me-1"></i> Mengirim…';
+        try {
+            await saveGroup(); // pilihan kategori di layar tersimpan dulu (server membaca temuan dari DB)
+            const { blob } = await buatPdfKomentar(entry);
+            const fd = new FormData();
+            fd.append('file', blob, entry.filename.replace(/\.pdf$/i, '') + ' - hasil pemeriksaan.pdf');
+            fd.append('_token', csrfToken);
+            const res  = await fetch(catUrl('sipotretDrafUrl').replace('__ID__', entry.hasilId), {
+                method: 'POST', body: fd, headers: { 'Accept': 'application/json' },
+            });
+            const data = await res.json().catch(() => ({ error: 'Server membalas ' + res.status }));
+            if (!res.ok || data.error) throw new Error(data.error || data.message || ('Server membalas ' + res.status));
+            Dialog.alert(data.message, { title: 'Terkirim ke SIPOTRET' });
+        } catch (err) {
+            console.error(err);
+            Dialog.alert('Gagal mengirim ke SIPOTRET: ' + err.message, { title: 'Gagal', danger: true });
         } finally {
             btn.disabled = false;
             btn.innerHTML = label;
@@ -3297,13 +3796,14 @@ const CheckerReview = (() => {
         if (cara === 'pilih') { selesaiPilih(); return; }
         withSave(() => {
             const entry = entries[fileIndex];
-            if (groupIndex < entry.groups.length - 1) {
+            if (groupIndex !== SEMUA && groupIndex < entry.groups.length - 1) {
                 groupIndex++;
                 renderGroup();
                 return;
             }
             const j = nextUnfinishedFile();
-            if (j !== null) switchFile(j);
+            // "Semua kategori" ikut dipakai di publikasi berikutnya
+            if (j !== null) switchFile(j, groupIndex === SEMUA ? SEMUA : null);
             else finish();
         });
     }
@@ -3331,6 +3831,7 @@ const CheckerReview = (() => {
                         <span class="rev-tab-no">${i + 1}</span>
                         <span class="rev-tab-judul">${esc(e.filename)}</span>
                         ${e.menunggu ? '<i class="ti ti-loader-2 icon-spin text-azure" title="Cek otomatis berjalan"></i>' : ''}
+                        ${e.prosesSemua ? `<span class="badge bg-info-lt" title="Menandai semua sesuai: ${e.prosesSemua.selesai}/${e.prosesSemua.total} kriteria tersimpan"><i class="ti ti-loader-2 icon-spin"></i> ${e.prosesSemua.total ? Math.round(e.prosesSemua.selesai / e.prosesSemua.total * 100) : 0}%</span>` : ''}
                         ${done === total ? '<i class="ti ti-circle-check text-green"></i>' : ''}
                         <span class="badge ${done === total ? 'bg-green-lt' : 'bg-secondary-lt'}" title="Kategori selesai ditinjau">${done}/${total}</span>
                     </a>
@@ -3354,7 +3855,7 @@ const CheckerReview = (() => {
             groupIndex--;
             renderGroup();
         } else if (fileIndex > 0) {
-            switchFile(fileIndex - 1, entries[fileIndex - 1].groups.length - 1);
+            switchFile(fileIndex - 1, groupIndex === SEMUA ? SEMUA : entries[fileIndex - 1].groups.length - 1);
         }
     }
 
@@ -3378,7 +3879,7 @@ const CheckerReview = (() => {
             const ket = isian.kriteria[c.id];
             if (c.reviewed) {
                 sudahDitinjau++;
-                // tersimpan Sesuai/Skip padahal tercatat di acuan: ditandai supaya bisa dibandingkan (lihat terapkanBedaAcuan)
+                // tersimpan Sesuai/Skip padahal tercatat di acuan: ditandai & tetap tampil di daftar Tidak Sesuai supaya bisa dibandingkan
                 if (c.status !== TIDAK_SESUAI) { c.bedaAcuan = true; c.acuanKet = ket; c.acuanAsal = asal; }
                 return;
             }
@@ -3448,10 +3949,6 @@ const CheckerReview = (() => {
         ].filter(Boolean).join('\n');
         const jumlah = [info?.diisi ? `${info.diisi} kriteria diisi` : '', info?.lainnya ? `${info.lainnya} item lainnya` : '']
             .filter(Boolean).join(', ');
-        const { kriteria: belumKriteria, usulan: belumUsulan } = isianBelumDisimpan(entry);
-        const nBelum = belumKriteria.length + belumUsulan.length;
-        const nCek = acuanBelumDicek(entry).length;
-        const beda = daftarBedaAcuan(entry);
 
         box.hidden = false;
         box.title = jelas;
@@ -3464,82 +3961,12 @@ const CheckerReview = (() => {
                 </select>`
             : `<strong>${acuan ? esc(namaPeriode(acuan)) : '-'}</strong>`}
             ${jumlah ? `<span class="text-secondary">· ${esc(jumlah)}</span>` : ''}
-            <i class="ti ti-info-circle text-secondary" title="${esc(jelas)}"></i>
-            ${aksiAcuanHtml(entry, beda, nCek, nBelum, belumKriteria, belumUsulan)}`;
-    }
-
-    /**
-     * Satu tombol "Aksi acuan" berisi aksi terhadap isian dari acuan SIPOTRET (simpan semua, cek otomatis,
-     * beda dari acuan), masing-masing dengan penjelasan — supaya judul panel tidak penuh tombol.
-     */
-    function aksiAcuanHtml(entry, beda, nCek, nBelum, belumKriteria, belumUsulan) {
-        const item = (attr, ikon, judul, jelas) => `
-            <button type="button" class="dropdown-item d-block text-wrap" ${attr}>
-                <i class="ti ti-${ikon} me-1"></i><strong>${judul}</strong>
-                <div class="small opacity-75 ms-4">${jelas}</div>
-            </button>`;
-        const aksi = [
-            nBelum && entry.hasilId ? item('data-acuan-simpan', 'device-floppy', `Simpan semua dari acuan (${nBelum})`,
-                `Simpan sekaligus ${belumKriteria.length} kriteria${belumUsulan.length ? ` dan ${belumUsulan.length} item lainnya` : ''} dari acuan tanpa membuka satu per satu.`) : '',
-            nCek ? item('data-acuan-cek', 'robot', `Cek otomatis acuan (${nCek})`,
-                'Bandingkan dengan cek otomatis: yang sudah lolos dipilihkan Sesuai. Belum disimpan, periksa dulu di PDF.') : '',
-            beda.length ? item('data-acuan-beda', 'git-compare', `Beda dari acuan (${beda.length})`,
-                `Tercatat tidak sesuai di acuan tapi tersimpan Sesuai/Skip (${esc(beda.map(c => c.id).join(', '))}). Pilihkan Tidak Sesuai lagi.`) : '',
-        ].filter(Boolean);
-        if (!aksi.length) return '';
-        return `
-            <div class="dropdown d-inline-block ms-1">
-                <button type="button" class="btn btn-sm btn-outline-primary py-0 px-2 dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
-                    <i class="ti ti-bolt me-1"></i>Aksi acuan
-                </button>
-                <div class="dropdown-menu p-1" style="min-width:340px;">${aksi.join('')}</div>
-            </div>`;
-    }
-
-    /**
-     * Isian dari acuan yang belum disimpan: kriteria dari acuan yang belum ditinjau (Tidak Sesuai, atau
-     * Sesuai hasil "Cek otomatis acuan") & usulan item lainnya.
-     */
-    function isianBelumDisimpan(entry) {
-        return {
-            kriteria: (entry?.checks || []).filter(c => c.isianSipotret && (
-                (pilihanAwal(c) === TIDAK_SESUAI && !tsTersimpan(c))
-                || (!c.reviewed && c.cekOtomatis === 'OK' && pilihanAwal(c) === 'OK'))),
-            usulan:   (entry?.usulanCatatan || []).filter(u => usulanBelumDipakai(entry, u)),
-        };
+            <i class="ti ti-info-circle text-secondary" title="${esc(jelas)}"></i>`;
     }
 
     // ── Beda dari acuan: tercatat tidak sesuai di SIPOTRET, tapi tersimpan Sesuai/Skip di tinjauan ──
     function bedaAcuan(c) {
         return !!c.bedaAcuan && c.reviewed && c.status !== TIDAK_SESUAI;
-    }
-
-    /** Kriteria yang tersimpan berbeda dari acuan dan belum dipilihkan ulang di layar. */
-    function daftarBedaAcuan(entry) {
-        return (entry?.checks || []).filter(c => bedaAcuan(c) && !c.isianSipotret);
-    }
-
-    /**
-     * Pilihkan lagi "Tidak Sesuai" + keterangan acuan untuk kriteria yang tersimpan berbeda dari acuan,
-     * supaya bisa diperiksa lalu disimpan (mis. lewat "Simpan semua dari acuan"). Belum dikirim ke server.
-     */
-    function terapkanBedaAcuan() {
-        const entry = entries[fileIndex];
-        if (!entry) return;
-        collectGroup();
-        const list = daftarBedaAcuan(entry);
-        if (!list.length) return;
-        list.forEach(c => {
-            c.selStatus     = TIDAK_SESUAI;
-            c.selKet        = c.acuanKet || '';
-            c.isianSipotret = c.acuanKet
-                ? `${c.acuanAsal}: ${c.acuanKet} (tersimpan ${LABEL_PILIHAN[c.status]?.[0] ?? c.status})`
-                : `${c.acuanAsal} (tanpa keterangan; tersimpan ${LABEL_PILIHAN[c.status]?.[0] ?? c.status})`;
-        });
-        renderGroup();
-        pesanSimpan('alert-warning', `${list.length} kriteria tercatat tidak sesuai di acuan tapi tersimpan Sesuai/Skip `
-            + `(${list.map(c => c.id).join(', ')}). Sudah dipilihkan Tidak Sesuai lagi, periksa di PDF lalu Simpan semua dari acuan, `
-            + 'atau ubah ke Sesuai bila memang sudah diperbaiki.');
     }
 
     // ── Cek otomatis acuan: catatan SIPOTRET dibandingkan dengan hasil cek otomatis publikasi saat ini ──
@@ -3581,84 +4008,6 @@ const CheckerReview = (() => {
         pesanSimpan(hasil.OK.length ? 'alert-success' : 'alert-info',
             `Cek otomatis acuan: ${hasil.OK.length} kriteria sekarang lolos dan dipilihkan Sesuai${hasil.OK.length ? ` (${hasil.OK.join(', ')})` : ''}, `
             + `${hasil.masalah.length} masih bermasalah, ${hasil.manual.length} perlu dicek manual. Belum disimpan, periksa dulu di PDF.`);
-    }
-
-    /**
-     * Simpan semua isian dari acuan SIPOTRET sekaligus, tanpa membuka kriteria satu per satu:
-     * kriteria Tidak Sesuai yang diisi dari acuan (beserta keterangannya, dalam satu permintaan)
-     * dan usulan item lainnya sebagai catatan tambahan. Catatan SIPOTRET tanpa keterangan diberi
-     * keterangan bawaan (asal catatannya), karena Tidak Sesuai wajib berketerangan.
-     */
-    async function simpanSemuaAcuan() {
-        const entry = entries[fileIndex];
-        if (!entry?.hasilId || saving) return;
-        collectGroup();
-        const { kriteria, usulan } = isianBelumDisimpan(entry);
-        const lolos    = kriteria.filter(c => pilihanAwal(c) === 'OK'); // Sesuai dari cek otomatis acuan
-        const ts       = kriteria.filter(c => pilihanAwal(c) === TIDAK_SESUAI);
-        // catatan SIPOTRET tanpa keterangan: keterangan diisi asal catatannya supaya tetap ikut tersimpan
-        const tanpaKet = ts.filter(c => !(c.selKet ?? '').trim());
-        const siap     = [...ts, ...lolos];
-        const periodeKet = entry.acuan || entry.isianInfo?.periode;
-        const ketBawaan  = `Tercatat tidak sesuai di SIPOTRET${periodeKet ? ' ' + namaPeriode(periodeKet) : ''} (tanpa keterangan)`;
-        if (!siap.length && !usulan.length) {
-            pesanSimpan('alert-warning', 'Semua isian dari acuan sudah disimpan.');
-            return;
-        }
-        if (!confirm(`Simpan semua isian dari catatan SIPOTRET${periodeKet ? ' ' + namaPeriode(periodeKet) : ''} tanpa diperiksa satu per satu?\n\n`
-            + `• ${siap.length - lolos.length} kriteria disimpan sebagai Tidak Sesuai beserta keterangannya\n`
-            + (lolos.length ? `• ${lolos.length} kriteria lolos cek otomatis disimpan sebagai Sesuai (${lolos.map(c => c.id).join(', ')})\n` : '')
-            + (usulan.length ? `• ${usulan.length} item lainnya disimpan sebagai catatan tambahan\n` : '')
-            + (tanpaKet.length ? `   ${tanpaKet.length} di antaranya tanpa keterangan di SIPOTRET (${tanpaKet.map(c => c.id).join(', ')}), diberi keterangan "${ketBawaan}"\n` : '')
-            + '\nBisa diubah lagi kapan saja dari tinjauan.')) return;
-
-        saving = true;
-        const tombol = el('isianInfo')?.querySelector('[data-acuan-simpan]');
-        if (tombol) tombol.disabled = true;
-        let nKriteria = 0;
-        const gagal = [];
-        try {
-            if (siap.length) {
-                siap.forEach(c => { c.selKet = (c.selKet ?? '').trim() || (pilihanAwal(c) === TIDAK_SESUAI ? ketBawaan : ''); });
-                await simpanItems(entry, siap); // semua kategori sekaligus (endpoint menerima kriteria campuran)
-                nKriteria = siap.length;
-            }
-        } catch (e) {
-            gagal.push(`kriteria: ${e.message}`);
-        }
-        let nUsulan = 0;
-        for (const u of usulan) {
-            try {
-                const res = await fetch(catUrl('catatanUrl').replace('__ID__', entry.hasilId), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
-                    body: JSON.stringify({
-                        kategori: u.kategori || null, // item lainnya SIPOTRET tidak berkategori
-                        item: String(u.item || '').slice(0, maxItem()), // item master tidak dipotong
-                        keterangan: u.keterangan || '-',
-                        // flag kosong dibiarkan kosong (di SIPOTRET = tidak perlu perbaikan)
-                        flag_level: ['minor', 'moderate', 'major'].includes(u.flag_level) ? u.flag_level : null,
-                        // item master SIPOTRET tetap dikirim sebagai item master, seperti "Dari History"
-                        item_periksa_id: u.item_periksa_id || null,
-                    }),
-                });
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok) throw new Error(data.message || `Server membalas ${res.status}`);
-                (entry.catatan ??= []).push(data.catatan);
-                u.dipakai = true;
-                nUsulan++;
-            } catch (e) {
-                gagal.push(`${u.item}: ${e.message}`);
-            }
-        }
-        saving = false;
-
-        renderGroup();
-        renderFileTabs();
-        pesanSimpan(gagal.length ? 'alert-warning' : 'alert-success',
-            `${nKriteria - (nKriteria ? lolos.length : 0)} kriteria Tidak Sesuai${nKriteria && lolos.length ? `, ${lolos.length} Sesuai` : ''}${nUsulan ? ` dan ${nUsulan} catatan tambahan` : ''} dari acuan disimpan.`
-            + (nKriteria && tanpaKet.length ? ` ${tanpaKet.length} kriteria tanpa keterangan di SIPOTRET diberi keterangan bawaan, lengkapi bila perlu.` : '')
-            + (gagal.length ? ` Gagal: ${gagal.join('; ')}.` : ''));
     }
 
     /** Ganti/simpan acuan isian awal (nilai select "bulan-tahun", kosong = tanpa acuan), lalu pasang ulang isiannya. */

@@ -4,8 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>403 - Akses Ditolak</title>
+    @includeIf('layouts.partials.favicon')
     <link rel="stylesheet" href="{{ asset('assets/vendors/tabler/css/tabler.min.css') }}">
-    <link rel="stylesheet" href="{{ asset('assets/vendors/tabler-icons/tabler-icons.min.css') }}">
+    <link rel="stylesheet" href="{{ asset('assets/vendors/tabler-icons/tabler-icons-300.min.css') }}">
     <link rel="stylesheet" href="{{ asset('assets/css/pubchecker.css') }}?v={{ filemtime(public_path('assets/css/pubchecker.css')) }}">
 </head>
 <body class="border-top-wide border-primary d-flex flex-column">

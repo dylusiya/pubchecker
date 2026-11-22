@@ -252,6 +252,44 @@ class SipotretService
     }
 
     /**
+     * Temuan satu hasil (kriteria Tidak Sesuai + catatan tambahan) dalam bentuk item SIPOTRET, dicocokkan seperti
+     * rencana(): kriteria → item master lewat kategori + nama; tanpa item master → item lainnya (custom).
+     * Dipakai untuk mengirim hasil pemeriksaan draf (pra rilis) ke transaksi SIPOTRET.
+     *
+     * @return array<int, array{kode:string, kategori:?string, nama:string, keterangan:?string, item_id:?int, flag:?string, item:?object}>
+     */
+    public function temuanItem(HasilPemeriksaan $hasil): array
+    {
+        $temuan = $hasil->detail()->where('status', DetailPemeriksaan::STATUS_TIDAK_SESUAI)->orderBy('id')->get()
+            ->map(function (DetailPemeriksaan $d) {
+                $item = $this->cariItem($d);
+                return [
+                    'kode'       => $d->kriteria_id,
+                    'kategori'   => $d->kategori,
+                    'nama'       => $item->item_nama ?? $this->namaKriteria($d->deskripsi),
+                    'keterangan' => $d->keterangan,
+                    'item_id'    => $item ? (int) $item->item_id : null,
+                    // tanpa item master (mis. kesesuaian dengan SIPOTRET/Web API): level major seperti kiriman pasca rilis
+                    'flag'       => $item ? $item->item_flag_level : 'major',
+                    'item'       => $item,
+                ];
+            });
+        $tambahan = $hasil->catatanTambahan()->get()->map(function ($c) {
+            $item = $c->item_periksa_id ? $this->itemMaster((int) $c->item_periksa_id) : null;
+            return [
+                'kode'       => 'Tambahan',
+                'kategori'   => $c->kategori,
+                'nama'       => $item->item_nama ?? (string) $c->item,
+                'keterangan' => $c->keterangan,
+                'item_id'    => $item ? (int) $item->item_id : null,
+                'flag'       => $item ? $item->item_flag_level : $c->flag_level,
+                'item'       => $item,
+            ];
+        });
+        return $temuan->concat($tambahan)->values()->all();
+    }
+
+    /**
      * Kirim temuan baru ke SIPOTRET. Mengembalikan jumlah yang ditambah/dilewati.
      *
      * @param  bool $perbarui temuan yang sudah ada tapi keterangan/levelnya beda ikut diperbarui di SIPOTRET
@@ -572,6 +610,72 @@ class SipotretService
             ];
         }
         return $rekap;
+    }
+
+    /**
+     * Catatan Pasca Rilis tiap publikasi pada periode (bulan, tahun) untuk Laporan ARC. Publikasi sesuai standar pada
+     * periode itu bila tidak punya catatan sama sekali di periode tersebut; yang tidak ada di hasil = tanpa catatan.
+     *
+     * @param  string[] $pubIdApis
+     * @return array<string, array{catatan: int, tahap: string}> hanya publikasi yang punya catatan di periode itu
+     */
+    public function catatanPeriode(array $pubIdApis, int $bulan, int $tahun): array
+    {
+        $pubIdApis = array_values(array_unique(array_filter(array_map('strval', $pubIdApis))));
+        if (!$pubIdApis) return [];
+        $kolomRev = $this->kolomRev();
+
+        $out = [];
+        foreach (array_chunk($pubIdApis, 500) as $potong) {
+            $baris = $this->db()->table('pasca_rilis_history as h')
+                ->join('pasca_rilis as p', 'p.id', '=', 'h.pasca_id')
+                ->join('pasca_rilis_catatan as c', 'c.rilis_id', '=', 'h.id')
+                ->whereIn('p.pub_id_api', $potong)
+                ->where('h.bulan', $bulan)->where('h.tahun', $tahun)
+                ->groupBy('p.pub_id_api', 'rev')
+                ->selectRaw("p.pub_id_api, {$kolomRev} as rev, COUNT(c.id) as jumlah_catatan")
+                ->get();
+            foreach ($baris as $b) {
+                $k = (string) $b->pub_id_api;
+                $out[$k] = [
+                    'catatan' => ($out[$k]['catatan'] ?? 0) + (int) $b->jumlah_catatan,
+                    'tahap'   => self::tahapRev($b->rev),
+                ];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Temuan ketidaksesuaian terbanyak pada periode bulanDari–bulanSampai satu tahun (Laporan ARC): dihitung per
+     * item_periksa, jumlah publikasi yang punya temuan itu (satu publikasi dihitung sekali walau tercatat di
+     * beberapa bulan). Item lainnya (custom, tanpa item master) tidak ikut diperingkat.
+     *
+     * @param  int[]|null $wilayah  batasi ke domain kab/kota ini
+     * @return array<int, array{item: string, deskripsi: string, kategori: ?string, publikasi: int, catatan: int}>
+     */
+    public function temuanTerbanyak(int $tahun, int $bulanDari, int $bulanSampai, int $batas = 5, ?array $wilayah = null): array
+    {
+        return $this->db()->table('pasca_rilis_catatan as c')
+            ->join('pasca_rilis_history as h', 'h.id', '=', 'c.rilis_id')
+            ->join('pasca_rilis as p', 'p.id', '=', 'h.pasca_id')
+            ->join('item_periksa as i', 'i.item_id', '=', 'c.item_periksa_id')
+            ->where('h.tahun', $tahun)
+            ->whereBetween('h.bulan', [$bulanDari, $bulanSampai])
+            ->when($wilayah, fn($q) => $q->whereIn('p.pub_wilayah', $wilayah))
+            ->groupBy('i.item_id', 'i.item_nama', 'i.item_deskripsi', 'i.item_kategori')
+            ->selectRaw('i.item_nama, i.item_deskripsi, i.item_kategori,
+                COUNT(DISTINCT h.pasca_id) as publikasi, COUNT(*) as catatan')
+            ->orderByDesc('publikasi')->orderByDesc('catatan')->orderBy('i.item_nama')
+            ->limit($batas)
+            ->get()
+            ->map(fn($r) => [
+                'item'      => trim((string) $r->item_nama),
+                'deskripsi' => trim((string) $r->item_deskripsi),
+                'kategori'  => $r->item_kategori,
+                'publikasi' => (int) $r->publikasi,
+                'catatan'   => (int) $r->catatan,
+            ])->all();
     }
 
     /**

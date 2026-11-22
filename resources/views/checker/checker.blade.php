@@ -1,10 +1,15 @@
 @extends('layouts.app')
 
-@section('title', 'Pemeriksaan Publikasi')
-@section('pretitle', 'Publication Checker')
-@section('page-title', 'Pemeriksaan Kover Publikasi')
-@section('page-subtitle', 'Upload hingga 10 PDF publikasi BPS, lalu tinjau per kategori berdampingan dengan contoh yang benar')
+@php $dariPraRilis = request()->filled('draf'); @endphp
+@section('title', $dariPraRilis ? 'Pemeriksaan Pra Rilis' : 'Upload Manual')
+@section('pretitle', $dariPraRilis ? 'Pra Rilis · draf dari SIPOTRET' : 'Upload Manual')
+@section('page-title', $dariPraRilis ? 'Pemeriksaan Draf Pra Rilis' : 'Pemeriksaan Upload Manual')
+@section('page-subtitle', $dariPraRilis ? 'Draf dari SIPOTRET diambil otomatis; tinjau per kategori, lalu kirim hasilnya ke SIPOTRET dari panel tinjauan'
+    : 'Untuk PDF di luar SIPOTRET / Web BPS: upload hingga 10 PDF, lalu tinjau per kategori berdampingan dengan contoh yang benar')
 @section('page-actions')
+    <a href="{{ route('checker.sipotret_draf.index') }}" class="btn">
+        <i class="ti {{ $dariPraRilis ? 'ti-arrow-left' : 'ti-file-pencil' }}"></i> {{ $dariPraRilis ? 'Kembali ke Pra Rilis' : 'Pra Rilis' }}
+    </a>
     <a href="{{ route('checker.riwayat') }}" class="btn btn-primary">
         <i class="ti ti-history"></i> Riwayat
     </a>
@@ -161,6 +166,15 @@ let selectedFiles = [];
 let allResults    = [];
 let batchOutcomes = []; // hasil per kartu (urutan sama dengan file), { result } atau { error }
 let sesiId        = null;
+let tinjauanTerbuka = false; // tinjauan sedang dibuka: jangan pindah halaman dulu
+const RIWAYAT_URL = '{{ route("checker.riwayat.detail", "__ID__") }}';
+/** Setelah pemeriksaan: langsung ke Riwayat (detail sesi) untuk melanjutkan. Ada yang gagal → tetap di sini (bisa Coba lagi). */
+function keRiwayat(gagal = 0) {
+    if (!sesiId) return;
+    const url = RIWAYAT_URL.replace('__ID__', sesiId);
+    if (!gagal) { window.location = url; return; }
+    document.getElementById('batchTitle').innerHTML += ` <a href="${url}" class="btn btn-sm btn-primary ms-2">Lanjut ke Riwayat <i class="ti ti-arrow-right ms-1"></i></a>`;
+}
 let currentFilter = 'all';
 
 // Maksimal PDF per pemeriksaan: teks & OCR dibaca di browser (±30–40 detik per PDF) dan
@@ -197,6 +211,77 @@ async function addFiles(files) {
     renderQueue();
 }
 
+/**
+ * Draf upload PJK di SIPOTRET (halaman Pra Rilis → ?draf=<tr_id>,<tr_id>): PDF diambil lewat server
+ * pubchecker lalu masuk antrean seperti file upload. file._sipotretTr dikirim ke server sebagai penanda draf.
+ */
+async function muatDrafSipotret(ids) {
+    ids = [...new Set(ids)].slice(0, Math.max(0, MAX_FILES - selectedFiles.length));
+    if (!ids.length) return;
+    const dz = document.getElementById('dropzone');
+    const info = document.createElement('div');
+    info.className = 'alert alert-info py-2 small mb-3 d-flex align-items-center gap-2';
+    info.innerHTML = `<i class="ti ti-loader-2 icon-spin"></i><span class="flex-grow-1"></span>
+        <button type="button" class="btn btn-sm btn-outline-secondary py-0">Batal</button>`;
+    dz.before(info);
+    // unduhan pertama: server pubchecker mengambil dulu dari OwnCloud SIPOTRET (bisa lama), berikutnya dari cache
+    const BATAS_DETIK = 180;
+    const henti = new AbortController();
+    info.querySelector('button').onclick = () => henti.abort('dibatalkan');
+    const mulai = Date.now();
+    const status = ids.map(() => 'menunggu server mengambil dari SIPOTRET');
+    const mb = n => (n / 1048576).toFixed(1).replace('.', ',');
+    const tampil = () => {
+        const dtk = Math.round((Date.now() - mulai) / 1000);
+        info.querySelector('span').textContent = `Mengambil ${ids.length} draf dari SIPOTRET · ${dtk} dtk · `
+            + status.join(' | ') + (dtk > 30 ? ' — unduhan pertama dari OwnCloud bisa lama, berikutnya lebih cepat' : '');
+        if (dtk >= BATAS_DETIK) henti.abort('waktu habis');
+    };
+    const jam = setInterval(tampil, 1000);
+    tampil();
+    const gagal = [];
+    const files = await Promise.all(ids.map(async (id, i) => {
+        try {
+            const res = await fetch(DRAF_PDF_URL.replace('/0/pdf', `/${id}/pdf`), { headers: { 'Accept': 'application/pdf' }, signal: henti.signal });
+            if (!res.ok) throw new Error((await res.text()).slice(0, 300) || ('HTTP ' + res.status));
+            const nama = decodeURIComponent(res.headers.get('X-Nama-File') || '') || `draf-${id}.pdf`;
+            // progres unduhan dari server pubchecker ke browser
+            const total = +res.headers.get('Content-Length') || 0;
+            const reader = res.body.getReader();
+            const potong = [];
+            let n = 0;
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                potong.push(value);
+                n += value.length;
+                status[i] = total ? `${mb(n)}/${mb(total)} MB` : `${mb(n)} MB`;
+            }
+            status[i] = 'selesai';
+            const file = new File(potong, nama, { type: 'application/pdf' });
+            file._sipotretTr = id;
+            return file;
+        } catch (e) {
+            status[i] = 'gagal';
+            const sebab = henti.signal.aborted
+                ? (henti.signal.reason === 'dibatalkan' ? 'dibatalkan' : `lebih dari ${BATAS_DETIK} detik, server tidak berhasil mengambil file dari SIPOTRET`)
+                : e.message;
+            gagal.push(`#${id}: ${sebab}`);
+            return null;
+        }
+    }));
+    clearInterval(jam);
+    info.remove();
+    if (gagal.length) showAlert('danger', 'Draf tidak bisa diambil dari SIPOTRET — ' + gagal.join('; '));
+    selectedFiles = selectedFiles.concat(files.filter(Boolean)
+        .filter(f => !selectedFiles.some(s => s._sipotretTr === f._sipotretTr)));
+    renderQueue();
+}
+const DRAF_PDF_URL = '{{ route("checker.sipotret_draf.pdf", 0) }}';
+{
+    const draf = (new URLSearchParams(location.search).get('draf') || '').split(',').map(Number).filter(n => n > 0);
+    if (draf.length) muatDrafSipotret(draf);
+}
 function handleDrop(e) {
     e.preventDefault();
     document.getElementById('dropzone').style.background = '';
@@ -214,7 +299,7 @@ function renderQueue() {
         : `${selectedFiles.length} PDF siap diperiksa, bisa tambah ${MAX_FILES - selectedFiles.length} lagi`;
     chips.innerHTML = selectedFiles.map((f, i) => `
         <span class="file-chip">
-            <i class="ti ti-file-type-pdf text-danger"></i>
+            <i class="ti ${f._sipotretTr ? 'ti-cloud-download text-purple' : 'ti-file-type-pdf text-danger'}" title="${f._sipotretTr ? 'Draf dari SIPOTRET' : ''}"></i>
             <span class="text-truncate" style="max-width:160px;" title="${f.name}">${f.name}</span>
             <small class="text-muted">${(f.size/1024).toFixed(0)} KB</small>
             <i class="ti ti-x text-muted" style="cursor:pointer;" onclick="removeFile(${i})"></i>
@@ -255,7 +340,8 @@ async function startCheck() {
             const fd = new FormData();
             fd.append('files[]', file);
             if (sesiId) fd.append('sesi_id', sesiId);
-            if (extracted) fd.append('extracted_b64', PdfExtract.kemas(extracted)); // base64: lihat PdfExtract.kemas
+            if (file._sipotretTr) fd.append('sipotret_tr_id', file._sipotretTr);
+            if (extracted) fd.append('extracted_b64', await PdfExtract.kemas(extracted)); // base64 (+gzip): lihat PdfExtract.kemas
             fd.append('_token', CSRF);
             const res  = await fetch('{{ route("checker.check") }}', { method: 'POST', body: fd, headers: { 'Accept': 'application/json' } });
             // halaman HTML (mis. 403 dari firewall hosting) → pesan yang jelas, bukan "Unexpected token '<'"
@@ -281,8 +367,8 @@ async function startCheck() {
     btn.disabled = false;
     btn.innerHTML = '<i class="ti ti-player-play me-1"></i> Periksa Ulang';
 
-    // Satu publikasi: langsung masuk tinjauan seperti sebelumnya
-    if (total === 1 && allResults.length === 1) beginReview();
+    // langsung ke Riwayat untuk melanjutkan (kecuali sedang meninjau: pindah setelah tinjauan selesai)
+    if (allResults.length && !tinjauanTerbuka) keRiwayat(gagal);
 }
 
 
@@ -394,6 +480,7 @@ function beginReview(jobIndex) {
                 filename: r.filename,
                 checks:   r.checks,
                 hasilId:  r.hasil_id,
+                sipotretTr: file._sipotretTr || null,
                 ocrLines: r.ocr_lines,
                 summary:  r.summary,
                 url,
@@ -403,10 +490,14 @@ function beginReview(jobIndex) {
         .filter(Boolean);
 
     const startIndex = target ? entries.findIndex(e => e.hasilId === target.hasil_id) : undefined;
+    tinjauanTerbuka = true;
     CheckerReview.start(entries, { onFinish: finishReview, startIndex: startIndex >= 0 ? startIndex : undefined });
 }
 
 function finishReview() {
+    tinjauanTerbuka = false;
+    // pemeriksaan otomatis sudah selesai → lanjut di Riwayat; masih berjalan → tetap di sini (pindah otomatis setelah selesai)
+    if (sesiId && document.getElementById('btnCheck') && !document.getElementById('btnCheck').disabled) { keRiwayat(); return; }
     renderStats(); renderList();
     document.getElementById('statsSection').style.display   = 'block';
     document.getElementById('resultsSection').style.display = 'block';

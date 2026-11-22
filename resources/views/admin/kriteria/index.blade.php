@@ -116,7 +116,7 @@
                                     </a>
                                     <form action="{{ route('admin.kriteria.destroy', $item) }}"
                                           method="POST" class="d-inline"
-                                          onsubmit="return confirm('Hapus kriteria {{ $item->kode }}?')">
+                                          data-confirm="Hapus kriteria {{ $item->kode }}?" data-confirm-ok="Hapus" data-confirm-danger>
                                         @csrf @method('DELETE')
                                         <button type="submit"
                                                 class="btn btn-sm btn-outline-danger py-0 px-2" title="Hapus">

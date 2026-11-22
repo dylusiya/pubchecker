@@ -18,6 +18,10 @@ use App\Http\Controllers\CatatanTambahanController;
 */
 Route::get('/', [SsoController::class, 'index'])->name('home');
 
+// Token CSRF terbaru untuk halaman yang sudah lama terbuka (public/js/csrf-retry.js); tanpa auth
+Route::get('/csrf-token', fn() => response()->json(['token' => csrf_token()])
+    ->header('Cache-Control', 'no-store'))->name('csrf.token');
+
 /*
 |--------------------------------------------------------------------------
 | SSO & Authentication — tanpa auth middleware
@@ -57,6 +61,10 @@ Route::middleware(['auth', 'approved'])->group(function () {
         ->whereNumber('history')->name('dashboard.sipotret.approve')->middleware('can:periksa');
     Route::get('/profile',   [ProfileController::class, 'index'])->name('profile.index');
 
+    // Laporan pemantauan ARC publikasi kab/kota (rekap rilis, on time, sesuai standar, temuan terbanyak)
+    Route::get('/laporan/arc',       [App\Http\Controllers\LaporanArcController::class, 'index'])->name('laporan.arc');
+    Route::get('/laporan/arc/excel', [App\Http\Controllers\LaporanArcController::class, 'excel'])->name('laporan.arc.excel');
+
     // Publication Checker
     Route::prefix('checker')->name('checker.')->group(function () {
         Route::get('/',                      [CheckerController::class, 'index'])        ->name('index')->middleware('can:periksa');
@@ -64,18 +72,35 @@ Route::middleware(['auth', 'approved'])->group(function () {
         Route::post('/check',                [CheckerController::class, 'check'])        ->name('check')->middleware('can:periksa');
         Route::post('/export',               [CheckerController::class, 'export'])       ->name('export')->middleware('can:periksa');
         Route::get('/riwayat',               [CheckerController::class, 'riwayat'])      ->name('riwayat');
-        Route::get('/riwayat/{sesi}',        [CheckerController::class, 'riwayatDetail'])->name('riwayat.detail');
-        Route::get('/riwayat/{sesi}/export', [CheckerController::class, 'exportSesi'])   ->name('riwayat.export');
-        Route::get('/riwayat/{sesi}/tinjau', [CheckerController::class, 'tinjauSesi'])   ->name('riwayat.tinjau')->middleware('can:periksa');
-        Route::get('/riwayat/{sesi}/sipotret',  [SipotretController::class, 'preview'])  ->name('riwayat.sipotret')->middleware('can:periksa');
-        Route::post('/riwayat/{sesi}/sipotret', [SipotretController::class, 'kirim'])    ->name('riwayat.sipotret.kirim')->middleware('can:periksa');
+        Route::get('/riwayat/{sesi}',        [CheckerController::class, 'riwayatDetail'])->name('riwayat.detail')->middleware(\App\Http\Middleware\PemilikSesi::class);
+        Route::get('/riwayat/{sesi}/export', [CheckerController::class, 'exportSesi'])   ->name('riwayat.export')->middleware(\App\Http\Middleware\PemilikSesi::class);
+        Route::get('/riwayat/{sesi}/tinjau', [CheckerController::class, 'tinjauSesi'])   ->name('riwayat.tinjau')->middleware('can:periksa')->middleware(\App\Http\Middleware\PemilikSesi::class);
+        Route::get('/riwayat/{sesi}/sipotret',  [SipotretController::class, 'preview'])  ->name('riwayat.sipotret')->middleware('can:periksa')->middleware(\App\Http\Middleware\PemilikSesi::class);
+        Route::post('/riwayat/{sesi}/sipotret', [SipotretController::class, 'kirim'])    ->name('riwayat.sipotret.kirim')->middleware('can:periksa')->middleware(\App\Http\Middleware\PemilikSesi::class);
         // acuan isian awal dari catatan SIPOTRET periode tertentu (dipilih petugas, disimpan per hasil)
         Route::get('/sipotret/isian',           [SipotretController::class, 'isian'])    ->name('sipotret.isian')->middleware('can:periksa');
         // salin catatan periode sebelumnya ke periode pemeriksaan (belum upload / belum approve) lalu langsung tercatat
+        // draf publikasi yang diupload PJK di SIPOTRET (sebelum rilis)
+        Route::get('/sipotret-draf',          [App\Http\Controllers\SipotretDrafController::class, 'index'])->name('sipotret_draf.index')->middleware('can:periksa');
+        Route::post('/sipotret-draf/penugasan', [App\Http\Controllers\SipotretDrafController::class, 'tugaskan'])->name('sipotret_draf.tugaskan')->middleware('can:periksa');
+        Route::get('/sipotret-draf/notifikasi', [App\Http\Controllers\SipotretDrafController::class, 'notifikasi'])->name('sipotret_draf.notifikasi')->middleware('can:periksa');
+        Route::get('/sipotret-draf/publikasi/{pub}',[App\Http\Controllers\SipotretDrafController::class, 'show'])->name('sipotret_draf.show')->whereNumber('pub')->middleware('can:periksa');
+        Route::get('/sipotret-draf/publikasi/{pub}/berkas/{jenis}', [App\Http\Controllers\SipotretDrafController::class, 'berkas'])->name('sipotret_draf.berkas')->whereNumber('pub')->whereIn('jenis', ['spr'])->middleware('can:periksa');
+        Route::post('/sipotret-draf/publikasi/{pub}/rilis', [App\Http\Controllers\SipotretDrafController::class, 'rilis'])->name('sipotret_draf.rilis')->whereNumber('pub')->middleware('can:periksa');
+        Route::post('/sipotret-draf/publikasi/{pub}/upload', [App\Http\Controllers\SipotretDrafController::class, 'upload'])->name('sipotret_draf.upload')->whereNumber('pub')->middleware('can:periksa');
+        Route::post('/sipotret-draf/publikasi/{pub}/batal-rilis', [App\Http\Controllers\SipotretDrafController::class, 'batalRilis'])->name('sipotret_draf.batal_rilis')->whereNumber('pub')->middleware('can:periksa');
+        Route::post('/sipotret-draf/publikasi/{pub}/kelengkapan', [App\Http\Controllers\SipotretDrafController::class, 'kelengkapan'])->name('sipotret_draf.kelengkapan')->whereNumber('pub')->middleware('can:periksa');
+        Route::post('/sipotret-draf/publikasi', [App\Http\Controllers\SipotretDrafController::class, 'tambah'])->name('sipotret_draf.tambah')->middleware('can:periksa');
+        Route::post('/sipotret-draf/publikasi/{pub}/abstraksi', [App\Http\Controllers\SipotretDrafController::class, 'abstraksi'])->name('sipotret_draf.abstraksi')->whereNumber('pub')->middleware('can:periksa');
+        Route::post('/sipotret-draf/publikasi/{pub}/sprp', [App\Http\Controllers\SipotretDrafController::class, 'sprp'])->name('sipotret_draf.sprp')->whereNumber('pub')->middleware('can:periksa');
+        Route::post('/sipotret-draf/publikasi/{pub}/sprp-upload', [App\Http\Controllers\SipotretDrafController::class, 'uploadSprp'])->name('sipotret_draf.sprp_upload')->whereNumber('pub')->middleware('can:periksa');
+        Route::post('/sipotret-draf/publikasi/{pub}/portal', [App\Http\Controllers\SipotretDrafController::class, 'portal'])->name('sipotret_draf.portal')->whereNumber('pub')->middleware('can:periksa');
+        Route::post('/hasil/{hasil}/sipotret-draf', [App\Http\Controllers\SipotretDrafController::class, 'kirim'])->name('hasil.sipotret_draf')->middleware(['can:periksa', 'tugas']);
+        Route::get('/sipotret-draf/{tr}/pdf', [App\Http\Controllers\SipotretDrafController::class, 'pdf'])  ->name('sipotret_draf.pdf')->whereNumber('tr')->middleware('can:periksa');
         Route::post('/sipotret/salin-sebelumnya', [SipotretController::class, 'salinSebelumnya'])->name('sipotret.salin')->middleware('can:periksa');
         Route::patch('/hasil/{hasil}/acuan-sipotret', [SipotretController::class, 'acuan'])->name('hasil.acuan_sipotret')->middleware(['can:periksa', 'tugas']);
         Route::delete('/riwayat',            [CheckerController::class, 'deleteSesiBulk'])->name('riwayat.delete-bulk')->middleware('can:periksa');
-        Route::delete('/riwayat/{sesi}',     [CheckerController::class, 'deleteSesi'])   ->name('riwayat.delete')->middleware('can:periksa');
+        Route::delete('/riwayat/{sesi}',     [CheckerController::class, 'deleteSesi'])   ->name('riwayat.delete')->middleware('can:periksa')->middleware(\App\Http\Middleware\PemilikSesi::class);
         Route::patch('/hasil/{hasil}/review', [CheckerController::class, 'reviewDetail'])->name('hasil.review')->middleware(['can:periksa', 'tugas']);
         Route::patch('/hasil/{hasil}/review-kategori', [CheckerController::class, 'reviewKategori'])->name('hasil.review_kategori')->middleware(['can:periksa', 'tugas']);
         Route::patch('/hasil/{hasil}/pin',   [CheckerController::class, 'simpanPin'])     ->name('hasil.pin')->middleware(['can:periksa', 'tugas']);

@@ -156,7 +156,8 @@ const BatchCheck = (() => {
             if (b) onReview?.(parseInt(b.dataset.review, 10));
             // gagal (mis. koneksi lemah) → ulangi publikasi itu saja, tanpa mengulang semuanya
             const u = e.target.closest('[data-ulang]');
-            if (u) { u.disabled = true; jalankan(parseInt(u.dataset.ulang, 10)); }
+            // "Coba lagi" setelah dibatalkan: pilihan PDF secured yang diingat ("batalkan semua") tidak dipakai lagi
+            if (u) { u.disabled = true; PdfExtract.lupakanPilihanSecured?.('batal'); jalankan(parseInt(u.dataset.ulang, 10)); }
         };
 
         // Batasi job yang berjalan bersamaan: tiap PDF (s.d. 50MB) diunduh & diparse di memori browser,
@@ -173,7 +174,7 @@ const BatchCheck = (() => {
             let phaseFrac = { download: 0, text: 0, ocr: 0 };
             // ulang: kembalikan tampilan kartu ke awal
             STEPS.forEach(([k]) => setStep(card, k, 'pending'));
-            card.querySelector('.progress-bar').classList.remove('bg-red', 'bg-green');
+            card.querySelector('.progress-bar').classList.remove('bg-red', 'bg-green', 'bg-secondary');
             card.querySelector('.batch-result').innerHTML = '';
             progress(card, 0, 'Menunggu giliran…');
             const lapor = (msg, frac, phase) => {
@@ -210,9 +211,17 @@ const BatchCheck = (() => {
                     } else {
                         data = await job.source.arrayBuffer();
                     }
-                    extracted = await PdfExtract.extract(data, { onProgress: lapor });
+                    extracted = await PdfExtract.extract(data, { onProgress: lapor, nama: job.title });
                     if (!extracted.ocr_pages?.length) setStep(card, 'ocr', 'skip'); // tidak perlu OCR / dilewati
+                    if (extracted.secured) {
+                        // PDF secured: langkah OCR kartu ini memakan waktu (atau hanya kover)
+                        card.querySelector('[data-step="ocr"] span').textContent = extracted.secured === 'tanpa'
+                            ? 'Tanpa OCR (PDF secured)'
+                            : `OCR ${extracted.ocr_pages.length} hal. ${extracted.secured === 'penting' ? 'penting ' : ''}(PDF secured)` +
+                              (extracted.ocr_terlewat ? `, ${extracted.ocr_terlewat} hal. dilewati` : '');
+                    }
                 } catch (err) {
+                    if (err?.dibatalkan) throw err; // petugas membatalkan (PDF secured): jangan dibaca server
                     // pembacaan di browser gagal (mis. koneksi putus) → server mengunduh & membaca sendiri
                     console.warn('Ekstraksi teks di browser gagal, dibaca di server', err);
                     ['download', 'text', 'ocr'].forEach(k => setStep(card, k, 'skip'));
@@ -239,11 +248,11 @@ const BatchCheck = (() => {
                 // blob mungkin sudah dibuka viewer tinjauan (job.onPdf) → jangan dicabut
                 if (blobUrl && !job.onPdf) URL.revokeObjectURL(blobUrl);
                 const active = card.querySelector('.ti-loader-2, .ti-hourglass')?.closest('li')?.dataset.step || 'check';
-                setStep(card, active, 'error');
-                card.querySelector('.progress-bar').classList.add('bg-red');
-                progress(card, 1, 'Gagal');
+                setStep(card, active, err?.dibatalkan ? 'skip' : 'error');
+                card.querySelector('.progress-bar').classList.add(err?.dibatalkan ? 'bg-secondary' : 'bg-red');
+                progress(card, 1, err?.dibatalkan ? 'Dibatalkan' : 'Gagal');
                 card.querySelector('.batch-result').innerHTML =
-                    `<div class="text-red small mb-2">${esc(err.message)}</div>
+                    `<div class="${err?.dibatalkan ? 'text-secondary' : 'text-red'} small mb-2">${esc(err.message)}</div>
                      <button type="button" class="btn btn-sm btn-outline-primary w-100" data-ulang="${i}">
                         <i class="ti ti-refresh"></i> Coba lagi
                      </button>`;

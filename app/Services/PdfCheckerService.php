@@ -72,6 +72,8 @@ class PdfCheckerService
     private ?string $tanggalRilis = null;
     /** Isian Web API BPS (issn, katalog, nomor_publikasi) — untuk cek sama_api; null = bukan dari Import API BPS. */
     private ?array $dataApi = null;
+    /** Sumber data pembanding cek sama_api: 'Web API BPS' (Import API) atau 'SIPOTRET' (draf upload PJK). */
+    private string $sumberApi = 'Web API BPS';
     private float  $pageW      = 595.0;
     private float  $pageH      = 842.0;
     private string $page2Text  = '';
@@ -92,6 +94,21 @@ class PdfCheckerService
     /** Nomor halaman (1-based) yang teksnya hasil OCR / berupa gambar tanpa teks. */
     private array $ocrPages   = [];
     private array $imagePages = [];
+    private int $ocrTerlewat  = 0; // halaman tanpa lapisan teks yang tidak di-OCR karena batas (PdfExtract ocr_terlewat)
+    /**
+     * Perataan kolom angka tabel yang diukur di browser (PdfExtract ukurTabel): [{hal, kol, n, rata, tengah, geser, contoh}].
+     * null = tidak diukur (dibaca di server / versi PdfExtract lama).
+     */
+    private ?array $tabelAngka = null;
+    /**
+     * Teks di pita atas/bawah tiap halaman dari browser (PdfExtract tepiHalaman), indeks 0-based:
+     * [['w' => lebar, 'h' => tinggi, 'it' => [['t', 'x', 'y'], …]] | null]. Kosong = tidak dikirim (versi lama / server).
+     */
+    private array $tepi = [];
+    /** Nama font teks halaman awal & terakhir (PdfExtract fontHalaman): [nomor halaman => [['t', 'f', 'x', 'y'], …]]. */
+    private array $fontHal = [];
+    /** Cache nomorHalaman(). */
+    private ?array $nomorCache = null;
 
     // ═══════════════════════════════════════════════════════
     // PUBLIC API
@@ -143,6 +160,8 @@ class PdfCheckerService
      */
     public function checkFromText(array $x, string $filename, int $fileSize): array
     {
+        // publikasi tebal (±900 halaman) butuh lebih dari batas bawaan 30–60 detik; diabaikan bila hosting melarang
+        if (function_exists('set_time_limit')) @set_time_limit(300);
         $this->reset();
 
         $pages = array_values(array_filter($x['pages'] ?? [], 'is_string'));
@@ -174,7 +193,38 @@ class PdfCheckerService
         $toInts = fn($v) => array_values(array_filter(array_map('intval', (array) ($v ?? [])), fn($n) => $n > 0));
         $this->ocrPages   = $toInts($x['ocr_pages'] ?? []);
         $this->imagePages = $toInts($x['image_pages'] ?? []);
-        $this->method     = in_array($x['method'] ?? '', ['pdfjs', 'pdfjs+ocr'], true) ? $x['method'] : 'pdfjs';
+        $this->ocrTerlewat = max(0, (int) ($x['ocr_terlewat'] ?? 0));
+        if (isset($x['tabel_angka']) && is_array($x['tabel_angka'])) {
+            $this->tabelAngka = [];
+            foreach (array_slice($x['tabel_angka'], 0, 3000) as $t) {
+                if (!is_array($t) || !is_numeric($t['hal'] ?? null) || !is_numeric($t['kol'] ?? null)) continue;
+                $this->tabelAngka[] = [
+                    'hal'    => (int) $t['hal'],
+                    'kol'    => (int) $t['kol'],
+                    'n'      => (int) ($t['n'] ?? 0),
+                    'rata'   => in_array($t['rata'] ?? '', ['kanan', 'kiri', 'tengah', 'tidak'], true) ? $t['rata'] : 'tidak',
+                    'tengah' => (bool) ($t['tengah'] ?? false),
+                    'geser'  => is_numeric($t['geser'] ?? null) ? (float) $t['geser'] : 0.0,
+                    'contoh' => mb_substr((string) ($t['contoh'] ?? ''), 0, 40),
+                ];
+            }
+        }
+        $this->method    = in_array($x['method'] ?? '', ['pdfjs', 'pdfjs+ocr'], true) ? $x['method'] : 'pdfjs';
+
+        // tepi halaman (nomor halaman & running title) dan nama font halaman awal/terakhir
+        $item = fn($w, bool $font) => is_array($w) && is_string($w['t'] ?? null) && is_numeric($w['x'] ?? null) && is_numeric($w['y'] ?? null)
+            ? ['t' => mb_substr($w['t'], 0, 120), 'x' => (float) $w['x'], 'y' => (float) $w['y']] + ($font ? ['f' => mb_substr((string) ($w['f'] ?? ''), 0, 80)] : [])
+            : null;
+        foreach (array_slice((array) ($x['tepi'] ?? []), 0, self::MAX_PAGES) as $i => $pg) {
+            $this->tepi[$i] = is_array($pg) && is_numeric($pg['w'] ?? null) && is_numeric($pg['h'] ?? null) && $pg['h'] > 0
+                ? ['w' => (float) $pg['w'], 'h' => (float) $pg['h'],
+                   'it' => array_values(array_filter(array_map(fn($w) => $item($w, false), array_slice((array) ($pg['it'] ?? []), 0, 80))))]
+                : null;
+        }
+        foreach ((array) ($x['fonts'] ?? []) as $hal => $daftar) {
+            if (!is_numeric($hal) || (int) $hal < 1 || count($this->fontHal) >= 10) continue;
+            $this->fontHal[(int) $hal] = array_values(array_filter(array_map(fn($w) => $item($w, true), array_slice((array) $daftar, 0, 400))));
+        }
 
         $this->runAllRules();
         return $this->buildResult($filename, $fileSize);
@@ -193,6 +243,10 @@ class PdfCheckerService
         $json = $request->filled('extracted_b64')
             ? base64_decode((string) $request->input('extracted_b64'), true)
             : (string) $request->input('extracted');
+        // dikompres gzip di browser (PdfExtract.kemas) → 2 byte awal 1F 8B
+        if (is_string($json) && str_starts_with($json, "\x1f\x8b") && function_exists('gzdecode')) {
+            $json = @gzdecode($json, 200 * 1024 * 1024) ?: '';
+        }
         $data = $json ? json_decode($json, true) : null;
         return is_array($data) ? $data : null;
     }
@@ -200,7 +254,8 @@ class PdfCheckerService
     public static function ocrLinesFrom(?array $extracted): ?array
     {
         $out = [];
-        foreach (array_slice((array) ($extracted['ocr_lines'] ?? []), 0, 50, true) as $page => $lines) {
+        // semua halaman hasil OCR (PDF secured bisa ratusan halaman); batas hanya pengaman ukuran
+        foreach (array_slice((array) ($extracted['ocr_lines'] ?? []), 0, self::MAX_PAGES, true) as $page => $lines) {
             if (!is_numeric($page) || (int) $page < 1 || !is_array($lines)) continue;
             foreach (array_slice($lines, 0, 500) as $l) {
                 if (!isset($l['s'], $l['x'], $l['y'], $l['w'], $l['h']) || !is_string($l['s'])) continue;
@@ -594,6 +649,11 @@ class PdfCheckerService
             default => [], // 'all': halaman foto/pembatas bab terlalu umum, catatan jadi tidak bermakna
         };
 
+        // PDF "secured" (teks berbentuk kurva): halaman tanpa teks di luar batas OCR tidak terbaca sama sekali
+        if (!$pages && $this->ocrTerlewat > 0) {
+            return " [{$this->ocrTerlewat} halaman tanpa lapisan teks tidak di-OCR, cek manual]";
+        }
+
         if (array_intersect($pages, $this->ocrPages)) {
             return ' [teks hasil OCR, cek ulang]';
         }
@@ -638,7 +698,12 @@ class PdfCheckerService
             'abjad'        => $this->evalAbjad($param, $text, $gagal, $msgOk, $msgErr),
             'judul_kover'  => $this->evalJudulKover($text, $gagal, $msgOk, $msgErr),
             'sama_api'     => $this->evalSamaApi($param, $text, $gagal, $msgOk, $msgErr),
-            'manual'       => ['PERLU DICEK', $msgErr],
+            'rata_angka'   => $this->evalRataAngka($gagal, $msgOk, $msgErr),
+            'nomor_halaman'  => $this->evalNomorHalaman($gagal, $msgOk, $msgErr),
+            'running_title'  => $this->evalRunningTitle($param, $gagal, $msgOk, $msgErr),
+            'daftar_halaman' => $this->evalDaftarHalaman($param, $text, $gagal, $msgOk, $msgErr),
+            'font_bps'       => $this->evalFontBps($param, $gagal, $msgOk, $msgErr),
+            'manual'      => ['PERLU DICEK', $msgErr],
             default        => ['TIDAK DIPERIKSA', 'Tipe cek tidak dikenal: ' . $rule->tipe_cek],
         };
     }
@@ -1081,6 +1146,634 @@ class PdfCheckerService
         return [$gagal, "{$err} ({$info}" . ($hilang ? '; tidak ditemukan: ' . implode(', ', array_slice($hilang, 0, 6)) : '') . ')'];
     }
 
+    // ═══════════════════════════════════════════════════════
+    // NOMOR HALAMAN, RUNNING TITLE, DAFTAR ↔ HALAMAN, FONT NAMA BPS
+    // (butuh data tepi/fonts dari browser: PdfExtract tepiHalaman & fontHalaman)
+    // ═══════════════════════════════════════════════════════
+
+    /** Batas jumlah temuan yang dirinci di catatan (sisanya diringkas "dan N lainnya"). */
+    private const MAKS_RINCI = 6;
+    /** Pita atas halaman tempat judul "BAB n" (sama dengan PITA_TEPI di js/pdf-extract.js). */
+    private const PITA_ATAS = 0.12;
+
+    /**
+     * Nomor halaman tercetak & running title tiap halaman (indeks 0-based → info|null), dari teks pita atas/bawah:
+     * nomor = item berisi angka arab / romawi saja yang paling dekat ke tepi halaman dan berada di garis dasar
+     * yang paling sering dipakai nomor halaman di dokumen ini (supaya angka sel tabel di dekat tepi tidak ikut);
+     * running title = teks lain di baris yang sama dengan nomor itu.
+     *
+     * @return array<int, ?array{jenis:string, n:int, teks:string, rt:string, x:float, y:float, sisi:string}>
+     */
+    private function nomorHalaman(): array
+    {
+        if ($this->nomorCache !== null) return $this->nomorCache;
+
+        // 1. kandidat per halaman
+        $kandidat = [];
+        foreach ($this->tepi as $i => $pg) {
+            if (!$pg) continue;
+            $terbaik = null;
+            foreach ($pg['it'] as $it) {
+                $t = $it['t'];
+                if (preg_match('/^\d{1,4}$/', $t)) {
+                    $jenis = 'arab';
+                } elseif (preg_match('/^(?:[ivxlcdm]{1,7}|[IVXLCDM]{1,7})$/', $t) && $this->romawiKeAngka(strtolower($t)) > 0) {
+                    $jenis = 'romawi';
+                } else {
+                    continue;
+                }
+                $atas  = $it['y'] < $pg['h'] / 2;
+                $jarak = $atas ? $it['y'] : $pg['h'] - $it['y'];
+                if (!$terbaik || $jarak < $terbaik['jarak']) {
+                    $terbaik = ['jenis' => $jenis, 'teks' => $t, 'x' => $it['x'], 'y' => $it['y'], 'jarak' => $jarak, 'pita' => $atas ? 'atas' : 'bawah'];
+                }
+            }
+            if ($terbaik) $kandidat[$i] = $terbaik;
+        }
+
+        // 2. garis dasar nomor halaman per jenis (y dibulatkan 4 pt): dipakai banyak halaman (≥ 3 dan ≥ 8% kandidat
+        //    jenis itu). Angka di ujung entri daftar isi/tabel atau sel tabel yang kebetulan dekat tepi tersebar → tersaring.
+        $dasar = [];
+        foreach ($kandidat as $k) {
+            $b = (int) round($k['y'] / 4);
+            $dasar[$k['jenis']][$b] = ($dasar[$k['jenis']][$b] ?? 0) + 1;
+        }
+        $garis = [];
+        foreach ($dasar as $jenis => $hitung) {
+            $min = max(3, array_sum($hitung) * 0.08);
+            $garis[$jenis] = array_flip(array_keys(array_filter($hitung, fn($n) => $n >= $min)));
+        }
+
+        // 3. nomor + running title
+        $hasil = [];
+        foreach ($this->tepi as $i => $pg) {
+            $k = $kandidat[$i] ?? null;
+            $b = $k ? (int) round($k['y'] / 4) : 0;
+            $g = $k ? ($garis[$k['jenis']] ?? []) : [];
+            if (!$k || !(isset($g[$b]) || isset($g[$b - 1]) || isset($g[$b + 1]))) {
+                $hasil[$i] = null;
+                continue;
+            }
+            $sebaris = array_values(array_filter($pg['it'], fn($it) => abs($it['y'] - $k['y']) <= 3
+                && !($it['x'] === $k['x'] && $it['t'] === $k['teks'])));
+            usort($sebaris, fn($a, $b) => $a['x'] <=> $b['x']);
+            $rt = trim(preg_replace([
+                '~(?:https?://)?\S+\.(?:go\.id|bps\.go\.id)\S*~iu', // watermark alamat web
+                '/\s+/u',
+            ], ' ', implode(' ', array_column($sebaris, 't'))));
+            // romawi satu huruf ("BAB V", "Pilar I") di pita bukan nomor halaman
+            if ($k['jenis'] === 'romawi' && mb_strlen($k['teks']) === 1 && preg_match('/\b(?:BAB|CHAPTER|PILAR|BAGIAN)\s*$/iu', $rt)) {
+                $hasil[$i] = null;
+                continue;
+            }
+            $hasil[$i] = [
+                'jenis' => $k['jenis'],
+                'n'     => $k['jenis'] === 'arab' ? (int) $k['teks'] : $this->romawiKeAngka(strtolower($k['teks'])),
+                'teks'  => $k['teks'],
+                'rt'    => preg_match('/\p{L}{3}/u', $rt) ? $rt : '',
+                'x'     => $k['x'],
+                'y'     => $k['y'],
+                'sisi'  => $k['x'] < $pg['w'] * 0.4 ? 'kiri' : ($k['x'] > $pg['w'] * 0.6 ? 'kanan' : 'tengah'),
+            ];
+        }
+        return $this->nomorCache = $hasil;
+    }
+
+    /**
+     * Selisih indeks halaman PDF (1-based) dengan nomor tercetak untuk satu jenis (arab/romawi): nilai yang paling sering.
+     * null bila nomor halaman jenis itu tidak cukup terbaca (< 3 halaman sepakat).
+     */
+    private function selisihHalaman(string $jenis): ?int
+    {
+        $hitung = [];
+        foreach ($this->nomorHalaman() as $i => $nh) {
+            if ($nh && $nh['jenis'] === $jenis) $hitung[$i + 1 - $nh['n']] = ($hitung[$i + 1 - $nh['n']] ?? 0) + 1;
+        }
+        if (!$hitung) return null;
+        arsort($hitung);
+        $selisih = array_key_first($hitung);
+        return $hitung[$selisih] >= 3 ? (int) $selisih : null;
+    }
+
+    /** Nomor tercetak → indeks halaman PDF (0-based), atau null bila tidak bisa dipetakan. */
+    private function indeksDariNomor(string $nomor): ?int
+    {
+        $jenis = ctype_digit($nomor) ? 'arab' : 'romawi';
+        $n = $jenis === 'arab' ? (int) $nomor : $this->romawiKeAngka(strtolower($nomor));
+        $selisih = $this->selisihHalaman($jenis);
+        if ($n < 1 || $selisih === null) return null;
+        $i = $n + $selisih - 1;
+        return $i >= 0 && $i < count($this->pageTexts) ? $i : null;
+    }
+
+    /**
+     * Label halaman untuk catatan: "hal. 18 (PDF 47)". Nomornya menurut urutan yang benar (dari selisih yang paling
+     * sering), bukan yang tercetak, supaya nomor halaman yang salah cetak tidak membingungkan.
+     */
+    private function labelHal(int $i): string
+    {
+        foreach (['arab', 'romawi'] as $jenis) {
+            $s = $this->selisihHalaman($jenis);
+            if ($s === null || $i + 1 - $s < 1) continue;
+            if ($jenis === 'romawi' && ($a = $this->selisihHalaman('arab')) !== null && $i + 1 - $a >= 1) continue;
+            $n = $i + 1 - $s;
+            return 'hal. ' . ($jenis === 'arab' ? $n : $this->angkaKeRomawi($n)) . ' (PDF ' . ($i + 1) . ')';
+        }
+        return 'hal. PDF ' . ($i + 1);
+    }
+
+    private function angkaKeRomawi(int $n): string
+    {
+        $peta = ['m' => 1000, 'cm' => 900, 'd' => 500, 'cd' => 400, 'c' => 100, 'xc' => 90, 'l' => 50, 'xl' => 40, 'x' => 10, 'ix' => 9, 'v' => 5, 'iv' => 4, 'i' => 1];
+        $s = '';
+        foreach ($peta as $r => $v) while ($n >= $v) { $s .= $r; $n -= $v; }
+        return $s;
+    }
+
+    /** Ringkas daftar temuan: maks. MAKS_RINCI dirinci, sisanya "dan N lainnya". */
+    private function rinci(array $temuan): string
+    {
+        $temuan = array_values(array_unique($temuan));
+        $lebih  = count($temuan) - self::MAKS_RINCI;
+        return implode('; ', array_slice($temuan, 0, self::MAKS_RINCI)) . ($lebih > 0 ? "; dan {$lebih} lainnya" : '');
+    }
+
+    /** Kata (huruf/angka, ≥ 3 karakter) dalam huruf besar, untuk membandingkan judul. */
+    private function kataKunci(string $s): array
+    {
+        return array_values(array_unique(array_filter(
+            preg_split('/[^\p{L}\d]+/u', mb_strtoupper($this->bersihkanGanda($s))),
+            fn($w) => mb_strlen($w) >= 3 && !in_array($w, ['DAN', 'YANG', 'THE', 'AND', 'FOR', 'DARI', 'BAB'], true)
+        )));
+    }
+
+    /** Porsi kata $a yang ada di $b (0–1); $a kosong → 0. */
+    private function porsiKata(array $a, array $b): float
+    {
+        if (!$a) return 0.0;
+        $b = array_flip($b);
+        return count(array_filter($a, fn($w) => isset($b[$w]))) / count($a);
+    }
+
+    /** nomor_halaman: nomor halaman romawi & arab berurutan, tanpa loncat atau ganda. */
+    private function evalNomorHalaman(string $gagal, string $ok, string $err): array
+    {
+        if (!$this->tepi) return ['TIDAK DIPERIKSA', 'Data nomor halaman tidak tersedia (periksa ulang dengan halaman yang sudah dimuat ulang)'];
+        $nh = array_filter($this->nomorHalaman());
+        if (!$nh) return ['TIDAK DIPERIKSA', 'Nomor halaman tidak terbaca (mungkin berupa gambar/kurva), cek manual'];
+
+        $temuan = [];
+        $ringkas = [];
+        foreach (['romawi', 'arab'] as $jenis) {
+            $selisih = $this->selisihHalaman($jenis);
+            $hal = array_filter($nh, fn($x) => $x['jenis'] === $jenis);
+            if ($selisih === null || !$hal) continue;
+            $nomor = array_column($hal, 'n');
+            $ringkas[] = $jenis === 'arab' ? 'arab ' . min($nomor) . '–' . max($nomor) : 'romawi ' . $this->angkaKeRomawi(min($nomor)) . '–' . $this->angkaKeRomawi(max($nomor));
+            foreach ($hal as $i => $x) {
+                $harap = $i + 1 - $selisih;
+                if ($x['n'] === $harap) continue;
+                $seharusnya = $jenis === 'arab' ? (string) $harap : $this->angkaKeRomawi(max(1, $harap));
+                $temuan[] = 'hal. PDF ' . ($i + 1) . " tertulis {$x['teks']} (seharusnya {$seharusnya})";
+                if (count($this->lokasi) < self::MAX_LOKASI) $this->lokasi[] = ['hal' => $i + 1, 'teks' => mb_substr(trim($x['rt'] . ' ' . $x['teks']), 0, 80)];
+            }
+        }
+        if (!$ringkas) return ['TIDAK DIPERIKSA', 'Nomor halaman tidak cukup terbaca untuk dicek urutannya'];
+        if (!$temuan) return ['OK', "{$ok} (" . implode(', ', $ringkas) . ')'];
+        return [$gagal, "{$err}: " . $this->rinci($temuan)];
+    }
+
+    /**
+     * running_title (cek: arab | romawi | ganjil | genap):
+     *   arab   — halaman bernomor arab (isi s.d. penutup) memakai running title;
+     *   romawi — halaman bernomor romawi tidak memakai running title;
+     *   ganjil — running title halaman ganjil berisi judul bab;
+     *   genap  — running title halaman genap berisi judul buku.
+     */
+    private function evalRunningTitle(array $p, string $gagal, string $ok, string $err): array
+    {
+        if (!$this->tepi) return ['TIDAK DIPERIKSA', 'Data header/footer tidak tersedia (periksa ulang dengan halaman yang sudah dimuat ulang)'];
+        $nh  = $this->nomorHalaman();
+        $cek = $p['cek'] ?? 'arab';
+        $temuan = [];
+        $lokasi = function (int $i, string $teks) {
+            if (count($this->lokasi) < self::MAX_LOKASI) $this->lokasi[] = ['hal' => $i + 1, 'teks' => mb_substr($teks, 0, 80)];
+        };
+
+        if ($cek === 'romawi') {
+            $romawi = array_filter($nh, fn($x) => $x && $x['jenis'] === 'romawi');
+            if (!$romawi) return ['TIDAK DIPERIKSA', 'Halaman bernomor romawi tidak terbaca'];
+            foreach ($romawi as $i => $x) {
+                if ($x['rt'] === '') continue;
+                $temuan[] = "hal. {$x['teks']} (PDF " . ($i + 1) . "): \"" . mb_strimwidth($x['rt'], 0, 50, '…') . '"';
+                $lokasi($i, $x['rt']);
+            }
+            return $temuan ? [$gagal, "{$err}: " . $this->rinci($temuan)] : ['OK', "{$ok} (" . count($romawi) . ' halaman romawi)'];
+        }
+
+        $arab = array_filter($nh, fn($x) => $x && $x['jenis'] === 'arab');
+        if (count($arab) < 3) return ['TIDAK DIPERIKSA', 'Halaman bernomor arab tidak cukup terbaca, cek manual'];
+
+        if ($cek === 'arab') {
+            [$awal, $akhir] = [min(array_keys($arab)), max(array_keys($arab))];
+            for ($i = $awal; $i <= $akhir; $i++) {
+                $pg = $this->tepi[$i] ?? null;
+                // halaman landscape (tabel diputar), kosong, atau berupa gambar (pembatas bab) dilewati
+                if (!$pg || $pg['w'] > $pg['h'] || mb_strlen(trim($this->pageTexts[$i] ?? '')) < 150) continue;
+                if (!empty($nh[$i]['rt'])) continue;
+                $temuan[] = ($nh[$i] ? $this->labelHal($i) : 'hal. PDF ' . ($i + 1) . ' (nomor halaman juga tidak terbaca)');
+                $lokasi($i, '');
+            }
+            return $temuan ? [$gagal, "{$err}: tanpa running title di " . $this->rinci($temuan)]
+                           : ['OK', "{$ok} (" . count($arab) . ' halaman arab)'];
+        }
+
+        // ganjil (judul bab) / genap (judul buku): running title yang sama dikelompokkan
+        $mauGanjil = $cek === 'ganjil';
+        $judulBuku = $this->kataKunci(preg_replace('/(?:Katalog|Catalogue|IS[SB]N)[^\n]*|https?:\/\/\S+|\S+\.go\.id\S*/iu', ' ', $this->coverText));
+        $bab = $mauGanjil ? $this->judulBab() : [];
+        if ($mauGanjil && !$bab) return ['TIDAK DIPERIKSA', 'Judul bab tidak terbaca dari Daftar Isi, cek manual'];
+        $babTerakhir = $this->babMulai() ? max($this->babMulai()) : PHP_INT_MAX; // halaman awal bab terakhir
+        if (!$mauGanjil && count($judulBuku) < 2) return ['TIDAK DIPERIKSA', 'Judul buku di kover tidak terbaca (mungkin gambar)'];
+
+        $salah = []; // rt → [indeks halaman]
+        $diperiksa = 0;
+        foreach ($arab as $i => $x) {
+            if ($x['rt'] === '' || ($x['n'] % 2 === 1) !== $mauGanjil) continue;
+            $diperiksa++;
+            $rujukan = $mauGanjil ? $this->babUntuk($bab, $i) : ['judul' => '', 'kata' => $judulBuku];
+            if (!$rujukan) continue;
+            if ($this->porsiKata($this->kataKunci($x['rt']), $rujukan['kata']) >= 0.7) continue;
+            // bagian penutup yang judulnya tidak terbaca sebagai awal bagian (mis. salah ketik di judul halamannya):
+            // running title "DAFTAR PUSTAKA"/"LAMPIRAN" sesudah bab terakhir diterima
+            if ($mauGanjil && $i > $babTerakhir
+                && array_filter(self::JUDUL_BELAKANG, fn($pola) => preg_match($pola, $x['rt']))) continue;
+            $salah[$x['rt'] . ($mauGanjil ? ' ⟂ ' . $rujukan['judul'] : '')][] = $i;
+        }
+        if (!$diperiksa) return ['TIDAK DIPERIKSA', 'Running title halaman ' . ($mauGanjil ? 'ganjil' : 'genap') . ' tidak terbaca'];
+        foreach ($salah as $kunci => $hal) {
+            [$rt, $judul] = array_pad(explode(' ⟂ ', $kunci, 2), 2, '');
+            $temuan[] = '"' . mb_strimwidth($rt, 0, 45, '…') . '"' . ($judul ? ' (bab: "' . mb_strimwidth($judul, 0, 40, '…') . '")' : '')
+                . ' di ' . implode(', ', array_map(fn($i) => $this->labelHal($i), array_slice($hal, 0, 3))) . (count($hal) > 3 ? ' +' . (count($hal) - 3) : '');
+            $lokasi($hal[0], $rt);
+        }
+        return $temuan ? [$gagal, "{$err}: " . $this->rinci($temuan)] : ['OK', "{$ok} ({$diperiksa} halaman " . ($mauGanjil ? 'ganjil' : 'genap') . ')'];
+    }
+
+    /**
+     * Halaman awal bab: [nomor bab => indeks halaman], dari judul "BAB n" di pita atas halaman (data tepi), atau
+     * awalBab() (baris atas teks halaman) bila data tepi tidak memuatnya.
+     */
+    private function babMulai(): array
+    {
+        $hasil = [];
+        foreach ($this->tepi as $i => $pg) {
+            if (!$pg) continue;
+            $baris = [];
+            foreach ($pg['it'] as $it) if ($it['y'] < $pg['h'] * self::PITA_ATAS) $baris[(int) round($it['y'] / 3)][] = $it;
+            foreach ($baris as $b) {
+                usort($b, fn($a, $c) => $a['x'] <=> $c['x']);
+                if (!preg_match('/^(?:BAB|CHAPTER)\s+(\d{1,2}|[IVXLC]{1,6})$/u', trim(implode(' ', array_column($b, 't'))), $m)) continue;
+                $n = ctype_digit($m[1]) ? (int) $m[1] : $this->romawiKeAngka(strtolower($m[1]));
+                if ($n > 0) $hasil[$n] ??= $i;
+            }
+        }
+        if (!$hasil) foreach ($this->awalBab() as $b) $hasil[$b['nomor']] ??= $b['hal'] - 1;
+        ksort($hasil);
+        return $hasil;
+    }
+
+    /**
+     * Bagian buku untuk running title halaman ganjil, menurut letaknya di dokumen (bukan nomor di Daftar Isi, yang
+     * bisa salah): tiap bab (judul dari entri Daftar Isi "BAB n …", atau baris setelah "BAB n" di halamannya) dan
+     * bagian penutup (Daftar Pustaka, Glosarium, Indeks, Lampiran).
+     * @return array<int, array{idx:int, judul:string, kata:array}> urut indeks halaman
+     */
+    private function judulBab(): array
+    {
+        $judulToc = [];
+        if ($r = $this->halamanKhusus('daftar_isi')) {
+            foreach ($this->entriDaftar(implode("\n", array_slice($this->pageTexts, $r[0], $r[1]))) as $e) {
+                if (!preg_match('/^(?:BAB|CHAPTER)\s+(\d{1,2}|[IVXLC]{1,6})\b[\s.:]*(.+)$/iu', $e['judul'], $m)) continue;
+                $judulToc[ctype_digit($m[1]) ? (int) $m[1] : $this->romawiKeAngka(strtolower($m[1]))] = trim($m[2]);
+            }
+        }
+        $bagian = [];
+        foreach ($this->babMulai() as $no => $i) {
+            $judul = $judulToc[$no] ?? '';
+            if ($judul === '') {
+                // baris setelah "BAB n" di halaman awal bab
+                $baris = array_values(array_filter(array_map('trim', preg_split('/\R/u', $this->pageTexts[$i] ?? ''))));
+                foreach ($baris as $k => $l) {
+                    if (preg_match('/^(?:BAB|CHAPTER)\s+(?:\d{1,2}|[IVXLC]{1,6})$/u', $l) && isset($baris[$k + 1])) { $judul = $baris[$k + 1]; break; }
+                }
+            }
+            if ($judul !== '') $bagian[] = ['idx' => $i, 'judul' => $judul, 'kata' => $this->kataKunci($judul)];
+        }
+        foreach (['daftar_pustaka', 'glosarium', 'indeks', 'lampiran'] as $nama) {
+            if ($r = $this->halamanKhusus($nama)) {
+                $bagian[] = ['idx' => $r[0], 'judul' => self::HALAMAN_KHUSUS[$nama], 'kata' => $this->kataKunci(self::HALAMAN_KHUSUS[$nama])];
+            }
+        }
+        usort($bagian, fn($a, $b) => $a['idx'] <=> $b['idx']);
+        return $bagian;
+    }
+
+    /** Bagian buku yang memuat halaman berindeks $i. */
+    private function babUntuk(array $bab, int $i): ?array
+    {
+        $kini = null;
+        foreach ($bab as $b) if ($b['idx'] <= $i) $kini = $b;
+        return $kini;
+    }
+
+    /**
+     * Entri daftar (isi/tabel/gambar): baris "Judul …… 12" atau "Judul ……" lalu baris "12". Baris tanpa nomor
+     * sebelum entri (judul yang terpotong ke baris berikutnya, "BAB I" di atas judul bab) digabung ke judul entri.
+     * @return array<int, array{judul:string, nomor:string, jenis:string}>
+     */
+    private function entriDaftar(string $teks): array
+    {
+        $entri = [];
+        $buf = [];
+        $pengarah = '(?:(?:\.\s?){3,}|…{2,}|·{3,}|_{3,})';
+        foreach (preg_split('/\R/u', $teks) as $baris) {
+            $l = trim(preg_replace('/\s+/u', ' ', $this->bersihkanGanda($baris)));
+            if ($l === '') continue;
+            if (preg_match('/^(?:DAFTAR\s+(?:ISI|TABEL|GAMBAR|LAMPIRAN)|(?:TABLE\s+OF\s+)?CONTENTS|LIST\s+OF\s+(?:TABLES|FIGURES|APPENDI\w+)|ISSN\b|Halaman|Page)\b/iu', $l)
+                && !preg_match('/' . $pengarah . '\s*(?:[ivxlcdm]{1,7}|\d{1,4})$/iu', $l)) {
+                $buf = [];
+                continue;
+            }
+            if (preg_match('/^(.*?)\s*' . $pengarah . '\s*([ivxlcdm]{1,7}|\d{1,4})$/iu', $l, $m)) {
+                // baris yang diawali "BAB n" / "3.1" adalah entri utuh: baris tanpa nomor sebelumnya bukan judulnya
+                $awalEntri = preg_match('/^(?:BAB|CHAPTER)\s+(?:\d{1,2}|[IVXLC]{1,6})\b|^\d+(?:\.\d+)+\s/u', $l);
+                $judul = trim(($awalEntri ? '' : implode(' ', $buf)) . ' ' . $m[1]);
+                $nomor = $m[2];
+            } elseif ($buf && preg_match('/^' . $pengarah . '?\s*([ivxlcdm]{1,7}|\d{1,4})$/iu', $l, $m) && preg_match('/' . $pengarah . '\s*$/u', end($buf))) {
+                $judul = implode(' ', $buf);
+                $nomor = $m[1];
+            } else {
+                // baris awal entri ("BAB III", "3.1 …") memulai entri baru: baris sebelumnya (mis. kepala halaman
+                // lanjutan daftar isi berisi judul buku) bukan bagian judulnya
+                if (preg_match('/^(?:BAB|CHAPTER)\s+(?:\d{1,2}|[IVXLC]{1,6})\b|^\d+(?:\.\d+)+\s/u', $l)) $buf = [];
+                $buf[] = $l;
+                if (count($buf) > 3) array_shift($buf);
+                continue;
+            }
+            $buf = [];
+            $judul = trim(preg_replace('/[\s.…·_]+$/u', '', $judul));
+            if (mb_strlen($judul) < 2) continue;
+            $entri[] = ['judul' => $judul, 'nomor' => $nomor, 'jenis' => ctype_digit($nomor) ? 'arab' : 'romawi'];
+        }
+        return $entri;
+    }
+
+    /**
+     * Entri Daftar Tabel/Gambar per blok: blok dimulai baris "Tabel 2.1 …" / "2.1 …" dan berakhir sebelum entri berikutnya.
+     * Nomor halaman = angka setelah pengarah titik, atau angka di baris sendiri di akhir blok (bukan tahun 19xx/20xx).
+     * @return array<int, array{nomor_item:string, judul:string, nomor:?string}> nomor null = nomor halaman tidak dicantumkan
+     */
+    private function entriDaftarBernomor(string $teks, string $jenis): array
+    {
+        $kata = $jenis === 'tabel' ? 'Tabel|Table' : 'Gambar|Figure|Grafik';
+        $blok = [];
+        foreach (preg_split('/\R/u', $teks) as $baris) {
+            $l = trim(preg_replace('/\s+/u', ' ', $this->bersihkanGanda($baris)));
+            if ($l === '' || preg_match('/^(?:DAFTAR\s+(?:TABEL|GAMBAR)|LIST\s+OF\s+(?:TABLES|FIGURES)|Halaman|Page)\b/iu', $l)) continue;
+            if (preg_match('/^(?:(?:' . $kata . ')\s+)?(\d+(?:\.\d+)+|(?:' . $kata . ')\s+\d+)(?![\d]|\.\d)\.?\s*(.*)$/iu', $l, $m)) {
+                $no = preg_replace('/^\D+/', '', $m[1]);
+                $blok[] = ['nomor_item' => $no, 'baris' => $m[2] !== '' ? [$m[2]] : []];
+            } elseif ($blok) {
+                $blok[array_key_last($blok)]['baris'][] = $l;
+            }
+        }
+        $hasil = [];
+        foreach ($blok as $b) {
+            $baris = $b['baris'];
+            $nomor = null;
+            $akhir = end($baris) ?: '';
+            if (preg_match('/^(?:(?:\.\s?){3,}|…{2,})?\s*(\d{1,4}|[ivxlcdm]{1,7})$/iu', $akhir, $m) && !preg_match('/^(?:19|20)\d{2}$/', $m[1])) {
+                $nomor = $m[1];
+                array_pop($baris);
+            } elseif (preg_match('/(?:(?:\.\s?){3,}|…{2,})\s*(\d{1,4}|[ivxlcdm]{1,7})$/iu', $akhir, $m)) {
+                $nomor = $m[1];
+            }
+            $judul = trim(preg_replace(['/(?:(?:\.\s?){3,}|…{2,})\s*(?:\d{1,4}|[ivxlcdm]{1,7})?$/iu', '/\s+/u'], ['', ' '], implode(' ', $baris)));
+            $hasil[] = ['nomor_item' => $b['nomor_item'], 'judul' => $judul, 'nomor' => $nomor];
+        }
+        return $hasil;
+    }
+
+    /** Teks halaman tanpa baris running title (judul bab di running title halaman lain tidak boleh dianggap judul). */
+    private function teksIsi(int $i): string
+    {
+        $t  = $this->pageTexts[$i] ?? '';
+        $nh = $this->nomorHalaman()[$i] ?? null;
+        if (!$nh || $nh['rt'] === '' || mb_substr_count($t, $nh['rt']) < 2) return $t;
+        // hanya satu kemunculan yang dibuang (footer: yang terakhir, header: yang pertama) — judul halaman
+        // yang kebetulan sama dengan running title-nya (mis. "DAFTAR PUSTAKA") tetap ada
+        $diBawah = $nh['y'] > ($this->tepi[$i]['h'] ?? $this->pageH) / 2;
+        $pos = $diBawah ? mb_strrpos($t, $nh['rt']) : mb_strpos($t, $nh['rt']);
+        return $pos === false ? $t : mb_substr($t, 0, $pos) . ' ' . mb_substr($t, $pos + mb_strlen($nh['rt']));
+    }
+
+    /** Judul (dan nomor bab/subbab-nya, bila ada) tercantum di halaman $i. */
+    private function memuatJudul(int $i, string $judul): bool
+    {
+        $isi = $this->teksIsi($i);
+        $padat = fn($s) => preg_replace('/[^\p{L}\d]+/u', '', mb_strtoupper($this->bersihkanGanda($s)));
+        if (mb_strlen($padat($judul)) >= 6 && str_contains($padat($isi), $padat($judul))) return true;
+        if (preg_match('/^((?:\d+\.)+\d+|\d+)\s/u', $judul, $no) && !preg_match('/(?<![\d.])' . preg_quote($no[1], '/') . '(?![\d])/u', $isi)) return false;
+        $kata = array_slice($this->kataKunci($judul), 0, 8);
+        return count($kata) >= 1 && $this->porsiKata($kata, $this->kataKunci($isi)) >= 0.85;
+    }
+
+    /** Judul tabel/gambar bernomor $nomor di halaman $i ("Tabel 2.1 …" + 2 baris berikutnya), atau null. */
+    private function captionDi(int $i, string $jenis, string $nomor): ?string
+    {
+        $kata = $jenis === 'tabel' ? 'Tabel|Table' : 'Gambar|Figure|Grafik';
+        $baris = array_values(array_filter(array_map('trim', preg_split('/\R/u', $this->teksIsi($i)))));
+        foreach ($baris as $k => $l) {
+            if (preg_match('/^(?:' . $kata . ')\s+' . preg_quote($nomor, '/') . '(?![\d]|\.\d)\.?\s*(.*)$/u', $l, $m)
+                && !preg_match('/(?:\.\s?){4,}/u', $l)) {
+                return trim($m[1] . ' ' . ($baris[$k + 1] ?? '') . ' ' . ($baris[$k + 2] ?? ''));
+            }
+        }
+        return null;
+    }
+
+    /**
+     * daftar_halaman (daftar: isi | tabel | gambar): setiap entri daftar ada di halaman yang disebutnya.
+     * Tabel/gambar juga: judulnya sama dengan judul di halaman isi, dan tabel/gambar di isi tercantum di daftarnya.
+     * Entri yang tidak ditemukan di mana pun (mis. halaman berupa gambar) → PERLU DICEK, bukan langsung tidak sesuai.
+     */
+    private function evalDaftarHalaman(array $p, string $text, string $gagal, string $ok, string $err): array
+    {
+        if (!$this->tepi) return ['TIDAK DIPERIKSA', 'Data nomor halaman tidak tersedia (periksa ulang dengan halaman yang sudah dimuat ulang)'];
+        $jenis = in_array($p['daftar'] ?? 'isi', ['isi', 'tabel', 'gambar'], true) ? $p['daftar'] : 'isi';
+        $entri = $jenis === 'isi' ? $this->entriDaftar($text) : $this->entriDaftarBernomor($text, $jenis);
+        if (count($entri) < 2) return ['TIDAK DIPERIKSA', 'Entri daftar tidak terbaca, cek manual'];
+        if ($this->selisihHalaman('arab') === null) return ['TIDAK DIPERIKSA', 'Nomor halaman isi tidak terbaca, tidak bisa dicocokkan'];
+
+        // halaman daftar (isi/tabel/gambar/lampiran) tidak ikut dicari
+        $lewati = [];
+        foreach (['daftar_isi', 'daftar_tabel', 'daftar_gambar', 'daftar_lampiran'] as $d) {
+            if ($r = $this->halamanKhusus($d)) $lewati += array_fill_keys(range($r[0], $r[0] + $r[1] - 1), true);
+        }
+        $n = count($this->pageTexts);
+        $temuan = [];
+        $hilang = [];
+        $cocok = 0;
+        $nomorDaftar = [];
+        $kataItem = $jenis === 'tabel' ? 'Tabel' : 'Gambar';
+        // indeks judul tabel/gambar di isi (nomor → halaman pertama), dibuat sekali: publikasi tebal ("Dalam Angka"
+        // ±900 halaman, ratusan tabel) kehabisan waktu bila tiap entri memindai ulang semua halaman
+        $indeks = [];
+        if ($jenis !== 'isi') {
+            $pola = $jenis === 'tabel' ? 'Tabel|Table' : 'Gambar|Figure|Grafik';
+            $mulai = $lewati ? max(array_keys($lewati)) + 1 : 1;
+            for ($j = $mulai; $j < $n; $j++) {
+                if (!preg_match_all('/^\s*(?:' . $pola . ')\s+(\d+(?:\.\d+)*)(?![\d]|\.\d)\.?\s+[\p{Lu}\d]/mu', $this->teksIsi($j), $mm)) continue;
+                foreach ($mm[1] as $no) $indeks[$no] ??= $j;
+            }
+        }
+        // awal bab yang dikenali ("BAB n" di bagian atas halaman): nomor bab → indeks halaman
+        $awalBab = $this->babMulai();
+
+        foreach ($entri as $e) {
+            if ($jenis !== 'isi') {
+                $nomorDaftar[$e['nomor_item']] = true;
+                if ($e['nomor'] === null) {
+                    $temuan[] = "{$kataItem} {$e['nomor_item']}: nomor halaman tidak dicantumkan di daftar";
+                    continue;
+                }
+            }
+            $i = $this->indeksDariNomor($e['nomor']);
+            if ($i === null) continue; // nomor romawi tanpa nomor romawi terbaca, dsb.
+            $label = mb_strimwidth($e['judul'], 0, 45, '…');
+
+            if ($jenis === 'isi') {
+                // entri bab: dicocokkan dengan halaman awal bab ("BAB n" di bagian atas halaman)
+                if (preg_match('/^(?:BAB|CHAPTER)\s+(\d{1,2}|[IVXLC]{1,6})\b/iu', $e['judul'], $bm)) {
+                    $nb = ctype_digit($bm[1]) ? (int) $bm[1] : $this->romawiKeAngka(strtolower($bm[1]));
+                    if (isset($awalBab[$nb])) {
+                        if ($awalBab[$nb] === $i) { $cocok++; continue; }
+                        $temuan[] = "\"{$label}\" tertulis hal. {$e['nomor']}, ada di " . $this->labelHal($awalBab[$nb]);
+                        if (count($this->lokasi) < self::MAX_LOKASI) $this->lokasi[] = ['hal' => $awalBab[$nb] + 1, 'teks' => $bm[0]];
+                        continue;
+                    }
+                }
+                if ($this->memuatJudul($i, $e['judul'])) { $cocok++; continue; }
+                $alt = null;
+                foreach ([1, -1, 2, -2, 3, -3, 4, -4] as $d) {
+                    $j = $i + $d;
+                    if ($j > 0 && $j < $n && !isset($lewati[$j]) && $this->memuatJudul($j, $e['judul'])) { $alt = $j; break; }
+                }
+                if ($alt !== null) {
+                    $temuan[] = "\"{$label}\" tertulis hal. {$e['nomor']}, ada di " . $this->labelHal($alt);
+                    if (count($this->lokasi) < self::MAX_LOKASI) $this->lokasi[] = ['hal' => $alt + 1, 'teks' => mb_substr($e['judul'], 0, 80)];
+                } else {
+                    $hilang[] = "\"{$label}\" tidak ditemukan di hal. {$e['nomor']}";
+                }
+                continue;
+            }
+
+            // tabel / gambar
+            [$nomor, $judul, $kata] = [$e['nomor_item'], $e['judul'], $kataItem];
+            $cap = $this->captionDi($i, $jenis, $nomor);
+            if ($cap === null) {
+                $ada = $indeks[$nomor] ?? null; // satu indeks untuk seluruh isi (lihat di atas), bukan pindai ulang per entri
+                if ($ada !== null && $ada !== $i) {
+                    $temuan[] = "{$kata} {$nomor} tertulis hal. {$e['nomor']}, ada di " . $this->labelHal($ada);
+                    if (count($this->lokasi) < self::MAX_LOKASI) $this->lokasi[] = ['hal' => $ada + 1, 'teks' => "{$kata} {$nomor}"];
+                } else {
+                    $hilang[] = "{$kata} {$nomor} tidak ditemukan di isi";
+                }
+                continue;
+            }
+            if ($this->porsiKata(array_slice($this->kataKunci($judul), 0, 10), $this->kataKunci($cap)) < 0.75) {
+                $temuan[] = "judul {$kata} {$nomor} beda: daftar \"" . mb_strimwidth($judul, 0, 40, '…') . '", isi "' . mb_strimwidth($cap, 0, 40, '…') . '"';
+                if (count($this->lokasi) < self::MAX_LOKASI) $this->lokasi[] = ['hal' => $i + 1, 'teks' => "{$kata} {$nomor}"];
+                continue;
+            }
+            $cocok++;
+        }
+
+        // tabel/gambar di isi yang tidak tercantum di daftarnya
+        if ($jenis !== 'isi' && $nomorDaftar) {
+            foreach ($indeks as $nomor => $j) {
+                if (!isset($nomorDaftar[$nomor])) $temuan[] = "{$kataItem} {$nomor} di " . $this->labelHal($j) . ' tidak ada di daftar';
+            }
+        }
+
+        if (!$temuan && !$hilang) return ['OK', "{$ok} ({$cocok} entri cocok)"];
+        if (!$temuan) return ['PERLU DICEK', 'Sebagian entri tidak ditemukan otomatis (judul mungkin berupa gambar / terbaca beda): ' . $this->rinci($hilang)];
+        return [$gagal, "{$err}: " . $this->rinci(array_merge($temuan, $hilang))];
+    }
+
+    /**
+     * font_bps (halaman: kover | judul | belakang): nama BPS penerbit ("BADAN PUSAT STATISTIK" + baris wilayahnya)
+     * ditulis Arial Bold Italic, huruf kapital semua.
+     */
+    private function evalFontBps(array $p, string $gagal, string $ok, string $err): array
+    {
+        if (!$this->fontHal) return ['TIDAK DIPERIKSA', 'Data huruf tidak tersedia (periksa ulang dengan halaman yang sudah dimuat ulang)'];
+        $namaBps = '/BADAN\s+PUSAT\s+STATISTIK|BPS\s*[-–]?\s*STATISTICS/iu';
+        $hal = match ($p['halaman'] ?? 'kover') {
+            'belakang' => count($this->pageTexts),
+            'judul'    => (function () use ($namaBps) {
+                // halaman judul utama: halaman 2–5 pertama (bukan katalog) yang memuat nama BPS sebagai teks
+                $katalog = ($this->halamanKhusus('katalog')[0] ?? -1) + 1;
+                foreach ($this->fontHal as $h => $its) {
+                    if ($h >= 2 && $h <= 5 && $h !== $katalog && preg_match($namaBps, implode(' ', array_column($its, 't')))) return $h;
+                }
+                return null;
+            })(),
+            default    => 1,
+        };
+        $label = ['kover' => 'kover depan', 'judul' => 'halaman judul utama', 'belakang' => 'kover belakang'][$p['halaman'] ?? 'kover'] ?? 'halaman';
+        if (!$hal || empty($this->fontHal[$hal])) return ['TIDAK DIPERIKSA', "Nama BPS penerbit di {$label} tidak terbaca sebagai teks (mungkin gambar/kurva), cek manual"];
+
+        // kelompokkan per baris (y), cari baris nama BPS + baris wilayah tepat di bawahnya (≤ 2 baris, ≤ 40 pt)
+        $its = $this->fontHal[$hal];
+        usort($its, fn($a, $b) => [$a['y'], $a['x']] <=> [$b['y'], $b['x']]);
+        $baris = [];
+        foreach ($its as $it) {
+            $k = array_key_last($baris);
+            if ($k !== null && abs($baris[$k][0]['y'] - $it['y']) <= 2) $baris[$k][] = $it; else $baris[] = [$it];
+        }
+        $pilih = [];
+        foreach ($baris as $k => $b) {
+            if (!preg_match($namaBps, implode(' ', array_column($b, 't')))) continue;
+            $pilih = array_merge($pilih, $b);
+            for ($d = 1; $d <= 2 && isset($baris[$k + $d]); $d++) {
+                $bawah = $baris[$k + $d];
+                if ($bawah[0]['y'] - $b[0]['y'] > 40 * $d) break;
+                if (preg_match('/\b(?:PROVINSI|KABUPATEN|KOTA|PROVINCE|REGENCY|MUNICIPALITY)\b/iu', implode(' ', array_column($bawah, 't')))) $pilih = array_merge($pilih, $bawah);
+            }
+            break;
+        }
+        if (!$pilih) return ['TIDAK DIPERIKSA', "Nama BPS penerbit di {$label} tidak terbaca sebagai teks (mungkin gambar/kurva), cek manual"];
+
+        $teks = trim(implode(' ', array_column($pilih, 't')));
+        $this->lokasi[] = ['hal' => $hal, 'teks' => mb_substr($pilih[0]['t'], 0, 80)];
+        $fontSalah = [];
+        $kecil = [];
+        foreach ($pilih as $it) {
+            $f = mb_strtolower(preg_replace('/^[A-Z]{6}\+/', '', $it['f']));
+            if ($f === '' || !(str_contains($f, 'arial') && str_contains($f, 'bold') && (str_contains($f, 'italic') || str_contains($f, 'oblique')))) {
+                $fontSalah[preg_replace('/^[A-Z]{6}\+/', '', $it['f']) ?: '(tidak diketahui)'][] = $it['t'];
+            }
+            if (mb_strtoupper($it['t']) !== $it['t']) $kecil[] = $it['t'];
+        }
+        $temuan = [];
+        foreach ($fontSalah as $f => $t) $temuan[] = "huruf {$f} pada \"" . mb_strimwidth(implode(' ', $t), 0, 40, '…') . '"';
+        if ($kecil) $temuan[] = 'belum kapital semua: "' . mb_strimwidth(implode(' ', $kecil), 0, 50, '…') . '"';
+        $contoh = mb_strimwidth($teks, 0, 50, '…');
+        return $temuan ? [$gagal, "{$err} di {$label}: " . implode('; ', $temuan)] : ['OK', "{$ok} (\"{$contoh}\")"];
+    }
+
     /** Tanggal rilis publikasi (Y-m-d) dari API BPS — dipakai cek bulan penandatanganan. */
     public function setTanggalRilis(?string $tanggal): void
     {
@@ -1088,10 +1781,14 @@ class PdfCheckerService
         $this->tanggalRilis = $ts ? date('Y-m-d', $ts) : null;
     }
 
-    /** Isian publikasi dari Web API BPS: ['issn' => ..., 'katalog' => ..., 'nomor_publikasi' => ...]; null = tidak ada. */
-    public function setDataApi(?array $data): void
+    /**
+     * Isian publikasi pembanding: ['issn' => ..., 'katalog' => ..., 'nomor_publikasi' => ...]; null = tidak ada.
+     * $sumber: asal data, ditulis di catatan hasil cek (Web API BPS untuk Import API, SIPOTRET untuk draf PJK).
+     */
+    public function setDataApi(?array $data, string $sumber = 'Web API BPS'): void
     {
-        $this->dataApi = $data;
+        $this->dataApi   = $data;
+        $this->sumberApi = $sumber;
     }
 
     /** Label & pola nilai per isian yang dibandingkan dengan Web API (nilai = grup 1). */
@@ -1119,16 +1816,20 @@ class PdfCheckerService
         $isian = self::ISIAN_API[$p['isian'] ?? ''] ?? null;
         if (!$isian) return ['TIDAK DIPERIKSA', 'Parameter isian harus issn, katalog, atau nomor_publikasi'];
         if ($this->dataApi === null) {
-            return ['TIDAK DIPERIKSA', 'Data Web API BPS tidak tersedia (hanya untuk pemeriksaan lewat Import API BPS)'];
+            return ['TIDAK DIPERIKSA', 'Data pembanding tidak tersedia (hanya untuk pemeriksaan lewat Import API BPS atau draf SIPOTRET)'];
         }
+        $sumber  = $this->sumberApi;
+        $singkat = $sumber === 'Web API BPS' ? 'Web API' : $sumber;
+        // pesan kriteria ditulis untuk Web API BPS; untuk draf SIPOTRET sumbernya disesuaikan
+        [$ok, $err] = array_map(fn($m) => str_replace(['Web API BPS', 'Web API'], [$sumber, $singkat], $m), [$ok, $err]);
         $api = trim((string) ($this->dataApi[$p['isian']] ?? ''));
         if ($api === '' || $api === '-') {
-            return ['TIDAK DIPERIKSA', "{$isian['label']} tidak tercantum di Web API BPS"];
+            return ['TIDAK DIPERIKSA', "{$isian['label']} tidak tercantum di {$sumber}"];
         }
         $norm = fn(string $v) => strtoupper(preg_replace('/[^0-9A-Za-z]/', '', $v));
 
         if (!preg_match_all($isian['pola'], $text, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
-            return ['PERLU DICEK', "{$isian['label']} tidak ditemukan di halaman depan (Web API: {$api}), cek manual"];
+            return ['PERLU DICEK', "{$isian['label']} tidak ditemukan di halaman depan ({$singkat}: {$api}), cek manual"];
         }
         $beda = [];
         foreach ($m as $x) {
@@ -1139,7 +1840,43 @@ class PdfCheckerService
         $n = count($m);
         if (!$beda) return ['OK', "{$ok} ({$api}, {$n} kali ditemukan)"];
         $beda = array_values(array_unique($beda));
-        return [$gagal, sprintf('%s (Web API: %s; di publikasi: %s)', $err, $api, implode(', ', array_slice($beda, 0, 4)))];
+        return [$gagal, sprintf('%s (%s: %s; di publikasi: %s)', $err, $singkat, $api, implode(', ', array_slice($beda, 0, 4)))];
+    }
+
+    /**
+     * rata_angka: angka dalam tabel rata kanan & blok angkanya di tengah kolom. Diukur di browser dari posisi teks
+     * (PdfExtract ukurTabel), memakai baris nomor kolom "(1) (2) …" sebagai pusat kolom. Halaman hasil OCR tidak diukur.
+     */
+    private function evalRataAngka(string $gagal, string $ok, string $err): array
+    {
+        if ($this->tabelAngka === null) {
+            return ['TIDAK DIPERIKSA', 'Posisi angka tabel hanya diukur saat PDF dibaca di browser, cek manual'];
+        }
+        if (!$this->tabelAngka) {
+            return ['TIDAK DIPERIKSA', 'Tidak ada tabel dengan baris nomor kolom (1), (2), … yang terbaca di lapisan teks PDF, cek manual'];
+        }
+
+        $kolom = count($this->tabelAngka);
+        $hal   = count(array_unique(array_column($this->tabelAngka, 'hal')));
+        $salah = array_values(array_filter($this->tabelAngka, fn($t) => $t['rata'] !== 'kanan' || !$t['tengah']));
+        if (!$salah) {
+            return ['OK', "{$ok} ({$kolom} kolom angka di {$hal} halaman tabel diukur)"];
+        }
+
+        $label = ['kiri' => 'rata kiri', 'tengah' => 'rata tengah', 'tidak' => 'tidak rata'];
+        $uraian = function (array $t) use ($label): string {
+            $x = [];
+            if ($t['rata'] !== 'kanan') $x[] = $label[$t['rata']];
+            if (!$t['tengah']) $x[] = sprintf('bergeser %s pt ke %s', abs($t['geser']), $t['geser'] > 0 ? 'kanan' : 'kiri');
+            return "hal. {$t['hal']} kolom ({$t['kol']}) " . implode(', ', $x);
+        };
+        foreach (array_slice($salah, 0, self::MAX_LOKASI) as $t) {
+            $this->lokasi[] = ['hal' => $t['hal'], 'teks' => $t['contoh']];
+        }
+        $halSalah = array_values(array_unique(array_column($salah, 'hal')));
+        $contoh = implode('; ', array_map($uraian, array_slice($salah, 0, 4)));
+        return [$gagal, sprintf('%s: %d dari %d kolom angka, di %d halaman (%s%s)', $err, count($salah), $kolom,
+            count($halSalah), $contoh, count($salah) > 4 ? '; …' : '')];
     }
 
     /** Bulan penandatanganan (mis. "Banjarbaru, Februari 2026") paling lama satu bulan sebelum rilis. */
@@ -1531,6 +2268,11 @@ class PdfCheckerService
         $this->pageTexts  = [];
         $this->ocrPages   = [];
         $this->imagePages = [];
+        $this->ocrTerlewat = 0;
+        $this->tabelAngka = null;
+        $this->tepi       = [];
+        $this->fontHal    = [];
+        $this->nomorCache = null;
         $this->pageW      = 595.0;
         $this->pageH      = 842.0;
     }

@@ -4,34 +4,42 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    {{-- 419 (token CSRF basi) → ambil token baru & ulangi permintaan sekali --}}
+    {{-- tidak memakai route()/filemtime() langsung: route belum terdaftar (route:cache lama) atau file belum
+         terunggah tidak boleh membuat semua halaman error 500 --}}
+    @if (file_exists(public_path('js/csrf-retry.js')))
+        <script src="{{ asset('js/csrf-retry.js') }}?v={{ filemtime(public_path('js/csrf-retry.js')) }}" data-url="{{ url('csrf-token') }}"></script>
+    @endif
     <title>@yield('title', 'Pub Checker') - BPS Kalsel</title>
 
     {{-- Mode gelap/terang dipasang sebelum CSS dimuat supaya tidak berkedip --}}
     <script>
         try { if (localStorage.getItem('pubchecker.theme') === 'dark') document.documentElement.setAttribute('data-bs-theme', 'dark'); } catch (e) {}
+        // sidebar Tabler: bawaan terlipat & melebar saat disorot; "default" = disematkan terbuka (tombol lipat di sidebar)
+        try { if (localStorage.getItem('tabler-sidebar') !== 'default') document.documentElement.setAttribute('data-bs-sidebar', 'folded-hover'); }
+        catch (e) { document.documentElement.setAttribute('data-bs-sidebar', 'folded-hover'); }
     </script>
 
     {{-- Tabler (Bootstrap 5) + Tabler Icons — disimpan lokal di assets/vendors --}}
     <link rel="stylesheet" href="{{ asset('assets/vendors/tabler/css/tabler.min.css') }}">
-    <link rel="stylesheet" href="{{ asset('assets/vendors/tabler-icons/tabler-icons.min.css') }}">
+    <link rel="stylesheet" href="{{ asset('assets/vendors/tabler-icons/tabler-icons-300.min.css') }}">
     <link rel="stylesheet" href="{{ asset('assets/css/pubchecker.css') }}?v={{ filemtime(public_path('assets/css/pubchecker.css')) }}">
 
     @stack('plugin-styles')
 
-    <!-- Favicon -->
-    <link rel="apple-touch-icon" sizes="180x180" href="{{ asset('assets/images/apple-touch-icon.png') }}">
-    <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('assets/images/favicon-32x32.png') }}">
-    <link rel="icon" type="image/png" sizes="16x16" href="{{ asset('assets/images/favicon-16x16.png') }}">
+    @includeIf('layouts.partials.favicon')
 
     @stack('styles')
 </head>
 <body>
     <div class="page">
-        {{-- Header atas + menu horizontal (pola tampilan bawaan Tabler) --}}
-        @include('layouts.partials.navbar')
+        {{-- Sidebar kiri (Tabler navbar-vertical, folded-hover). Header atas sengaja DI DALAM .page-wrapper: Tabler 1.6
+             menyembunyikan .navbar-vertical bila .page juga punya anak navbar horizontal langsung. --}}
         @include('layouts.partials.sidebar')
 
         <div class="page-wrapper">
+            @include('layouts.partials.navbar')
+
             {{-- Page header: halaman mengisi @section('pretitle'), @section('page-title'), @section('page-actions') --}}
             @hasSection('page-title')
                 <div class="page-header d-print-none">
@@ -90,6 +98,10 @@
     <script>
         // Tabler membawa Bootstrap 5 di dalamnya; sediakan global `bootstrap` untuk kode halaman
         window.bootstrap = window.bootstrap || window.tabler?.bootstrap;
+    </script>
+    {{-- Dialog.confirm / Dialog.alert / form[data-confirm]: modal pengganti dialog bawaan browser --}}
+    <script src="{{ asset('js/dialog.js') }}?v={{ filemtime(public_path('js/dialog.js')) }}"></script>
+    <script>
 
         function toggleTheme(e) {
             e?.preventDefault();

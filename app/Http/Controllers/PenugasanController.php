@@ -20,6 +20,9 @@ class PenugasanController extends Controller
     }
 
     /** Status pengerjaan tugas pada bulan terpilih → [label, warna badge, ikon]. */
+    /** status yang dihitung "Selesai" di filter ringkas Tugas Saya */
+    public const BERES = ['terkirim', 'sipotret', 'ok'];
+
     public const STATUS = [
         'belum'    => ['Belum diperiksa',            'bg-red-lt',    'circle-dashed'],
         'tinjau'   => ['Tinjauan belum selesai',     'bg-yellow-lt', 'clipboard'],
@@ -39,7 +42,7 @@ class PenugasanController extends Controller
         $request->validate([
             'bulan'     => 'nullable|integer|between:1,12',
             'tahun'     => 'nullable|integer|between:2000,2100',
-            'status'    => 'nullable|in:' . implode(',', array_keys(self::STATUS)),
+            'status'    => 'nullable|in:beres,' . implode(',', array_keys(self::STATUS)),
             'pemeriksa' => 'nullable|integer',
             'wilayah'   => 'nullable|string|max:10',
         ]);
@@ -158,10 +161,31 @@ class PenugasanController extends Controller
         if ($wilayah !== null && $wilayah !== '') $baris = $baris->filter(fn($r) => (string) $r['kartu']['wilayah'] === (string) $wilayah)->values();
 
         $jumlah = ['semua' => $baris->count()] + $baris->countBy('status')->all() + array_fill_keys(array_keys(self::STATUS), 0);
+        // "beres" = selesai dalam arti apa pun: terkirim, tercatat di SIPOTRET, atau sudah sesuai (filter ringkas Tugas Saya)
+        $jumlah['beres'] = $jumlah['terkirim'] + $jumlah['sipotret'] + $jumlah['ok'];
         $status = $request->input('status');
-        if ($status) $baris = $baris->where('status', $status)->values();
+        if ($status === 'beres') $baris = $baris->whereIn('status', self::BERES)->values();
+        elseif ($status) $baris = $baris->where('status', $status)->values();
+
+        // tugas pra rilis (draf SIPOTRET): tidak per periode, tahap & tenggat dari SIPOTRET
+        $praRilis = collect();
+        if (\App\Models\PenugasanPraRilis::aktif()) {
+            $praRilis = \App\Models\PenugasanPraRilis::with('user:id,name,first_name,last_name')
+                ->when($pemeriksaId, fn($q) => $q->where('user_id', $pemeriksaId))->get();
+            $tahapPra = [];
+            $drafSvc = app(\App\Services\SipotretDrafService::class);
+            if ($praRilis->isNotEmpty() && $drafSvc->enabled()) {
+                try { $tahapPra = $drafSvc->tahapPublikasi($praRilis->pluck('sipotret_pub_id')->all()); } catch (\Throwable $e) { report($e); }
+            }
+            // belum rilis dulu (rencana rilis terdekat), yang sudah rilis di akhir
+            $praRilis = $praRilis->map(fn($t) => ['tugas' => $t, 'tahap' => $tahapPra[$t->sipotret_pub_id] ?? null])
+                ->sortBy(fn($r) => [($r['tahap']['tahap'] ?? '') === 'rilis' ? 1 : 0,
+                                    $r['tahap']['tgl_rilis'] ?? $r['tugas']->tgl_rilis?->format('Y-m-d') ?? '9999'])
+                ->values();
+        }
 
         return view('checker.tugas', [
+            'praRilis'    => $praRilis,
             'baris'       => $baris,
             'jumlah'      => $jumlah,
             'bulan'       => $bulan,

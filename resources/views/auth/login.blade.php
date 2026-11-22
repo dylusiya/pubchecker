@@ -6,13 +6,10 @@
     <title>Login - Publication Checker BPS Kalsel</title>
 
     <link rel="stylesheet" href="{{ asset('assets/vendors/tabler/css/tabler.min.css') }}">
-    <link rel="stylesheet" href="{{ asset('assets/vendors/tabler-icons/tabler-icons.min.css') }}">
+    <link rel="stylesheet" href="{{ asset('assets/vendors/tabler-icons/tabler-icons-300.min.css') }}">
     <link rel="stylesheet" href="{{ asset('assets/css/pubchecker.css') }}?v={{ filemtime(public_path('assets/css/pubchecker.css')) }}">
 
-    <!-- Favicon -->
-    <link rel="apple-touch-icon" sizes="180x180" href="{{ asset('assets/images/apple-touch-icon.png') }}">
-    <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('assets/images/favicon-32x32.png') }}">
-    <link rel="icon" type="image/png" sizes="16x16" href="{{ asset('assets/images/favicon-16x16.png') }}">
+    @includeIf('layouts.partials.favicon')
 </head>
 <body class="d-flex flex-column">
     <div class="page page-center">
@@ -53,7 +50,7 @@
                     @endif
 
                     {{-- Login lokal --}}
-                    <form method="POST" action="{{ route('login.local') }}" autocomplete="off">
+                    <form method="POST" action="{{ route('login.local') }}" autocomplete="off" id="formLoginLokal">
                         @csrf
                         <div class="mb-3">
                             <label class="form-label" for="username">Username</label>
@@ -110,6 +107,17 @@
             icon.classList.toggle('ti-eye', !show);
             icon.classList.toggle('ti-eye-off', show);
         });
+
+        // Cegah form terkirim dua kali (Enter + klik / klik ganda): kiriman kedua membawa token lama → 419
+        document.getElementById('formLoginLokal').addEventListener('submit', function (e) {
+            if (this.dataset.terkirim) { e.preventDefault(); return; }
+            this.dataset.terkirim = '1';
+            const btn = this.querySelector('button[type="submit"]');
+            if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Memproses…'; }
+        });
+
+        // Halaman dari cache Back/Forward (mis. setelah logout) membawa token lama: muat ulang supaya tokennya baru
+        window.addEventListener('pageshow', function (e) { if (e.persisted) location.reload(); });
 
         setTimeout(function () {
             document.querySelectorAll('.alert').forEach(function (el) {

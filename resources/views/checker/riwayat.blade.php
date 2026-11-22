@@ -91,7 +91,13 @@
                         </a>
                         <div class="d-flex align-items-center flex-wrap gap-2 mt-1">
                           @if($hasil->sumber)
-                            <span class="badge {{ $hasil->sumber === 'BPS' ? 'bg-info text-dark' : 'bg-secondary' }} fw-normal">{{ $hasil->sumber }}</span>
+                            {{-- jenis pemeriksaan sesuai menu: Pra Rilis (draf SIPOTRET) / Pasca Rilis (Web BPS) / Upload Manual --}}
+                            @php [$jenisCls, $jenisIkon, $jenisLabel] = match ($hasil->sumber) {
+                                'SIPOTRET' => ['bg-purple-lt', 'file-pencil', 'Pra Rilis'],
+                                'BPS'      => ['bg-azure-lt', 'world-check', 'Pasca Rilis'],
+                                default    => ['bg-secondary-lt', 'upload', 'Upload Manual'],
+                            }; @endphp
+                            <span class="badge {{ $jenisCls }} fw-normal"><i class="ti ti-{{ $jenisIkon }} me-1"></i>{{ $jenisLabel }}</span>
                           @endif
                           @if($hasil->total_halaman)
                             <small class="text-muted">{{ $hasil->total_halaman }} hal.</small>
@@ -152,7 +158,7 @@
                       </a>
                       @can('periksa')
                       <form action="{{ route('checker.riwayat.delete', $sesi) }}" method="POST"
-                            onsubmit="return confirm('Hapus sesi ini beserta semua hasilnya?')">
+                            data-confirm="Hapus sesi ini beserta semua hasilnya?" data-confirm-ok="Hapus" data-confirm-danger>
                         @csrf @method('DELETE')
                         <button type="submit" class="btn btn-sm btn-outline-danger" title="Hapus">
                           <i class="ti ti-trash"></i>

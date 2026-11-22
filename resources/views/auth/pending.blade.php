@@ -6,10 +6,10 @@
     <title>Menunggu Persetujuan - Publication Checker BPS Kalsel</title>
 
     <link rel="stylesheet" href="{{ asset('assets/vendors/tabler/css/tabler.min.css') }}">
-    <link rel="stylesheet" href="{{ asset('assets/vendors/tabler-icons/tabler-icons.min.css') }}">
+    <link rel="stylesheet" href="{{ asset('assets/vendors/tabler-icons/tabler-icons-300.min.css') }}">
     <link rel="stylesheet" href="{{ asset('assets/css/pubchecker.css') }}?v={{ filemtime(public_path('assets/css/pubchecker.css')) }}">
 
-    <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('assets/images/favicon-32x32.png') }}">
+    @includeIf('layouts.partials.favicon')
 </head>
 <body class="d-flex flex-column">
     <div class="page page-center">

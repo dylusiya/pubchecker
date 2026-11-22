@@ -32,7 +32,66 @@ class HomeController extends Controller
             }
         }
 
-        return view('home', compact('tahun', 'rekap', 'rekapError'));
+        [$pra, $praError] = $this->ringkasPraRilis($tahun);
+
+        return view('home', compact('tahun', 'rekap', 'rekapError', 'pra', 'praError'));
+    }
+
+    /**
+     * Ringkasan pra rilis tahun publikasi ini untuk dashboard, dengan aturan yang sama dengan halaman Pra Rilis:
+     * jumlah per kategori (tugas pemeriksa / menunggu PJK / tenggat ≤ 3 hari / lewat batas / selesai), tenggat terdekat,
+     * dan rencana vs sudah rilis per bulan. Gagal baca SIPOTRET → [null, pesan].
+     *
+     * @return array{0: ?array, 1: ?string}
+     */
+    private function ringkasPraRilis(int $tahun): array
+    {
+        $draf = app(\App\Services\SipotretDrafService::class);
+        if (!$draf->enabled()) return [null, 'Koneksi SIPOTRET belum diatur (SIPOTRET_DB_* di .env).'];
+        try {
+            $baris = collect($draf->daftar($tahun))->map(function ($p) {
+                $langkah = collect($p['langkah']['langkah']);
+                $kini    = $langkah->firstWhere('status', 'aktif');
+                $lewat   = $langkah->where('status', 'terlewat');
+                $tk      = $p['langkah']['tenggat'] ?? null;
+                $selesai = !$kini && $lewat->isEmpty();
+                return [
+                    'pub_id'   => $p['pub_id'],
+                    'judul'    => $p['judul'],
+                    'tgl_rilis'=> $p['tgl_rilis'],
+                    'rilis'    => $p['rilis'],
+                    'kini'     => $kini,
+                    'tenggat'  => $tk,
+                    'kategori' => $selesai ? 'selesai' : ($kini && $kini['oleh'] === 'PJK' ? 'pjk' : 'pemeriksa'),
+                    'telat'    => !$selesai && (($kini && $kini['lewat']) || $lewat->isNotEmpty() || (($tk['sisa'] ?? 0) < 0)),
+                    'mepet'    => !$selesai && $tk && $tk['sisa'] >= 0 && $tk['sisa'] <= 3,
+                ];
+            });
+        } catch (\Throwable $e) {
+            report($e);
+            return [null, 'Tidak bisa membaca database SIPOTRET: ' . $e->getMessage()];
+        }
+
+        $perBulan = [];
+        foreach (range(1, 12) as $b) {
+            $bulan = $baris->filter(fn($r) => $r['tgl_rilis'] && (int) substr($r['tgl_rilis'], 5, 2) === $b);
+            $perBulan[$b] = ['rencana' => $bulan->count(), 'rilis' => $bulan->where('rilis', true)->count()];
+        }
+
+        return [[
+            'total'    => $baris->count(),
+            'jumlah'   => [
+                'pemeriksa' => $baris->where('kategori', 'pemeriksa')->count(),
+                'pjk'       => $baris->where('kategori', 'pjk')->count(),
+                'mepet'     => $baris->where('mepet', true)->count(),
+                'telat'     => $baris->where('telat', true)->count(),
+                'selesai'   => $baris->where('kategori', 'selesai')->count(),
+            ],
+            // 6 tenggat terdekat yang masih berjalan (yang sudah lewat paling atas)
+            'terdekat' => $baris->filter(fn($r) => $r['kategori'] !== 'selesai' && $r['tenggat'])
+                ->sortBy(fn($r) => $r['tenggat']['tgl'])->take(6)->values()->all(),
+            'perBulan' => $perBulan,
+        ], null];
     }
 
     // ── GET /dashboard/sipotret/{wilayah}?tahun=&bulan=&status= — halaman daftar publikasi bermasalah satu kab/kota ──

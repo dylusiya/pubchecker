@@ -23,10 +23,10 @@
     $detailUrl = $p['pub_id_api'] ? route('checker.bps.detail.show', array_filter(['pub_id' => $p['pub_id_api'], 'domain' => $p['wilayah'] ?? null])) : null;
 @endphp
 <div class="pub-card mb-2" id="pubcard-{{ $i }}">
-    {{-- klik kotak → detail publikasi; klik di centang, tautan, toggle catatan & isinya diabaikan lewat closest()
-         (bukan stopPropagation: toggle collapse Bootstrap butuh event sampai document) --}}
-    <div class="d-flex gap-3 align-items-start flex-wrap"
-         @if($detailUrl) style="cursor:pointer;" title="Buka detail publikasi" onclick="if (!event.target.closest('label, a, button, .toggle-detail, .collapse')) window.location={{ Js::from($detailUrl) }}" @endif>
+    {{-- klik kotak → centang / batal centang (judul = tautan ke detail); klik di centang, tautan, toggle catatan & isinya
+         diabaikan lewat closest() (bukan stopPropagation: toggle collapse Bootstrap butuh event sampai document) --}}
+    <div class="d-flex gap-3 align-items-start flex-wrap pub-klik"
+         onclick="if (!event.target.closest('label, a, button, input, .toggle-detail, .collapse')) { const c = this.querySelector('.pub-select'); if (c && !c.disabled) c.click(); }">
         {{-- bisa dicentang untuk diperiksa (setelah PDF dari API BPS termuat), di-approve, atau (admin) ditugaskan --}}
         <label class="form-check m-0 pt-1"
                title="{{ $bisaDiapprove || $p['file_rev'] ? 'Pilih untuk diperiksa ulang' . ($bisaDiapprove ? ' atau di-approve' : '') : 'Memuat data publikasi dari API BPS…' }}">
@@ -39,7 +39,9 @@
         </div>
         {{-- flex-basis 0: lebar tidak ikut isi catatan, jadi tidak turun baris saat toggle dibuka --}}
         <div class="flex-grow-1" style="flex: 1 1 0; min-width:0;">
-            <div class="fw-semibold small mb-1" style="word-break: break-word; overflow-wrap: break-word;">{{ $p['judul'] }}</div>
+            <div class="fw-semibold small mb-1" style="word-break: break-word; overflow-wrap: break-word;">
+                @if($detailUrl)<a href="{{ $detailUrl }}" class="text-reset pub-judul" title="Buka detail publikasi">{{ $p['judul'] }}</a>@else{{ $p['judul'] }}@endif
+            </div>
 
             {{-- Tugas Saya: status pengerjaan periode pemeriksaan --}}
             @if($progres)
@@ -57,17 +59,15 @@
                     <span class="badge {{ $warna }} {{ $progres ? '' : 'fs-5 px-2 py-1' }}">
                         <i class="ti ti-{{ $ikon }} me-1"></i>{{ $label }}
                     </span>
-                    @isset($revLabel[$p['rev']])
+                    @if(isset($revLabel[$p['rev']]) && !$progres)
                         <small class="text-secondary ms-1">{{ $revLabel[$p['rev']] }}</small>
-                    @endisset
+                    @endif
                 </div>
             @endif
 
             <div class="d-flex flex-wrap gap-2 align-items-center">
-                @if($adaSipotret)
+                @if($adaSipotret && !$progres)
                     <span class="badge bg-azure-lt fw-normal">Pasca Rilis {{ $bulanNama[$p['bulan']] }} {{ $p['tahun'] }}</span>
-                @elseif($progres)
-                    <span class="badge bg-secondary-lt fw-normal">Belum ada catatan SIPOTRET periode ini</span>
                 @endif
                 {{-- provinsi mengunggah file perbaikan langsung di SIPOTRET → tanggal & file itu yang dipakai --}}
                 @if($p['file_rev'])
@@ -124,7 +124,8 @@
     <div class="d-flex gap-2 align-items-center justify-content-end mt-2 flex-wrap">
         @if($bisaDiapprove)
             <form method="post" action="{{ route('dashboard.sipotret.approve', $p['history_id']) }}" class="m-0"
-                  onsubmit="return confirm({{ Js::from("Approve perbaikan publikasi ini di SIPOTRET?\n\n" . $p['judul'] . ($p['rev'] === 'uploaded_kabkota' ? "\n\nPastikan PDF terbaru di portal BPS sudah diperiksa ulang (centang lalu Periksa)." : '')) }})">
+                  data-confirm="{{ "Approve perbaikan publikasi ini di SIPOTRET?\n\n" . $p['judul'] . ($p['rev'] === 'uploaded_kabkota' ? "\n\nPastikan PDF terbaru di portal BPS sudah diperiksa ulang (centang lalu Periksa)." : '') }}"
+                  data-confirm-ok="Approve">
                 @csrf
                 <button type="submit" class="btn btn-success btn-sm" title="Setujui file perbaikan (status SIPOTRET → approve)">
                     <i class="ti ti-circle-check"></i>
@@ -149,7 +150,7 @@
             @include('checker.partials.tugas-aksi', ['r' => $progres])
         @endif
     </div>
-    @if($p['rev'] === 'uploaded_kabkota' && $bisaApprove)
+    @if($p['rev'] === 'uploaded_kabkota' && $bisaApprove && !$progres)
         <div class="text-end small text-secondary mt-1">
             <i class="ti ti-info-circle"></i>
             Perbaikan diunggah kab/kota langsung ke portal publikasi BPS. Centang lalu klik <b>Periksa</b> di atas untuk memeriksa ulang PDF terbarunya sebelum approve.

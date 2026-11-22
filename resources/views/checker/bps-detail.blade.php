@@ -1,7 +1,7 @@
 @extends('layouts.app')
 
-@section('title', 'Detail Publikasi BPS')
-@section('pretitle', 'Import dari API BPS')
+@section('title', 'Detail Pasca Rilis')
+@section('pretitle', 'Pasca Rilis · publikasi di Web BPS')
 @section('page-title', 'Detail Publikasi')
 @section('page-actions')
     <a href="{{ route('checker.bps.index') }}" class="btn">
@@ -635,7 +635,10 @@ function renderTugas(t) {
 document.getElementById('tugasUser')?.addEventListener('change', async e => {
     const sel = e.target;
     const nama = sel.selectedOptions[0]?.textContent.trim();
-    if (!confirm(sel.value ? `Tugaskan publikasi ini ke ${nama}?` : 'Lepas penugasan publikasi ini?')) {
+    if (!(await Dialog.confirm(sel.value ? 'Selama ditugaskan, hanya pemeriksa itu (dan admin) yang bisa memeriksa, meninjau, dan mengirim ke SIPOTRET.'
+            : 'Publikasi ini bisa diperiksa lagi oleh pemeriksa mana pun.',
+            { title: sel.value ? `Tugaskan publikasi ini ke ${nama}?` : 'Lepas penugasan publikasi ini?',
+              okText: sel.value ? 'Tugaskan' : 'Lepas', warning: !sel.value }))) {
         sel.value = tugasPub ? String(tugasPub.user_id) : '';
         return;
     }
@@ -722,9 +725,18 @@ async function jalankanPeriksa({ lanjut, periode = null, acuan = null }) {
     let extracted = null;
     try {
         extracted = await PdfExtract.extract(getProxiedPdfUrl(), {
+            nama: publicationData.title,
+            selaluTanya: true,
             onProgress: msg => { btn.innerHTML = `<i class="ti ti-loader-2 icon-spin me-1"></i> ${msg}`; },
         });
     } catch (e) {
+        // PDF secured & petugas membatalkan: berhenti di sini (tidak dibaca server)
+        if (e?.dibatalkan) {
+            btn.disabled  = false;
+            btn.innerHTML = ori;
+            showAlert('secondary', esc(e.message));
+            return;
+        }
         console.warn('Ekstraksi teks di browser gagal, dibaca di server', e);
     }
     btn.innerHTML = '<i class="ti ti-loader-2 icon-spin me-1"></i> Memeriksa kriteria...';
@@ -749,10 +761,10 @@ async function jalankanPeriksa({ lanjut, periode = null, acuan = null }) {
                     periode_tahun: periode ? periode.tahun : null,
                 }],
                 domain: publicationData.domain,
-                extracted_b64: PdfExtract.kemas(extracted), // base64: lihat PdfExtract.kemas
+                extracted_b64: await PdfExtract.kemas(extracted), // base64 (+gzip): lihat PdfExtract.kemas
             })
         });
-        const data = await res.json();
+        const data = await PdfExtract.bacaJson(res); // halaman error HTML → pesan jelas, bukan "Unexpected token '<'"
         if (data.error || !res.ok) { showAlert('danger', data.error || data.message || ('Server membalas ' + res.status)); return; }
         const result = data.results?.[0];
         if (result) {

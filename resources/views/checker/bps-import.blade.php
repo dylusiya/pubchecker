@@ -1,9 +1,8 @@
 @extends('layouts.app')
 
-@section('title', 'Import dari API BPS')
-@section('pretitle', 'Publication Checker')
-@section('page-title', 'Import Publikasi dari API BPS')
-@section('page-subtitle', 'Cari publikasi dari portal BPS, centang hingga 10 publikasi untuk diperiksa sekaligus')
+@section('title', 'Pemeriksaan Pasca Rilis')
+@section('pretitle', 'Pasca Rilis · publikasi di Web BPS')
+@section('page-title', 'Pemeriksaan Pasca Rilis')
 @section('page-actions')
     @can('periksa')
     <a href="{{ route('checker.index') }}" class="btn">
@@ -52,64 +51,40 @@ BPS_DOMAIN=6300</pre>
                 <i class="ti ti-plug-connected-x alert-icon"></i>
                 <div>
                     <h4 class="alert-title">API BPS tidak bisa dihubungi</h4>
-                    <div class="text-secondary">
-                        Server <code>webapi.bps.go.id</code> tidak merespons dari jaringan ini (timeout), jadi daftar
-                        kabupaten/kota belum bisa dimuat. Pencarian tetap bisa dicoba untuk Provinsi Kalimantan Selatan,
-                        atau muat ulang halaman ini beberapa saat lagi.
-                    </div>
+                    <div class="text-secondary">Daftar kab/kota belum termuat. Coba muat ulang beberapa saat lagi.</div>
                 </div>
             </div>
         </div>
         @endif
 
-        {{-- Form Pencarian --}}
+        {{-- Form pencarian: satu baris (seperti Tugas Saya) --}}
         <div class="card mb-3">
-            <div class="card-body">
-                <h5 class="card-title mb-3">Cari Publikasi BPS</h5>
-                <div class="row g-3">
-                    <div class="col-md-4">
-                        <label class="form-label fw-semibold small">Domain / Kantor BPS</label>
-                        <select id="searchDomain" class="form-select form-select-sm text-black">
-                            @foreach($domains as $d)
-                                <option value="{{ $d['domain_id'] }}"
-                                    {{ $d['domain_id'] === $domain ? 'selected' : '' }}>
-                                    {{ $d['domain_name'] }}
-                                </option>
-                            @endforeach
-                        </select>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label fw-semibold small">Kata Kunci</label>
-                        <input type="text" id="searchKeyword" class="form-control form-control-sm text-black"
-                               placeholder="Contoh: statistik daerah">
-                    </div>
-                    <div class="col-md-2">
-                        <label class="form-label fw-semibold small">Tahun</label>
-                        <select id="searchYear" class="form-select form-select-sm text-black">
-                            <option value="">Semua</option>
-                            @for($y = now()->year; $y >= 2015; $y--)
-                            <option value="{{ $y }}">{{ $y }}</option>
-                            @endfor
-                        </select>
-                    </div>
-                    <div class="col-md-2">
-                        <label class="form-label fw-semibold small">Bulan</label>
-                        <select id="searchMonth" class="form-select form-select-sm text-black">
-                            <option value="">Semua</option>
-                            @for($m = 1; $m <= 12; $m++)
-                            <option value="{{ $m }}">
-                                {{ \Carbon\Carbon::create()->month($m)->translatedFormat('F') }}
-                            </option>
-                            @endfor
-                        </select>
-                    </div>
-                    <div class="col-md-1 d-flex align-items-end">
-                        <button class="btn btn-primary btn-sm w-100" onclick="doSearch(1)"
-                                id="btnSearch" {{ !$configured ? 'disabled' : '' }}>
-                            <i class="ti ti-search"></i>
-                        </button>
-                    </div>
+            <div class="card-body py-2 d-flex flex-wrap align-items-center gap-2">
+                <select id="searchDomain" class="form-select form-select-sm" style="width:auto;" title="Kantor BPS">
+                    @foreach($domains as $d)
+                        <option value="{{ $d['domain_id'] }}" @selected($d['domain_id'] === $domain)>{{ $d['domain_name'] }}</option>
+                    @endforeach
+                </select>
+                <div class="input-group input-group-sm input-group-flat flex-fill" style="min-width:200px; max-width:360px;">
+                    <span class="input-group-text"><i class="ti ti-search"></i></span>
+                    <input type="text" id="searchKeyword" class="form-control form-control-sm" placeholder="Kata kunci judul…"
+                           onkeydown="if (event.key === 'Enter') doSearch(1)">
                 </div>
+                <select id="searchYear" class="form-select form-select-sm" style="width:auto;" title="Tahun">
+                    <option value="">Semua tahun</option>
+                    @for($y = now()->year; $y >= 2015; $y--)
+                        <option value="{{ $y }}">{{ $y }}</option>
+                    @endfor
+                </select>
+                <select id="searchMonth" class="form-select form-select-sm" style="width:auto;" title="Bulan">
+                    <option value="">Semua bulan</option>
+                    @for($m = 1; $m <= 12; $m++)
+                        <option value="{{ $m }}">{{ \Carbon\Carbon::create()->month($m)->translatedFormat('F') }}</option>
+                    @endfor
+                </select>
+                <button class="btn btn-primary btn-sm" onclick="doSearch(1)" id="btnSearch" {{ !$configured ? 'disabled' : '' }}>
+                    <i class="ti ti-search"></i>
+                </button>
             </div>
         </div>
 
@@ -128,32 +103,35 @@ BPS_DOMAIN=6300</pre>
                     </div>
 
                     {{-- Pilihan beberapa publikasi (maks. MAX_PUBS) untuk diperiksa sekaligus --}}
-                    <div class="alert alert-info d-flex align-items-center flex-wrap gap-2 py-2 mb-3" id="selectionBar" @cannot('periksa') hidden @endcannot>
+                    {{-- sticky-top & tombol tidak pernah disembunyikan (hanya nonaktif) supaya tidak bergeser --}}
+                    <div class="alert alert-info d-flex align-items-center flex-wrap gap-2 py-2 mb-3 sticky-top" id="selectionBar" @cannot('periksa') hidden @endcannot>
                         <i class="ti ti-checkbox"></i>
-                        <span class="flex-fill small" id="selectionInfo"></span>
-                        <button type="button" class="btn btn-sm btn-ghost-secondary" id="btnClearSel" onclick="clearSelection()" hidden>
-                            <i class="ti ti-x"></i> <span>Batal Pilih</span>
+                        <span class="small text-nowrap" id="selectionInfo"></span>
+                        <div class="btn-list ms-auto">
+                        <button type="button" class="btn btn-sm btn-ghost-secondary" id="btnClearSel" onclick="clearSelection()" disabled>
+                            <i class="ti ti-x"></i> <span>Batal</span>
                         </button>
                         @if($pemeriksa)
                             {{-- admin: tugaskan publikasi yang dicentang ke satu pemeriksa --}}
-                            <div class="d-flex align-items-center gap-1" id="tugasBar" hidden>
-                                <select id="tugasUser" class="form-select form-select-sm w-auto" aria-label="Pemeriksa">
+                            <div class="input-group input-group-sm w-auto" id="tugasBar">
+                                <select id="tugasUser" class="form-select form-select-sm w-auto" aria-label="Pemeriksa" disabled>
                                     <option value="">Pilih pemeriksa…</option>
                                     @foreach($pemeriksa as $u)
                                         <option value="{{ $u['id'] }}">{{ $u['nama'] }}{{ $u['role'] === 'admin' ? ' (admin)' : '' }}</option>
                                     @endforeach
                                 </select>
-                                <button type="button" class="btn btn-sm btn-purple" onclick="tugaskanTerpilih()" title="Tugaskan publikasi yang dicentang ke pemeriksa ini">
+                                <button type="button" class="btn btn-sm btn-purple" onclick="tugaskanTerpilih()" title="Tugaskan publikasi yang dicentang ke pemeriksa ini" disabled>
                                     <i class="ti ti-user-check"></i> <span id="btnTugasLabel">Tugaskan</span>
                                 </button>
-                                <button type="button" class="btn btn-sm btn-ghost-secondary" onclick="tugaskanTerpilih(true)" title="Lepas penugasan publikasi yang dicentang">
+                                <button type="button" class="btn btn-sm" onclick="tugaskanTerpilih(true)" title="Lepas penugasan publikasi yang dicentang" disabled>
                                     <i class="ti ti-user-off"></i>
                                 </button>
                             </div>
                         @endif
                         <button type="button" class="btn btn-sm btn-primary" id="btnCheckSel" onclick="startCheck()" disabled>
-                            <i class="ti ti-rosette-discount-check"></i> <span id="btnCheckSelLabel">Periksa Terpilih</span>
+                            <i class="ti ti-rosette-discount-check"></i> <span id="btnCheckSelLabel">Periksa</span>
                         </button>
+                        </div>
                     </div>
 
                     <div id="searchResults"></div>
@@ -252,14 +230,15 @@ function clearSelection() {
 
 function renderSelection() {
     const n = selected.size;
-    document.getElementById('selectionInfo').innerHTML = n
-        ? `<strong>${n}</strong> dari maks. ${MAX_PUBS} publikasi dipilih: ${[...selected.values()].map(p => esc(p.title)).join(' · ')}`
-        : `Centang hingga ${MAX_PUBS} publikasi ber-PDF untuk diperiksa sekaligus, atau buka satu publikasi untuk melihat detailnya.`;
+    // info singkat (judul cukup di tooltip); tombol hanya aktif / nonaktif supaya tidak bergeser
+    const info = document.getElementById('selectionInfo');
+    info.innerHTML = n ? `<strong>${n}</strong> dipilih (maks. ${MAX_PUBS})` : 'Centang publikasi';
+    info.title = [...selected.values()].map(p => p.title).join('\n');
     document.getElementById('btnCheckSel').disabled = !n;
-    document.getElementById('btnCheckSelLabel').textContent = n ? `Periksa (${n})` : 'Periksa Terpilih';
-    document.getElementById('btnClearSel').hidden = !n;
+    document.getElementById('btnCheckSelLabel').textContent = n ? `Periksa (${n})` : 'Periksa';
+    document.getElementById('btnClearSel').disabled = !n;
     if (ADMIN_TUGAS) {
-        document.getElementById('tugasBar').hidden = !n;
+        document.getElementById('tugasBar').querySelectorAll('select, button').forEach(el => { el.disabled = !n; });
         document.getElementById('btnTugasLabel').textContent = n ? `Tugaskan (${n})` : 'Tugaskan';
     }
 }
@@ -271,9 +250,10 @@ async function tugaskanTerpilih(lepas = false) {
     const sel = document.getElementById('tugasUser');
     if (!lepas && !sel.value) { sel.focus(); showAlert('warning', 'Pilih pemeriksa dulu.'); return; }
     const nama = sel.selectedOptions[0]?.textContent.trim();
-    if (!confirm(lepas ? `Lepas penugasan ${pubs.length} publikasi?` : `Tugaskan ${pubs.length} publikasi ke ${nama}?
-
-Selama ditugaskan, hanya pemeriksa itu (dan admin) yang bisa memeriksa, meninjau, dan mengirim ke SIPOTRET.`)) return;
+    if (!(await Dialog.confirm(lepas ? 'Publikasi ini bisa diperiksa lagi oleh pemeriksa mana pun.'
+        : 'Selama ditugaskan, hanya pemeriksa itu (dan admin) yang bisa memeriksa, meninjau, dan mengirim ke SIPOTRET.',
+        { title: lepas ? `Lepas penugasan ${pubs.length} publikasi?` : `Tugaskan ${pubs.length} publikasi ke ${nama}?`,
+          okText: lepas ? 'Lepas' : 'Tugaskan', warning: lepas }))) return;
     try {
         const r = await Penugasan.simpan(pubs.map(p => ({ pub_id: String(p.pub_id), judul: p.title, domain: String(p.domain || p._domain || '') })), lepas ? null : sel.value);
         pubs.forEach(p => { p.tugas = r.tugas[String(p.pub_id)] ?? null; });
@@ -343,13 +323,13 @@ function renderSearchResults(meta, items) {
     }
 
     box.innerHTML = items.map((pub, i) => {
-        // Klik kartu → detail publikasi; centang → ikut diperiksa bersama (maks. MAX_PUBS)
+        // Klik kartu → centang / batal centang (ikut diperiksa bersama, maks. MAX_PUBS); judul & tombol → detail
         const detailUrl = `{{ route('checker.bps.detail.show') }}?pub_id=${pub.pub_id}&domain=${pub.domain || document.getElementById('searchDomain').value}`;
         const isSel = selected.has(String(pub.pub_id));
         return `
     <div class="pub-card mb-2 ${isSel ? 'border-primary' : ''}" id="pubcard-${i}">
-        <div class="d-flex gap-3 align-items-start flex-wrap" style="cursor:pointer;"
-             onclick="window.location='${detailUrl}'">
+        <div class="d-flex gap-3 align-items-start flex-wrap pub-klik"
+             onclick="if (!event.target.closest('label, a, button, input')) { const c = this.querySelector('.pub-select'); if (c && !c.disabled) c.click(); }">
             ${!CAN_PERIKSA ? '' : !Penugasan.boleh(pub.tugas)
                 ? `<label class="form-check m-0 pt-1" onclick="event.stopPropagation()" title="Ditugaskan ke ${esc(pub.tugas.nama)}">
                        <input type="checkbox" class="form-check-input" disabled>
@@ -368,8 +348,8 @@ function renderSearchResults(meta, items) {
                 : `<div class="pub-cover d-flex align-items-center justify-content-center text-muted" style="font-size:20px;"><i class="ti ti-file-type-pdf text-danger"></i></div>`
             }
             <div class="flex-grow-1 min-w-0" style="min-width:0;">
-                <div class="fw-semibold small mb-1" style="word-break: break-word; overflow-wrap: break-word;" title="${pub.title}">
-                    ${pub.title}
+                <div class="fw-semibold small mb-1" style="word-break: break-word; overflow-wrap: break-word;">
+                    <a href="${detailUrl}" class="text-reset pub-judul" title="Buka detail publikasi">${pub.title}</a>
                 </div>
                 <div class="d-flex flex-wrap gap-2">
                     ${pub.issn ? `<span class="badge bg-secondary fw-normal">${pub.issn}</span>` : ''}
@@ -406,6 +386,7 @@ async function startCheck() {
     if (!pubs.length) return;
     const btn = document.getElementById('btnCheckSel');
     btn.disabled = true;
+    pemeriksaanBerjalan = true;
 
     const total = pubs.length;
     document.getElementById('batchSection').style.display = 'block';
@@ -443,7 +424,7 @@ async function startCheck() {
                         pub_no:  pub.pub_no || null,
                         rl_date: pub.rl_date || null,
                     }],
-                    extracted_b64: PdfExtract.kemas(extracted), // base64: lihat PdfExtract.kemas
+                    extracted_b64: await PdfExtract.kemas(extracted), // base64 (+gzip): lihat PdfExtract.kemas
                     sesi_id: sesiId,
                 }),
             });
@@ -469,8 +450,19 @@ async function startCheck() {
     document.getElementById('btnReviewAll').disabled = !allResults.length;
     btn.disabled = false;
     clearSelection();
+    pemeriksaanBerjalan = false;
 
-    if (total === 1 && allResults.length === 1) beginReview();
+    // langsung ke Riwayat untuk melanjutkan (kecuali sedang meninjau: pindah setelah tinjauan selesai)
+    if (allResults.length && !tinjauanTerbuka) keRiwayat(gagal);
+}
+
+let tinjauanTerbuka = false, pemeriksaanBerjalan = false;
+/** Setelah pemeriksaan: langsung ke Riwayat (detail sesi). Ada yang gagal → tetap di sini (bisa Coba lagi). */
+function keRiwayat(gagal = 0) {
+    if (!sesiId) return;
+    const url = '{{ route("checker.riwayat.detail", "__ID__") }}'.replace('__ID__', sesiId);
+    if (!gagal) { window.location = url; return; }
+    document.getElementById('batchTitle').innerHTML += ` <a href="${url}" class="btn btn-sm btn-primary ms-2">Lanjut ke Riwayat <i class="ti ti-arrow-right ms-1"></i></a>`;
 }
 
 /** @param {number} [jobIndex] kartu yang diklik "Tinjau" — publikasi itu dibuka pertama */
@@ -493,10 +485,13 @@ function beginReview(jobIndex) {
     if (!entries.length) return;
 
     const startIndex = target ? entries.findIndex(e => e.hasilId === target.hasil_id) : -1;
+    tinjauanTerbuka = true;
     CheckerReview.start(entries, { onFinish: finishReview, startIndex: startIndex >= 0 ? startIndex : undefined });
 }
 
 function finishReview() {
+    tinjauanTerbuka = false;
+    if (sesiId && !pemeriksaanBerjalan) { keRiwayat(); return; } // pemeriksaan sudah selesai → lanjut di Riwayat
     document.getElementById('batchSection').style.display = 'block';
     if (sesiId) {
         const url = '{{ route("checker.riwayat.detail", "__ID__") }}'.replace('__ID__', sesiId);

@@ -62,6 +62,17 @@ return [
     'sipotret' => [
         'file_path' => env('SIPOTRET_FILE_PATH', base_path('../sipotret')),
         'file_url'  => env('SIPOTRET_FILE_URL', 'https://kalsel.web.bps.go.id/sipotret'),
+        // tombol langkah 5 pra rilis (upload ke portal publikasi BPS); kosong = tombol tidak ditampilkan
+        'portal_publikasi_url' => env('BPS_PORTAL_PUBLIKASI_URL'),
+        // Draf publikasi yang diupload PJK (transaksi.tr_file_upload = "owncloud/sm/<file>") disimpan SIPOTRET
+        // di OwnCloud; samakan dengan owncloud.* di .env SIPOTRET.
+        'owncloud_url'      => env('SIPOTRET_OWNCLOUD_URL', 'https://wadah.net'),
+        'owncloud_user'     => env('SIPOTRET_OWNCLOUD_USER'),
+        'owncloud_password' => env('SIPOTRET_OWNCLOUD_PASSWORD'),
+        'owncloud_dir'      => env('SIPOTRET_OWNCLOUD_DIR', 'Data Apps/Sipotret'),
+        // upload ke OwnCloud gagal (mis. wadah.net diblokir jaringan) → simpan di folder lokal SIPOTRET,
+        // sama dengan owncloud.fallbackToLocal SIPOTRET (bawaan true)
+        'owncloud_fallback' => env('SIPOTRET_OWNCLOUD_FALLBACK', true),
     ],
 
 ];

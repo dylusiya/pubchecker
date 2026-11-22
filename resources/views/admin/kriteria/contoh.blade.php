@@ -102,7 +102,7 @@
                                     </div>
                                 </form>
                                 <form action="{{ route('admin.kriteria.contoh.destroy', $c) }}" method="POST"
-                                      onsubmit="return confirm('Hapus contoh ini?')">
+                                      data-confirm="Hapus contoh ini?" data-confirm-ok="Hapus" data-confirm-danger>
                                     @csrf @method('DELETE')
                                     <button class="btn btn-outline-danger btn-sm w-100 py-0">
                                         <i class="ti ti-trash me-1"></i> Hapus

@@ -166,6 +166,7 @@ class BpsImportController extends Controller
         $sesi = $request->filled('sesi_id')
             ? SesiPemeriksaan::findOrFail($request->input('sesi_id'))
             : SesiPemeriksaan::create(['dibuat_oleh' => auth()->user()?->name ?? 'guest']);
+        abort_unless($sesi->boleh(auth()->user()), 403, 'Sesi pemeriksaan ini milik pemeriksa lain.');
 
         $results = [];
 
@@ -331,6 +332,7 @@ class BpsImportController extends Controller
         }
 
         $sesi     = SesiPemeriksaan::findOrFail($request->input('sesi_id'));
+        if (!$sesi->boleh(auth()->user())) return response()->json(['error' => 'Sesi pemeriksaan ini milik pemeriksa lain.'], 403);
         $filename = $this->sanitizeFilename($request->input('title')) . '.pdf';
         $acuan    = $request->filled('acuan_bulan') && $request->filled('acuan_tahun');
         $periode  = $request->filled('periode_bulan') && $request->filled('periode_tahun');
@@ -412,8 +414,20 @@ class BpsImportController extends Controller
         $extracted = PdfCheckerService::extractedDari($request);
 
         $this->checker->setTanggalRilis($hasil->pub_tanggal_rilis?->format('Y-m-d'));
-        $this->checker->setDataApi($this->dataApi(
-            ['pub_id' => $hasil->pub_id_api, 'domain' => $hasil->pub_domain, 'issn' => $hasil->pub_issn], null));
+        if ($hasil->sipotret_tr_id ?? null) {
+            // draf upload PJK: pembandingnya isian di SIPOTRET (bisa sudah dibetulkan PJK sejak cek pertama)
+            $drafSvc = app(\App\Services\SipotretDrafService::class);
+            try {
+                $d = $drafSvc->draf((int) $hasil->sipotret_tr_id);
+            } catch (\Throwable $e) {
+                report($e);
+                $d = null;
+            }
+            $this->checker->setDataApi($d ? $drafSvc->dataPembanding($d) : null, 'SIPOTRET');
+        } else {
+            $this->checker->setDataApi($this->dataApi(
+                ['pub_id' => $hasil->pub_id_api, 'domain' => $hasil->pub_domain, 'issn' => $hasil->pub_issn], null));
+        }
 
         $tmpPath = null;
         try {
