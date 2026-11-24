@@ -25,21 +25,22 @@
 <div class="card">
     <div class="card-header">
         <ul class="nav nav-tabs card-header-tabs" role="tablist">
+            {{-- Pasca Rilis = tab utama (tampil pertama) --}}
+            <li class="nav-item">
+                <a href="#tabPasca" class="nav-link active" data-bs-toggle="tab" role="tab"><i class="ti ti-world-check me-1"></i> Pasca Rilis</a>
+            </li>
             @if($bisaPra)
                 <li class="nav-item">
-                    <a href="#tabPra" class="nav-link active" data-bs-toggle="tab" role="tab"><i class="ti ti-file-pencil me-1"></i> Pra Rilis</a>
+                    <a href="#tabPra" class="nav-link" data-bs-toggle="tab" role="tab"><i class="ti ti-file-pencil me-1"></i> Pra Rilis</a>
                 </li>
             @endif
-            <li class="nav-item">
-                <a href="#tabPasca" class="nav-link {{ $bisaPra ? '' : 'active' }}" data-bs-toggle="tab" role="tab"><i class="ti ti-world-check me-1"></i> Pasca Rilis</a>
-            </li>
         </ul>
     </div>
 
     <div class="tab-content">
         {{-- ================= Pra rilis ================= --}}
         @if($bisaPra)
-        <div class="tab-pane active show" id="tabPra" role="tabpanel">
+        <div class="tab-pane" id="tabPra" role="tabpanel">
             <div class="card-body">
                 @if($praError)
                     <div class="alert alert-warning mb-0">{{ $praError }}</div>
@@ -118,7 +119,7 @@
         @endif
 
         {{-- ================= Pasca rilis ================= --}}
-        <div class="tab-pane {{ $bisaPra ? '' : 'active show' }}" id="tabPasca" role="tabpanel">
+        <div class="tab-pane active show" id="tabPasca" role="tabpanel">
             @if($rekapError)
                 <div class="card-body"><div class="alert alert-warning mb-0">{{ $rekapError }}</div></div>
             @else
